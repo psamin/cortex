@@ -16,7 +16,7 @@ class Settings(BaseSettings):
 
     data_dir: Path = ROOT / ".cortex-data"
     public_url: str = "http://localhost:8000"
-    cors_origins: str = "http://localhost:5173"
+    cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
     # InsForge (database, storage, model gateway)
     insforge_base_url: str | None = None
