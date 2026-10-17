@@ -1,0 +1,4 @@
+# NVIDIA L40 48 GB (nvidia-l40 was DOWN during this work; values extrapolated from L4/H200 measurements)
+sbatch: "--gres=gpu:l40:1 -c 16 --mem=64G"
+env: {DC_MODELS: "qwen3:4b qwen3:8b", OLLAMA_NUM_PARALLEL: 16, OLLAMA_MAX_LOADED_MODELS: 2, OLLAMA_CONTEXT_LENGTH: 4096, DC_WORKERS: 16}
+notes: "4b+8b measured at 17.0 GB total on L4 with NUM_PARALLEL=8; a 14b verifier also fits."

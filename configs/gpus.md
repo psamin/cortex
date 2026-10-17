@@ -7,6 +7,8 @@
 
 Measured from `scripts/bench_ollama.py` (job 10453), using real MiniGrid prompts (~260 prompt tokens, ~37 generated tokens, `think: false`).
 
+Presets: `configs/deploy/{l40,small_gpu,gpu_8gb,cpu}.yaml`.
+
 Recommendations:
 - **L40 48 GB** (down during this work): qwen3:4b + qwen3:8b with NUM_PARALLEL 16. A 14b verifier also fits.
 - **16–24 GB** (L4): qwen3:4b alone, or 4b + 8b (17 GB measured). Keep `OLLAMA_CONTEXT_LENGTH=4096`.
