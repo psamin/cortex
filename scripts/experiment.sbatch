@@ -37,7 +37,7 @@ if [ "${DC_BENCH:-0}" = "1" ]; then
   done
 fi
 if [ "${DC_PROBE:-0}" = "1" ]; then
-  uv run python scripts/prompt_probe.py --models ${DC_MODELS:-qwen3:4b} --out "results/probe-${SLURM_JOB_ID}.json"
+  uv run python scripts/prompt_probe.py --models ${DC_MODELS:-qwen3:4b} --prompts ${DC_PROBE_PROMPTS:-v1 v2 v3} --out "results/probe-${SLURM_JOB_ID}.json"
 fi
 if [ "${DC_CODEBENCH:-0}" = "1" ]; then
   uv run python -m dreamcache.codebench.run --out results/codebench --model "${DC_CB_MODEL:-qwen3:4b}" --repeats "${DC_CB_REPEATS:-1}"

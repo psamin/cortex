@@ -110,3 +110,71 @@ def describe(obs, history: list[int], legal: list[int]) -> str:
         f"Your recent actions: {hist}\n"
         f"Available actions:\n{acts}\n"
     )
+
+
+# ---- BALROG-style text observation (prompt v4) ---------------------------------------
+# Adapted from BartekCupial/Minigrid (Apache-2.0) `MiniGridEnv.gen_graph`, English path, as
+# used by BALROG's BabyAI wrapper (balrog-ai/BALROG, MIT). Rewritten to take only the
+# egocentric observation (no env access): walls straight ahead/left/right, then every
+# visible non-empty, non-wall object with "N steps left/right and M steps forward".
+_COLORS = {0: "red", 1: "green", 2: "blue", 3: "purple", 4: "yellow", 5: "grey"}
+_STATES = {0: "open", 1: "closed", 2: "locked"}
+
+
+def balrog_descriptions(obs) -> list[str]:
+    img = obs["image"]
+    out = []
+    t_carry, c_carry, _ = img[AX, AY]
+    if IDX_TO_OBJECT[int(t_carry)] not in ("empty", "unseen", "agent", "wall", "floor"):
+        out.append(f"You carry a {_COLORS[int(c_carry)]} {IDX_TO_OBJECT[int(t_carry)]}")
+
+    def first_wall(cells, label):
+        for dist, (x, y) in enumerate(cells, start=1):
+            t = int(img[x, y][0])
+            if t not in (0, 1):            # not unseen / empty
+                if t == 2:
+                    out.append(f"You see a wall {dist} step{'s' if dist > 1 else ''} {label}")
+                return
+
+    first_wall([(AX, y) for y in range(AY - 1, -1, -1)], "forward")
+    first_wall([(x, AY) for x in range(AX - 1, -1, -1)], "left")
+    first_wall([(x, AY) for x in range(AX + 1, 7)], "right")
+    for x in range(7):
+        for y in range(7):
+            t, c, s = (int(v) for v in img[x, y])
+            if t in (0, 1, 2) or (x, y) == (AX, AY):
+                continue
+            name = IDX_TO_OBJECT[t]
+            if t == 4:
+                art = "an" if _STATES[s] == "open" else "a"
+                desc = f"You see {art} {_STATES[s]} {_COLORS[c]} {name} "
+            else:
+                desc = f"You see a {_COLORS[c]} {name} "
+            dx, dy = x - AX, AY - y
+            parts = []
+            if dx == 0:
+                parts.append((dy, "forward"))
+            elif dy == 0:
+                parts.append((abs(dx), "right" if dx > 0 else "left"))
+            else:
+                parts += [(abs(dx), "right" if dx > 0 else "left"), (dy, "forward")]
+            desc += " and ".join(f"{d} step{'s' if d > 1 else ''} {lab}" for d, lab in parts)
+            out.append(desc)
+    return out
+
+
+BALROG_ACTIONS = {"left": "turn to the left", "right": "turn to the right", "forward": "take one step forward",
+                  "pickup": "pick up the object below you", "toggle": "manipulate the object in front of you"}
+
+
+def balrog_prompt(obs, history, legal) -> str:
+    """BALROG BabyAI instruction prompt (balrog/environments/babyai_text/__init__.py) + observation."""
+    acts = ",\n".join(f"{ACTION_NAMES[a]}: {BALROG_ACTIONS[ACTION_NAMES[a]]}" for a in legal)
+    hist = ", ".join(ACTION_NAMES[a] for a in history[-6:]) or "none"
+    return (f"You are an agent playing a simple navigation game. Your goal is to {obs['mission']}. "
+            "The following are the possible actions you can take in the game, followed by a short "
+            f"description of each action:\n\n{acts}.\n\nTips:\n- Once the desired object you want to "
+            "interact or pickup in front of you, you can use the 'toggle' action to interact with it.\n"
+            "- It doesn't make sense to repeat the same action over and over if the observation doesn't change.\n\n"
+            f"Observation:\n" + ("\n".join(balrog_descriptions(obs)) or "You see nothing special.") +
+            f"\nYour recent actions: {hist}\n")

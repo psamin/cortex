@@ -21,7 +21,7 @@ import httpx
 from pydantic import BaseModel, ValidationError
 
 from dreamcache.environments.minigrid_adapter import ACTION_NAMES, NAME_TO_ACTION
-from dreamcache.environments.observations import describe
+from dreamcache.environments.observations import balrog_prompt, describe
 from dreamcache.types import Cost, Decision
 
 SYSTEM = ("You control an agent in a 2D grid world. Choose actions that complete the "
@@ -185,6 +185,9 @@ class LLMPolicy:
         self.pool = ThreadPoolExecutor(max_workers)
 
     def _messages(self, obs, history):
+        if self.prompt == "v4":   # BALROG-style observation/instruction prompt
+            return [{"role": "system", "content": SYSTEM},
+                    {"role": "user", "content": balrog_prompt(obs, history, self.legal) + "\n" + INSTRUCTION}]
         body = describe(obs, history, self.legal)
         if self.prompt in ("v2", "v3"):
             body = RULES[self.family] + "\n\n" + body
