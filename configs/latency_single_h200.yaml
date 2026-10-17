@@ -1,0 +1,18 @@
+# Inference-speedup experiment, LOW-CONTENTION regime: H200, DC_WORKERS=2 (GPU mostly idle),
+# cache disabled. Tests whether speculation reduces latency when parallel capacity is free
+# (the regime Speculative Actions assumes). Validation seeds.
+split: val
+n_seeds: 12
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3, cache: false}
+defaults:
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: A_greedy_4b, agent: {trigger: never}}
+  - {name: L_greedy_8b, fast: {model: "qwen3:8b"}, agent: {trigger: never}}
+  - {name: LS_lossless_heur, kind: lossless, guessers: [obs_heuristic]}
+  - {name: LS_lossless_small, kind: lossless, guessers: [small_llm]}
+  - {name: LS_lossless_both, kind: lossless, guessers: [obs_heuristic, small_llm]}
+  - {name: K2_lossless_draft_L4, agent: {mode: spec_draft_lossless, plan_len: 4}}
+  - {name: K2_lossless_draft_L2, agent: {mode: spec_draft_lossless, plan_len: 2}}

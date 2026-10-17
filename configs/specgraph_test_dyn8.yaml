@@ -1,0 +1,26 @@
+# Experiment 2, Track A (MiniGrid): predictive execution of the actor's NEXT model call.
+# Predictors are fit on VALIDATION trajectories (results/specgraph/rows_train.jsonl) and frozen.
+# Cache disabled: latency is real. Identical worker count for all methods.
+# B7 (SSD + graph-ranked rollout candidates) is not implemented -> reported as N/A.
+split: test
+n_seeds: 40
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:8b", big_model: "qwen3:8b", prompt: v3, cache: false}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: B0_no_spec, agent: {trigger: never}}
+  - {name: B2_predict_no_exec, agent: {trigger: never}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: none}}}
+  - {name: B3_frequency_top1, agent: {trigger: never}, prefetch: {predictor: frequency, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: top1}}}
+  - {name: B4_global_top1, agent: {trigger: never}, prefetch: {predictor: context, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: top1}}}
+  - {name: B5_personalized_top1, agent: {trigger: never}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: top1}}}
+  - {name: B6_personalized_utility, agent: {trigger: never}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: utility}}}
+  - {name: B6a_personalized_utility_adaptive, agent: {trigger: never}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: utility_adaptive}}}
+  - {name: TopK3_all_actions, agent: {trigger: never}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: topk, k: 3, max_inflight: 3, budget_ratio: 3.0}}}
+  - {name: Rand_random_sched, agent: {trigger: never}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: actor8b, sched: {policy: random}}}
+  - {name: Heur_heuristic_top1, agent: {trigger: never}, prefetch: {predictor: heuristic, workflow: actor8b, sched: {policy: top1}}}
+  # SSD lineage: actor = qwen3:4b fast policy with selective rollouts
+  - {name: B1_ssd_sel_0.4, fast: {model: "qwen3:4b"}, agent: {trigger: threshold, threshold: 0.4}}
+  - {name: B8_ssd_plus_prefetch, fast: {model: "qwen3:4b"}, agent: {trigger: threshold, threshold: 0.4}, prefetch: {predictor: personalized, rows: results/specgraph/rows_train.jsonl, workflow: ssd4b, sched: {policy: top1}}}
