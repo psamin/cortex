@@ -27,6 +27,19 @@ ln -s "$REPO/results" results
 ln -s "$REPO/logs" logs
 uv sync -q --python 3.12 --extra dev
 export OLLAMA_HOST_URL="http://$OLLAMA_HOST"
+if [ "${DC_SERVE_ONLY:-0}" = "1" ]; then
+  # Dedicated speculation server: serve models on $DC_OLLAMA_PORT (127.0.0.1) until cancelled.
+  for m in ${DC_MODELS:-qwen3:4b}; do curl -s "$OLLAMA_HOST_URL/api/generate" -d "{\"model\":\"$m\",\"prompt\":\"ok\",\"stream\":false,\"keep_alive\":-1,\"options\":{\"num_predict\":1}}" >/dev/null; done
+  echo "SERVE_READY $(hostname) $OLLAMA_HOST"
+  touch "$REPO/logs/serve-${DC_OLLAMA_PORT}.ready"
+  while true; do sleep 60; done
+fi
+if [ -n "${DC_WAIT_HOST:-}" ]; then
+  # wait (up to 20 min) for a separate speculation server, e.g. another single-GPU job on this node
+  for i in $(seq 1 120); do curl -fs "$DC_WAIT_HOST/api/version" >/dev/null && break; sleep 10; done
+  curl -fs "$DC_WAIT_HOST/api/tags" >/dev/null || { echo "FATAL: speculation server $DC_WAIT_HOST not reachable" >&2; exit 1; }
+  echo "SPEC_SERVER_OK $DC_WAIT_HOST"
+fi
 export DC_LLM_CACHE="$SCR/llm_cache.sqlite"
 nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv -l 5 > "logs/gpu-${SLURM_JOB_ID}.csv" &
 SMI_PID=$!

@@ -25,8 +25,9 @@ from dreamcache.types import Cost
 
 
 class LosslessSpecAgent:
-    def __init__(self, big, small, legal, guessers=("obs_heuristic",), seed=0, max_workers=6):
+    def __init__(self, big, small, legal, guessers=("obs_heuristic",), seed=0, max_workers=6, spec_big=None):
         self.big, self.small, self.legal = big, small, legal
+        self.spec_big = spec_big or big   # speculative calls may go to a separate server/GPU
         self.guessers = list(guessers)
         self.heur = ObsBFSPolicy(seed=seed)
         self.pool = ThreadPoolExecutor(max_workers)
@@ -37,8 +38,9 @@ class LosslessSpecAgent:
     def _key(self, obs, history):
         return describe(obs, history, self.legal)
 
-    def _submit(self, obs, history):
-        f = self.pool.submit(self.big.decide, obs, list(history))
+    def _submit(self, obs, history, speculative=False):
+        actor = self.spec_big if speculative else self.big
+        f = self.pool.submit(actor.decide, obs, list(history))
         self.all_futs.append(f)
         return f
 
@@ -66,7 +68,7 @@ class LosslessSpecAgent:
             nobs, _, term, trunc, _ = sim.step(g)
             if not (term or trunc):
                 h2 = list(history) + [int(g)]
-                self.pending[self._key(nobs, h2)] = self._submit(nobs, h2)
+                self.pending[self._key(nobs, h2)] = self._submit(nobs, h2, speculative=True)
         dec = fut.result()
         action = dec.action
         cost = Cost()

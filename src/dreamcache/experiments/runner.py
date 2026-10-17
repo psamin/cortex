@@ -58,6 +58,7 @@ def make_fast(spec: dict, legal, seed, family="dynamic"):
         return SurrogatePolicy(legal, seed=seed, eps=spec.get("eps", 0.25))
     from dreamcache.policies.ollama_policy import LLMPolicy, OllamaClient
     client = OllamaClient(model=spec.get("model", "qwen3:4b"), think=spec.get("think", False),
+                          host=spec.get("host"),
                           cache_path="" if spec.get("cache") is False else None,
                           num_predict=spec.get("num_predict", 1024 if spec.get("think") else
                                                160 if spec.get("prompt") == "v3" else 80))
@@ -92,8 +93,11 @@ def make_prefetcher(fast, pf: dict, legal, env_id, fast_spec, seed):
             return pred.predict({**row, "env": f"{row['env']}|{wf}"})
 
     fp = f"{fast_spec.get('model')}|{fast_spec.get('prompt', 'v1')}"
+    sh = fast_spec.get("spec_host")
+    spec_inner = make_fast({**fast_spec, "host": sh}, legal, seed, "dynamic" if "Dynamic" in env_id else "doorkey") if sh else None
     return PrefetchingPolicy(fast, legal, _Keyed(), Scheduler(build(SchedConfig, pf.get("sched")), legal, seed),
-                             env_id, fp, max_workers=pf.get("workers", 4), heuristic=ObsBFSPolicy(seed=seed))
+                             env_id, fp, max_workers=pf.get("workers", 4), heuristic=ObsBFSPolicy(seed=seed),
+                             spec_inner=spec_inner)
 
 
 def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
@@ -107,6 +111,9 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
         fast = make_fast(fast_spec, legal, seed, family)
         big = (make_fast({**fast_spec, "model": fast_spec["big_model"]}, legal, seed, family)
                if fast_spec.get("big_model") else None)
+        sh = fast_spec.get("spec_host")
+        big_spec = (make_fast({**fast_spec, "model": fast_spec["big_model"], "host": sh}, legal, seed, family)
+                    if sh and fast_spec.get("big_model") else None)
         pf_cfg = method.get("prefetch")
         if pf_cfg:
             fast = make_prefetcher(fast, pf_cfg, legal, env_id, fast_spec, seed)
@@ -119,11 +126,15 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
                 return gp.predictor.predict({"env": env_id, "context": context_key(obs, history),
                                              "prev_op": history[-1] if history else -1, "heuristic_op": None})
         agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed, big=big, graph=graph)
+        agent.big_spec = big_spec
     elif kind == "lossless":
         from dreamcache.agents.lossless import LosslessSpecAgent
-        small = make_fast(fast_spec, legal, seed, family)
+        sh = fast_spec.get("spec_host")   # dedicated speculation server (separate GPU), if any
+        small = make_fast({**fast_spec, **({"host": sh} if sh else {})}, legal, seed, family)
         big = make_fast({**fast_spec, "model": fast_spec["big_model"]}, legal, seed, family)
-        agent = LosslessSpecAgent(big, small, legal, guessers=method.get("guessers", ["obs_heuristic"]), seed=seed)
+        spec_big = make_fast({**fast_spec, "model": fast_spec["big_model"], "host": sh}, legal, seed, family) if sh else None
+        agent = LosslessSpecAgent(big, small, legal, guessers=method.get("guessers", ["obs_heuristic"]), seed=seed,
+                                  spec_big=spec_big)
     elif kind == "planner_sim":
         planner = SimBFSPolicy()
     elif kind == "planner_obs":

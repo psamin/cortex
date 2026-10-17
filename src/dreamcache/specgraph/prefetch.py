@@ -30,8 +30,9 @@ from dreamcache.specgraph.graph import context_key, input_hash
 
 class PrefetchingPolicy:
     def __init__(self, inner, legal, predictor, scheduler, env_name, fingerprint, max_workers=4,
-                 heuristic=None):
+                 heuristic=None, spec_inner=None):
         self.inner, self.legal = inner, legal
+        self.spec_inner = spec_inner or inner   # speculative calls may go to a separate server/GPU
         self.predictor, self.scheduler = predictor, scheduler
         self.env_name, self.fp = env_name, fingerprint
         self.heuristic = heuristic
@@ -76,7 +77,7 @@ class PrefetchingPolicy:
                    "p": float(p[g]), "start": time.perf_counter(), "finish": None, "fate": "pending"}
 
             def run(nobs=nobs, h2=h2, rec=rec):
-                d = self.inner.decide(nobs, h2)
+                d = self.spec_inner.decide(nobs, h2)
                 rec["finish"] = time.perf_counter()
                 return d
 

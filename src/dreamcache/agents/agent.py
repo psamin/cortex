@@ -225,7 +225,9 @@ class Agent:
             states.append((o, h))
         if not hasattr(self, "_pool"):
             self._pool = ThreadPoolExecutor(max(2, c.plan_len))
-        decs = list(self._pool.map(lambda st: self.big.decide(st[0], st[1]), states))
+        spec = getattr(self, "big_spec", None) or self.big   # drafted future states: speculative capacity
+        decs = list(self._pool.map(lambda ist: (self.big if ist[0] == 0 else spec).decide(ist[1][0], ist[1][1]),
+                                   enumerate(states)))
         accepted, n_acc = [], 0
         for d in decs:
             cost += d.cost  # all parallel big calls are paid for, used or not
