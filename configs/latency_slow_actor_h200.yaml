@@ -1,0 +1,15 @@
+# Speedup regime test: SLOW actor (qwen3:32b) vs cheap guessers, low contention (H200, 2 workers),
+# cache disabled. Theory (Speculative Actions; speculative decoding) predicts a latency gain only
+# when guess cost << actor cost; on H200 4b and 8b had equal latency, so we test 32b.
+split: val
+n_seeds: 12
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:32b", prompt: v3, cache: false}
+defaults:
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: L_greedy_32b, fast: {model: "qwen3:32b"}, agent: {trigger: never}}
+  - {name: LS32_lossless_heur, kind: lossless, guessers: [obs_heuristic]}
+  - {name: LS32_lossless_small, kind: lossless, guessers: [small_llm]}
+  - {name: K2_32b_lossless_draft_L2, agent: {mode: spec_draft_lossless, plan_len: 2}}
