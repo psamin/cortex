@@ -21,8 +21,8 @@ TRAIN=(); EVAL=(); dst=TRAIN
 for x in "$@"; do if [ "$x" = "--" ]; then dst=EVAL; continue; fi; eval "$dst+=(\"$x\")"; done
 rm -f "$OUT/rows_train.jsonl" "$OUT/rows_eval.jsonl" "$OUT/graph.sqlite"
 # workflow label = actor identity; methods listed as WORKFLOW=method1,method2;...
-IFS=';' read -ra GROUPS <<< "${SG_ACTOR_METHODS:-actor8b=L_greedy_8b,LS_lossless_heur,LS_lossless_small,LS_lossless_both}"
-for g in "${GROUPS[@]}"; do
+IFS=';' read -ra SGROUPS <<< "${SG_ACTOR_METHODS:-actor8b=L_greedy_8b,LS_lossless_heur,LS_lossless_small,LS_lossless_both}"
+for g in "${SGROUPS[@]}"; do
   wf="${g%%=*}"; ms="${g#*=}"; ms="${ms//,/ }"
   uv run python -m dreamcache.specgraph.dataset "${TRAIN[@]}" --methods $ms --workflow "$wf" --out "$OUT/rows_train.jsonl" --db "$OUT/graph.sqlite"
   [ ${#EVAL[@]} -gt 0 ] && uv run python -m dreamcache.specgraph.dataset "${EVAL[@]}" --methods $ms --workflow "$wf" --out "$OUT/rows_eval.jsonl"

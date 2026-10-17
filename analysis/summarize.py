@@ -32,11 +32,18 @@ def main(argv=None):
     ap.add_argument("--compare", default="B_always")
     a = ap.parse_args(argv)
     os.makedirs(a.out, exist_ok=True)
-    rows, errors = [], 0
+    rows, errors, seen, dups = [], 0, set(), 0
     for r in a.runs:
         eps, errs = load(os.path.join(r, "episodes.jsonl"))
         errors += len(errs)
-        rows += [episode_metrics(e) for e in eps]
+        for e in eps:
+            k = (e["env"], e["method"], e["seed"])
+            if k in seen:   # same frozen method+seed in two runs (e.g. split test): keep first
+                dups += 1
+                continue
+            seen.add(k)
+            rows.append(episode_metrics(e))
+    print(f"[summarize] duplicates skipped: {dups}")
     by = defaultdict(list)
     for m in rows:
         by[(m["env"], m["method"])].append(m)
@@ -59,7 +66,7 @@ def main(argv=None):
         summary.append(s)
     json.dump(summary, open(os.path.join(a.out, "summary.json"), "w"), indent=2)
 
-    lines = [f"Episodes with runner errors (excluded, listed in episodes.jsonl): {errors}\n",
+    lines = [f"Episodes with runner errors (excluded, listed in episodes.jsonl): {errors}; duplicate (method, seed) episodes skipped: {dups}\n",
              "| env | method | n | success [95% CI] | collision | steps | trigger rate | LLM calls/ep | model-s/ep | sim CPU-s/ep | episode s | lat p50/p95 (s) |",
              "|---|---|---|---|---|---|---|---|---|---|---|---|"]
     for s in summary:
