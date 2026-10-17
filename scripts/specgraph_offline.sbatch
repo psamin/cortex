@@ -2,7 +2,7 @@
 # Experiment 2 offline stage (CPU only): build transition rows + SQLite execution graph from
 # logged trajectories, then evaluate predictors (H1, H4).
 #   sbatch scripts/specgraph_offline.sbatch TRAIN_RUNS... -- EVAL_RUNS...
-# Env: SG_OUT (output dir), SG_ACTOR_METHODS (methods whose executed actions are labels)
+# Env: SG_OUT (output dir), SG_ACTOR_METHODS="wf1=m1+m2;wf2=m3" (use + between methods: sbatch --export splits on commas)
 #SBATCH -J sg-offline
 #SBATCH -p general
 #SBATCH -c 8
@@ -23,7 +23,7 @@ rm -f "$OUT/rows_train.jsonl" "$OUT/rows_eval.jsonl" "$OUT/graph.sqlite"
 # workflow label = actor identity; methods listed as WORKFLOW=method1,method2;...
 IFS=';' read -ra SGROUPS <<< "${SG_ACTOR_METHODS:-actor8b=L_greedy_8b,LS_lossless_heur,LS_lossless_small,LS_lossless_both}"
 for g in "${SGROUPS[@]}"; do
-  wf="${g%%=*}"; ms="${g#*=}"; ms="${ms//,/ }"
+  wf="${g%%=*}"; ms="${g#*=}"; ms="${ms//,/ }"; ms="${ms//+/ }"
   uv run python -m dreamcache.specgraph.dataset "${TRAIN[@]}" --methods $ms --workflow "$wf" --out "$OUT/rows_train.jsonl" --db "$OUT/graph.sqlite"
   [ ${#EVAL[@]} -gt 0 ] && uv run python -m dreamcache.specgraph.dataset "${EVAL[@]}" --methods $ms --workflow "$wf" --out "$OUT/rows_eval.jsonl"
 done
