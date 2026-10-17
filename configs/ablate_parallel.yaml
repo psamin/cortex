@@ -1,0 +1,12 @@
+# Ablation 7 rerun (the first parallel4 arm failed on a pickling bug): sequential vs
+# process-parallel branch execution, same seeds, cache on (decisions shared).
+split: val
+n_seeds: 20
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", prompt: v3}
+defaults:
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: seq_K3, agent: {trigger: always}}
+  - {name: parallel4, agent: {trigger: always, spec: {parallel: 4}}}

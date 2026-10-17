@@ -50,3 +50,10 @@ def test_stale_snapshot_never_reused(tmp_path):
     assert not info["reused"]          # speculative result for snap0 is not valid for snap1
     st = sp.finalize()
     assert st.get("unused", 0) >= 1    # counted as wasted speculative work
+
+
+def test_infinite_loop_times_out_cleanly(tmp_path):
+    ws = str(tmp_path / "ws")
+    make_task(ws, "binary_search", 1, "eval")   # mutation `lo = mid` loops forever on misses
+    r = execute("run_tests", ws)
+    assert r["rc"] != 0

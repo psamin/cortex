@@ -73,8 +73,9 @@ def speculate(env, candidates, history, legal, scfg: SpecConfig, ecfg: EvalConfi
     base = rng.integers(0, 2**31 - 1, size=(len(candidates), scfg.samples))
     if scfg.crn:
         base[:] = base[0]
+    fp = fast_policy if scfg.rollout_policy == "fast" else None  # not picklable; only needed for LLM rollouts
     jobs = [(clone_env(env), a, history, scfg.horizon, legal, scfg.rollout_policy,
-             int(base[i, j]), ecfg, fast_policy)
+             int(base[i, j]), ecfg, fp)
             for i, a in enumerate(candidates) for j in range(scfg.samples)]
     if scfg.parallel and scfg.rollout_policy != "fast":
         pool = _POOLS.setdefault(scfg.parallel, ProcessPoolExecutor(scfg.parallel))

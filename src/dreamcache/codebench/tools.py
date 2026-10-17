@@ -48,12 +48,16 @@ _WRAP = ("import resource, subprocess, sys; r = subprocess.run(sys.argv[1:]); "
          "sys.stderr.write('__CPU__%f\\n' % (u.ru_utime + u.ru_stime)); sys.exit(r.returncode)")
 
 
-def _run(cmd, cwd, timeout=60):
+def _run(cmd, cwd, timeout=15):
     """Run cmd; per-call CPU is measured inside a tiny wrapper process (RUSAGE_CHILDREN of
     the wrapper), so concurrent speculative runs do not contaminate each other's CPU time."""
     t0 = time.perf_counter()
-    r = subprocess.run([sys.executable, "-c", _WRAP, *cmd], cwd=cwd, capture_output=True, text=True,
-                       timeout=timeout, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    try:
+        r = subprocess.run([sys.executable, "-c", _WRAP, *cmd], cwd=cwd, capture_output=True, text=True,
+                           timeout=timeout, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
+    except subprocess.TimeoutExpired:   # e.g. an edit introduced an infinite loop
+        return {"rc": 124, "out": f"TIMEOUT after {timeout}s (possible infinite loop)",
+                "seconds": time.perf_counter() - t0, "cpu": float(timeout)}
     m = re.search(r"__CPU__([0-9.]+)", r.stderr)
     cpu = float(m.group(1)) if m else 0.0
     out = r.stdout + re.sub(r"__CPU__[0-9.]+\n?", "", r.stderr)
