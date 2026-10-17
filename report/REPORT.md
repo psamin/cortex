@@ -32,7 +32,8 @@
    | Rollouts on DoorKey | 0.60–0.73 |
 
    **Simulated consequences, not more model reasoning, are what fix decisions.**
-5. **Inference speedups: none measured for speculative LLM execution.** Under both high contention (L4, 4 agents) and low contention (H200, 2 agents):
+5. **More model reasoning is not a substitute for simulation.** qwen3:4b with thinking enabled scored 0/32 on test, at 15× the model compute of always-on rollouts. On 16x16 (no retuning), always-on rollouts keep 1.00. Risk-triggered rollouts keep zero collisions but drop to 0.82 from step-budget truncations.
+6. **Inference speedups: none measured for speculative LLM execution.** Under both high contention (L4, 4 agents) and low contention (H200, 2 agents):
    - Lossless speculative actions (after Ye et al. 2025) and lossless speculative plan drafting (greedy speculative decoding over actions, after DSP / ISP) both **increased** mean decision latency over 8b greedy. Low contention: 0.78–1.32 s vs 0.71 s. High contention: 2.8–5.0 s vs 2.4 s.
    - Prefetch hit rates were 26–65%, and draft acceptance was 66%.
    - **Why, measured:** 4b and 8b have the *same* per-call latency on the H200 (0.69 vs 0.68 s; fixed per-call overhead dominates), so a draft is not cheaper than the target. Concurrent speculative calls also slow down the real call; misses rise from 0.68 to about 1.0 s.
@@ -107,6 +108,33 @@ Notes:
 - **Lossless drafting vs 8b greedy:** −0.04 [−0.16, +0.08], p=0.57. It's equivalent in success, as expected for a lossless method, at +649 model-s / ep.
 - **SwiftSage trigger vs 8b greedy:** −0.18 [−0.30, −0.06], p=0.006. Its stuck/repeat rule fires on only 8% of steps, and it misses imminent collisions.
 - **Best-of-K without rollouts vs 8b:** +0.17 [+0.04, +0.31], p=0.019. Observable-risk filtering helps, but far less than simulated rollouts (1.00).
+
+### 2b. Baseline H: extra model reasoning instead of rollouts (test seeds, n=32, 60-step cap)
+`report/data/test_dyn8_think/`
+
+qwen3:4b with thinking enabled (up to 1,024 thinking tokens per decision, about 26 s per call at 32-way concurrency):
+- Success **0.00 [0.00, 0.00]**.
+- Collisions 0.00. Every episode was truncated at 60 steps.
+- **1,552 model-s per episode**, about 15× always-on rollouts (103).
+
+Thinking made the agent avoid walls and obstacles, but it never reached the goal; it turns in place. On this task, spending compute on simulated consequences is decisive, and spending the same or more on reasoning without the environment is not.
+
+### 2c. Generalization: Dynamic-Obstacles-16x16 (test seeds, n=50, 200-step cap, val-selected 8x8 config unchanged)
+`report/data/test_dyn16/`
+
+| Method | Success [95% CI] | Collision | Steps | Trigger rate | Model-s / ep | Sim CPU-s / ep |
+|---|---|---|---|---|---|---|
+| A greedy 4b | 0.04 [0.00, 0.10] | 0.96 | 51.7 | 0 | 258.2 | 0 |
+| L greedy 8b | 0.20 [0.10, 0.32] | 0.78 | 60.0 | 0 | 172.6 | 0 |
+| B always-on rollouts | **1.00** | 0 | 33.1 | 1.00 | 148.9 | 0.70 |
+| C risk only, 0.4 | 0.82 [0.72, 0.92] | **0.00** | 141.7 | 0.15 | 809.8 | 0.47 |
+| E random 0.25 | 0.24 [0.12, 0.36] | 0.76 | 49.9 | 0.21 | 260.6 | 0.29 |
+| I planner, SimBFS / ObsBFS | 1.00 / 0.58 | 0 | 33.4 / 142.9 | — | 0 | — |
+
+- The risk trigger transfers in **safety**: no collisions on the larger grid, vs 0.76 for random at a similar rate.
+- It does not transfer in **efficiency**. All 9 failures are 200-step truncations: between triggers the 4b agent dithers, and the bigger grid makes that fatal to the step budget.
+- The observation-only planner also degrades (0.58), because the goal is often out of view.
+- Always-on rollouts stay at 1.00 and are again the cheapest way to get there.
 
 ## 3. Which signals find consequential decisions? (Ablation 4, offline)
 `report/data/detector_delta0.2/`
