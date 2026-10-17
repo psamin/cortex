@@ -33,7 +33,11 @@
 
    **Simulated consequences, not more model reasoning, are what fix decisions.**
 5. **More model reasoning is not a substitute for simulation.** qwen3:4b with thinking enabled scored 0/32 on test, at 15× the model compute of always-on rollouts. On 16x16 (no retuning, 100 seeds), always-on rollouts keep 1.00. Risk-triggered rollouts keep zero collisions but drop to 0.77 from step-budget truncations.
-6. **Inference speedups: none measured for speculative LLM execution.** Under both high contention (L4, 4 agents) and low contention (H200, 2 agents):
+6. **Inference speedups come only with dedicated speculation capacity.** With speculative calls served from a *second* GPU (same node, separate Ollama server, cache off, n=12 paired):
+   - Learned-predictor prefetch cut 8b decision latency **24.1%** (0.686 → 0.520 s, p<0.001).
+   - Lossless Speculative Actions with a heuristic guesser cut it **20.6%** (p<0.001).
+   - Both are lossless with respect to the actor, at +72% / +96% compute per decision.
+   - On a single shared GPU, the same methods gave −7% / +9.5%. The bullets below report that shared-GPU regime. Under both high contention (L4, 4 agents) and low contention (H200, 2 agents):
    - Lossless speculative actions (after Ye et al. 2025) and lossless speculative plan drafting (greedy speculative decoding over actions, after DSP / ISP) both **increased** mean decision latency over 8b greedy. Low contention: 0.78–1.32 s vs 0.71 s. High contention: 2.8–5.0 s vs 2.4 s.
    - Prefetch hit rates were 26–65%, and draft acceptance was 66%.
    - **Why, measured:** 4b and 8b have the *same* per-call latency on the H200 (0.69 vs 0.68 s; fixed per-call overhead dominates), so a draft is not cheaper than the target. Concurrent speculative calls also slow down the real call; misses rise from 0.68 to about 1.0 s.
@@ -231,6 +235,14 @@ The risk trigger transfers in **safety**: no collisions. It does not transfer in
   2. **Parallel calls are not free.** On the L4, throughput rises only from 1.2 to 3.0 calls/s going from 1 to 16 concurrent requests, so a second in-flight call slows the first.
 - Every lossless variant is "lossless" only up to server nondeterminism. Temperature-0 outputs varied with batch composition: in the bench, `forward` was chosen 31/32 vs 26/32 at different concurrency levels. Success rates therefore differ slightly between LS and L even though both execute the 8b policy.
 - **Slow-actor regime (qwen3:32b actor, guess/actor latency ratio ≈ 0.4; H200, n=12):** still no speedup. 32b greedy takes 1.682 s per decision. Lossless with the ObsBFS guesser took 1.732 s (+3%, n.s., hit 0.48), lossless drafting L=2 1.805 s (+7%, p=0.018), and lossless with the 4b guesser 2.200 s (+31%). On one local GPU, a concurrent speculative call slows the real call about as much as a hit saves. The published speedups assume API-served models with effectively unlimited parallel capacity.
+- **Dedicated speculation capacity (second H200, `report/data/latency_dualgpu/`, n=12, paired vs 8b greedy 0.686 s):**
+  - Learned top-1 prefetch: 0.520 s (**−24.1%**, p<0.001).
+  - Lossless Speculative Actions, heuristic guess: 0.544 s (**−20.6%**, p<0.001).
+  - Lossless drafting L=2: 0.715 s (+4%, n.s.). L=4: 0.910 s (+33%).
+  - Top-3 prefetch: 1.04 s (+51%).
+  - Lossless with a 4b guesser: 1.07 s (+56%). The guess call itself sits on the critical path.
+
+  This is the regime the Speculative Actions paper assumes, and its gains reproduce here, provided the guess is nearly free (heuristic or learned predictor) and only the top guess is speculated.
 - **What *did* reduce latency** (experiment 2):
   - A predictor learned from the actor's own history (60% top-1) with top-1 prefetch: −7.4% decision latency at +107% compute.
   - Prefetching the SSD agent's next fast-policy call during its ~2.2 s rollout phase: −5.8% at +35%, with success unchanged.

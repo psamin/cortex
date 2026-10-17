@@ -6,7 +6,7 @@ Design, variants, and safety mechanisms are in [DESIGN.md](DESIGN.md). All runs 
 | Question | Measured answer |
 |---|---|
 | **H1** Are execution transitions predictable beyond chance and frequency baselines? | **Yes.** MiniGrid: top-1 accuracy 0.60 for the context-conditioned predictor, vs 0.38 frequency, 0.34 uniform, 0.48 hand-written heuristic (held-out test trajectories, N = 2,906 decisions). Coding: `edit → run_tests` and `run_tests → run_tests` dominate, and frequency already captures them. |
-| **H2** Does predictive execution cut critical-path latency? | **Yes in both tracks, with a large difference in cost-effectiveness.** Coding agent: **−15 to −21% task wall-clock** for learned top-1/utility and −25% for run-everything (paired, 30 held-out tasks, identical decisions). MiniGrid LLM-call prefetch: **−7.4% decision latency** (B5, p=0.028) at **+107% model compute**. Heuristic or random prefetch made decisions **slower** (+6.7%, +13.1%). |
+| **H2** Does predictive execution cut critical-path latency? | **Yes in both tracks.** With a dedicated speculation GPU, learned prefetch cut LLM decision latency **24%** (p<0.001). On a shared GPU the cut was much smaller, as detailed here. Coding agent: **−15 to −21% task wall-clock** for learned top-1/utility and −25% for run-everything (paired, 30 held-out tasks, identical decisions). MiniGrid LLM-call prefetch: **−7.4% decision latency** (B5, p=0.028) at **+107% model compute**. Heuristic or random prefetch made decisions **slower** (+6.7%, +13.1%). |
 | **H3** Does budget-aware scheduling beat always-top-K? | **Yes.** MiniGrid: speculating all 3 actions made decisions **47% slower** (contention) at 6× compute, while top-1 and utility were faster. Coding: running every eligible tool saved the most time, but learned top-1 got about 85% of that saving with a third of the launches and almost no wasted work. |
 | **H4** Does personalization beat a global model? | **Mixed.** Within one workflow, shrinkage personalization equals the global model (top-1 0.600 vs 0.600; matched k=10: 0.550 vs 0.544). **Across workflows, matching history matters a lot:** for the SSD agent, a predictor trained on another workflow (8b greedy) reached a 0.46 hit rate and +2.2% latency (n.s.); trained on the SSD agent's own history it reached 0.68 hits and **−5.8% latency (p<0.001)**. |
 | **H5** Is SSD + predictive execution better than either alone? | **Yes, on two axes.** Graph-ranked rollout candidates (B7) let SSD use 2 branches instead of 3 at equal success, and cut compute 53% vs LLM-ranked K=2 (p<0.001), because the predictor keeps the action SSD would choose in the candidate set. For latency at equal success: The corrected B8 (SSD + workflow-matched prefetch) kept success at 1.00 (same as SSD) and cut decision latency 2.261 → 2.130 s (−5.8%, paired p<0.001) at +35% model compute. SSD alone is what lifts success from 0.45 to 1.00 over B0, which no amount of prefetching does. |
@@ -57,6 +57,20 @@ Design, variants, and safety mechanisms are in [DESIGN.md](DESIGN.md). All runs 
 **Interpretation.**
 - Here the "work" being pre-executed is a GPU call that competes with the critical-path call for the same GPU. So the achievable saving is bounded both by hit rate and by contention.
 - The 4b/8b latency equality (see the main report, §5) means that only a near-free guesser, like the learned predictor here, can work at all.
+
+### 1b′. Dedicated speculation GPU (val seeds, n=12, paired; `report/data/latency_dualgpu/`)
+Real actor calls run on the job's own H200. Every speculative call (prefetches, guesser calls, drafted-state checks) goes to a second Ollama server on another H200 of the same node, in a separate single-GPU job. The GPU UUIDs were verified to differ, and the speculation server received 538 calls vs 492 on the actor server.
+
+| Variant | Decision latency (s) | Δ vs 8b greedy | Model-s / decision | Hit / step |
+|---|---|---|---|---|
+| 8b greedy | 0.686 | — | 0.69 | — |
+| **B5 learned top-1 prefetch** | **0.520** | **−0.166 [−0.207, −0.129], p<0.001 (−24.1%)** | 1.18 | 0.55 |
+| lossless, ObsBFS guesser | 0.544 | −0.141 [−0.168, −0.113], p<0.001 (−20.6%) | 1.34 | 0.37 |
+| lossless drafting L=2 | 0.715 | +0.029 (n.s.) | 1.00 | — |
+| top-3 prefetch | 1.037 | +0.351 | 4.46 | 0.80 |
+| lossless, 4b guesser | 1.070 | +0.384 | 2.26 | 0.36 |
+
+**H2 is strongly supported when speculation does not contend with the critical path.** Same predictor, same actor: −7.4% on one shared GPU vs −24.1% with dedicated capacity. Nearly every hit was *late* (0.55 of 0.55): the prefetched call started at the same time as the current one, so roughly one call's latency is overlapped rather than eliminated.
 
 ### 1c. Slow-actor regime (32b actor, Speculative Actions style; val seeds, n=12, H200)
 `report/data/latency_slow_actor_h200/latency_paired.md`
