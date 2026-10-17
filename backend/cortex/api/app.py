@@ -1,0 +1,642 @@
+"""FastAPI app: REST for the studio, SSE/MJPEG for live views, and
+POST /api/tools/{name} for the MCP server (same domain services)."""
+
+from __future__ import annotations
+
+import asyncio
+import io
+import json
+import logging
+import threading
+from contextlib import asynccontextmanager
+from typing import Any
+
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse, Response, StreamingResponse
+from fastapi.staticfiles import StaticFiles
+from pydantic import BaseModel, ValidationError
+
+from ..config import settings
+from ..context import Ctx, build_ctx
+from ..models import (
+    Analysis,
+    Checkpoint,
+    Condition,
+    CreateDatasetVersionRequest,
+    CreateProjectRequest,
+    Episode,
+    EpisodeStatus,
+    LaunchEvaluationRequest,
+    Project,
+    StartAgentCollectionRequest,
+    TrainingJob,
+)
+from ..services import (
+    agent,
+    analysis_service,
+    autopilot,
+    dataset_service,
+    experiment_comparison,
+    recommendation_service,
+    recording_service,
+    simulation_runner,
+    training_service,
+)
+from ..services import agent_orchestrator as orch
+
+log = logging.getLogger("cortex")
+CTX: Ctx | None = None
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global CTX
+    logging.basicConfig(level=logging.INFO)
+    CTX = await build_ctx(settings())
+    for n in CTX.notes:
+        log.warning(n)
+    await training_service.resume_pollers(CTX)
+    resumed = await autopilot.resume_all(CTX)
+    if resumed:
+        log.info("resumed %d autopilot run(s)", resumed)
+    app.mount("/files", StaticFiles(directory=CTX.data_dir, check_dir=False), name="files")
+    yield
+
+
+app = FastAPI(title="Cortex", version="0.1.0", lifespan=lifespan)
+app.add_middleware(CORSMiddleware, allow_origins=settings().cors_origins.split(","), allow_methods=["*"],
+                   allow_headers=["*"])
+
+
+def ctx() -> Ctx:
+    assert CTX is not None
+    return CTX
+
+
+# ------------------------------------------------------------------ guard
+LOCAL = {"127.0.0.1", "::1", "localhost", "testclient"}
+
+
+@app.middleware("http")
+async def guard(request: Request, call_next):
+    """When the backend is tunneled for a hosted MCP server, only the tool
+    endpoint (with the MCP key) and health are reachable from outside."""
+    path = request.url.path
+    remote = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for")
+    is_local = request.client is not None and request.client.host in LOCAL and not remote
+    if not is_local and path not in ("/api/health",):
+        key = settings().cortex_mcp_key
+        ok = path.startswith("/api/tools") and key and request.headers.get("authorization") == f"Bearer {key}"
+        if not ok:
+            return JSONResponse({"detail": "Remote access is limited to /api/tools with the MCP key"}, 403)
+    return await call_next(request)
+
+
+@app.exception_handler(KeyError)
+async def _404(_, e: KeyError):
+    return JSONResponse({"detail": f"not found: {e.args[0] if e.args else e}"}, 404)
+
+
+@app.exception_handler(PermissionError)
+async def _403(_, e: PermissionError):
+    return JSONResponse({"detail": str(e), "code": getattr(e, "code", "approval_required"),
+                         "approval_required": True}, 403)
+
+
+@app.exception_handler(RuntimeError)
+async def _503(_, e: RuntimeError):
+    from ..services.agent_collection_service import PlannerUnavailable
+    if isinstance(e, PlannerUnavailable):
+        return JSONResponse({"detail": str(e), "code": e.code, "planner_unavailable": True}, 503)
+    return JSONResponse({"detail": f"{type(e).__name__}: {e}"}, 500)
+
+
+@app.exception_handler(ValueError)
+async def _400(_, e: ValueError):
+    return JSONResponse({"detail": str(e)}, 400)
+
+
+@app.exception_handler(FileNotFoundError)
+async def _409(_, e: FileNotFoundError):
+    return JSONResponse({"detail": str(e)}, 409)
+
+
+def actor(request: Request) -> str:
+    a = request.headers.get("x-cortex-actor", "gui")
+    return a if a in ("gui", "agent", "mcp") else "gui"
+
+
+# ------------------------------------------------------------------ health
+@app.get("/api/health")
+async def health():
+    c = ctx()
+    s = c.settings
+    try:
+        from importlib.metadata import version
+        lr = version("lerobot")
+    except Exception:
+        lr = None
+    from ..sim.so101 import ENVHUB_URI
+    return {
+        "db": {"provider": c.store.name, "fallback": not s.insforge_enabled},
+        "storage": {"provider": c.blobs.name, "fallback": not s.insforge_enabled},
+        "vlm": {"provider": c.vlm_source, "model": s.vlm_model if c.openrouter_key else None,
+                "fallback": not c.openrouter_key},
+        "agent": {"provider": "llm" if c.openrouter_key else "rule-based planner", "model": s.agent_model,
+                  "fallback": not c.openrouter_key},
+        "executor": {"provider": "parallel local worker processes", "fallback": False},
+        "training": {"provider": f"futurama slurm ({s.futurama_ssh_host})" if s.futurama_ssh_host
+                     else "manual command bundle", "fallback": not s.futurama_ssh_host},
+        "lerobot_version": lr, "sim_env": ENVHUB_URI, "notes": c.notes,
+    }
+
+
+# ------------------------------------------------------------------ projects
+@app.post("/api/projects")
+async def create_project(req: CreateProjectRequest, request: Request) -> Project:
+    p = await orch.create_project(ctx(), req, actor(request))
+    if req.start_autopilot:
+        await autopilot.start(ctx(), p)
+    return p
+
+
+@app.get("/api/projects")
+async def list_projects() -> list[Project]:
+    return list(reversed(await ctx().repo.list("projects", Project)))
+
+
+@app.get("/api/projects/{pid}")
+async def get_project(pid: str) -> Project:
+    return await orch.get_project(ctx(), pid)
+
+
+@app.get("/api/projects/{pid}/state")
+async def state(pid: str):
+    return await orch.project_state(ctx(), await orch.get_project(ctx(), pid))
+
+
+@app.get("/api/projects/{pid}/events")
+async def events(pid: str, request: Request):
+    async def gen():
+        yield "event: hello\ndata: {}\n\n"
+        q = ctx().bus.subscribe(pid)
+        try:
+            while True:
+                try:
+                    ev, data = await asyncio.wait_for(q.get(), timeout=15)
+                    yield f"event: {ev}\ndata: {json.dumps(data, default=str)}\n\n"
+                except TimeoutError:
+                    if await request.is_disconnected():
+                        return
+                    yield ": ping\n\n"
+        finally:
+            ctx().bus.unsubscribe(pid, q)
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/api/projects/{pid}/jobs")
+async def jobs(pid: str):
+    return [j.model_dump() for j in ctx().jobs.list(pid)]
+
+
+@app.get("/api/jobs/{job_id}")
+async def job(job_id: str):
+    j = ctx().jobs.get(job_id)
+    if not j:
+        raise KeyError(job_id)
+    return j.model_dump()
+
+
+@app.get("/api/projects/{pid}/audit")
+async def audit(pid: str):
+    rows = await ctx().store.list("tool_audit_logs", project_id=pid)
+    return [{**r["data"], "status": r["status"]} for r in reversed(rows)][:300]
+
+
+# ------------------------------------------------------------------ collect
+_render_lock = threading.Lock()
+_preview_env: dict[str, Any] = {}
+
+
+def _render_png(region: str, lighting: str, seed: int) -> bytes:
+    from PIL import Image
+
+    from ..sim.so101 import PickPlaceEnv, Variation
+    with _render_lock:
+        env = _preview_env.get("env")
+        if env is None:
+            env = _preview_env["env"] = PickPlaceEnv(height=240, width=320)
+        env.reset(seed, Variation(cube_region=region, lighting=lighting))
+        img = env.render_front()
+    buf = io.BytesIO()
+    Image.fromarray(img).save(buf, format="PNG")
+    return buf.getvalue()
+
+
+@app.get("/api/projects/{pid}/sim/frame")
+async def sim_frame(pid: str, cube_region: str = "center", lighting: str = "normal", seed: int = 0):
+    png = await asyncio.to_thread(_render_png, cube_region, lighting, seed)
+    return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/projects/{pid}/sim/live")
+async def sim_live(pid: str, request: Request):
+    path = ctx().local(f"{recording_service.live_key(pid)}/live.jpg")
+
+    async def gen():
+        last = 0.0
+        idle = 0
+        while not await request.is_disconnected():
+            try:
+                m = path.stat().st_mtime
+                if m != last:
+                    last, idle = m, 0
+                    data = path.read_bytes()
+                    yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " +
+                           str(len(data)).encode() + b"\r\n\r\n" + data + b"\r\n")
+            except FileNotFoundError:
+                pass
+            idle += 1
+            if idle > 20 * 60 * 5:
+                return
+            await asyncio.sleep(0.05)
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
+class RecordReq(BaseModel):
+    condition: Condition
+    seed: int | None = None
+    auto_accept: bool = False
+
+
+class RecordBatchReq(BaseModel):
+    conditions: list[Condition]
+    per_condition: int = 1
+    base_seed: int | None = None
+    auto_accept: bool = True
+
+
+@app.post("/api/projects/{pid}/recordings")
+async def record(pid: str, req: RecordReq, request: Request):
+    p = await orch.get_project(ctx(), pid)
+    job = await recording_service.start_recording(ctx(), p, [req.condition],
+                                                  [req.seed] if req.seed is not None else None,
+                                                  req.auto_accept, actor(request))
+    return job.model_dump()
+
+
+@app.post("/api/projects/{pid}/recordings/batch")
+async def record_batch(pid: str, req: RecordBatchReq, request: Request):
+    p = await orch.get_project(ctx(), pid)
+    conds = [c for c in req.conditions for _ in range(req.per_condition)]
+    seeds = [req.base_seed + i for i in range(len(conds))] if req.base_seed is not None else None
+    job = await recording_service.start_recording(ctx(), p, conds, seeds, req.auto_accept, actor(request))
+    return job.model_dump()
+
+
+@app.post("/api/recordings/{job_id}/stop")
+async def stop_recording(job_id: str):
+    j = await ctx().jobs.cancel(job_id)
+    if not j:
+        raise KeyError(job_id)
+    return j.model_dump()
+
+
+@app.get("/api/projects/{pid}/episodes")
+async def episodes(pid: str) -> list[Episode]:
+    return await recording_service.list_episodes(ctx(), pid)
+
+
+class StatusReq(BaseModel):
+    status: str
+
+
+@app.patch("/api/episodes/{eid}")
+async def patch_episode(eid: str, req: StatusReq, request: Request) -> Episode:
+    return await recording_service.set_status(ctx(), eid, EpisodeStatus(req.status), actor(request))
+
+
+@app.post("/api/projects/{pid}/episodes/accept-passing")
+async def accept_passing(pid: str, request: Request):
+    n = 0
+    for e in await recording_service.list_episodes(ctx(), pid):
+        if e.status == EpisodeStatus.recorded and e.success and e.quality and \
+                e.quality.score >= recording_service.AUTO_ACCEPT_MIN_SCORE:
+            await recording_service.set_status(ctx(), e.id, EpisodeStatus.accepted, actor(request))
+            n += 1
+    return {"accepted": n}
+
+
+@app.get("/api/episodes/{eid}/media")
+async def episode_media(eid: str):
+    e = await ctx().repo.get("episodes", eid, Episode)
+    if not e:
+        raise KeyError(eid)
+    return {"video_url": await ctx().media_url(e.artifacts["front"]) if "front" in e.artifacts else None,
+            "thumb_url": await ctx().media_url(e.artifacts["thumb"]) if "thumb" in e.artifacts else None,
+            "frames": e.num_frames}
+
+
+@app.get("/api/media")
+async def media(key: str):
+    return {"url": await ctx().media_url(key)}
+
+
+# ------------------------------------------------------------------ analyze
+class AnalyzeReq(BaseModel):
+    use_vlm: bool = True
+    max_vlm_episodes: int = 6
+
+
+@app.post("/api/projects/{pid}/analyses")
+async def analyze(pid: str, req: AnalyzeReq, request: Request):
+    job = await analysis_service.start_analysis(ctx(), await orch.get_project(ctx(), pid), req.use_vlm,
+                                                req.max_vlm_episodes, actor(request))
+    return job.model_dump()
+
+
+@app.get("/api/projects/{pid}/analyses/latest")
+async def latest_analysis(pid: str) -> Analysis | None:
+    return await analysis_service.latest_analysis(ctx(), pid)
+
+
+@app.get("/api/analyses/{aid}")
+async def get_analysis(aid: str) -> Analysis:
+    a = await ctx().repo.get("analyses", aid, Analysis)
+    if not a:
+        raise KeyError(aid)
+    return a
+
+
+@app.get("/api/projects/{pid}/failure-clusters")
+async def clusters(pid: str):
+    return await analysis_service.current_clusters(ctx(), pid)
+
+
+class LabelReq(BaseModel):
+    status: str
+    human_label: str | None = None
+
+
+@app.post("/api/analyses/{aid}/diagnoses/{ref:path}")
+async def label(aid: str, ref: str, req: LabelReq, request: Request):
+    return await analysis_service.label_diagnosis(ctx(), aid, ref, req.status, req.human_label, actor(request))
+
+
+# ------------------------------------------------------------------ improve
+class RecReq(BaseModel):
+    budget: int | None = None
+
+
+@app.post("/api/projects/{pid}/recommendations")
+async def recommend(pid: str, req: RecReq, request: Request):
+    return await recommendation_service.recommend(ctx(), await orch.get_project(ctx(), pid), req.budget,
+                                                  actor(request))
+
+
+@app.get("/api/projects/{pid}/recommendations")
+async def open_recs(pid: str):
+    return await recommendation_service.open_recommendations(ctx(), pid)
+
+
+@app.patch("/api/recommendations/{rid}")
+async def patch_rec(rid: str, req: StatusReq, request: Request):
+    return await recommendation_service.set_status(ctx(), rid, req.status, actor(request))
+
+
+@app.post("/api/projects/{pid}/datasets")
+async def create_dataset(pid: str, req: CreateDatasetVersionRequest, request: Request):
+    job = await dataset_service.create_version(ctx(), await orch.get_project(ctx(), pid), req, actor(request))
+    return job.model_dump()
+
+
+@app.get("/api/projects/{pid}/datasets")
+async def datasets(pid: str):
+    return await dataset_service.list_versions(ctx(), pid)
+
+
+class ProposeReq(BaseModel):
+    dataset_version_id: str
+    policy_type: str = "act"
+    steps: int | None = None
+
+
+@app.post("/api/projects/{pid}/training/proposals")
+async def propose(pid: str, req: ProposeReq, request: Request) -> TrainingJob:
+    return await training_service.propose(ctx(), await orch.get_project(ctx(), pid), req.dataset_version_id,
+                                          req.policy_type, req.steps, actor(request))
+
+
+class ApproveReq(BaseModel):
+    approver: str = "studio user"
+    approval_token: str | None = None
+
+
+@app.post("/api/training/{tid}/approve")
+async def approve(tid: str, req: ApproveReq, request: Request) -> TrainingJob:
+    return await training_service.approve(ctx(), tid, req.approver, actor(request), req.approval_token)
+
+
+@app.post("/api/training/{tid}/launch")
+async def launch(tid: str, request: Request) -> TrainingJob:
+    return await training_service.launch(ctx(), tid, actor(request))
+
+
+@app.get("/api/projects/{pid}/training")
+async def training(pid: str) -> list[TrainingJob]:
+    return await ctx().repo.list("training_jobs", TrainingJob, project_id=pid)
+
+
+@app.get("/api/training/{tid}/command")
+async def training_command(tid: str):
+    tj = await training_service._get(ctx(), tid)
+    return {"command": training_service.manual_command(ctx(), tj)}
+
+
+class CheckpointReq(BaseModel):
+    path: str
+    training_job_id: str | None = None
+    step: int | None = None
+
+
+@app.post("/api/projects/{pid}/checkpoints")
+async def register_checkpoint(pid: str, req: CheckpointReq, request: Request) -> Checkpoint:
+    return await training_service.register_checkpoint(ctx(), pid, req.training_job_id, req.path, req.step,
+                                                      actor(request))
+
+
+@app.get("/api/projects/{pid}/checkpoints")
+async def checkpoints(pid: str) -> list[Checkpoint]:
+    return await ctx().repo.list("checkpoints", Checkpoint, project_id=pid)
+
+
+@app.post("/api/projects/{pid}/evaluations")
+async def evaluate(pid: str, req: LaunchEvaluationRequest, request: Request):
+    run = await simulation_runner.launch_evaluation(ctx(), await orch.get_project(ctx(), pid), req, actor(request))
+    return await simulation_runner.get_evaluation(ctx(), run.id)
+
+
+@app.get("/api/evaluations/{evid}")
+async def get_eval(evid: str):
+    ev = await simulation_runner.get_evaluation(ctx(), evid)
+    if not ev:
+        raise KeyError(evid)
+    return ev
+
+
+@app.get("/api/projects/{pid}/evaluations")
+async def evals(pid: str):
+    return await simulation_runner.list_evaluations(ctx(), pid)
+
+
+class CompareReq(BaseModel):
+    evaluation_ids: list[str] | None = None
+
+
+@app.post("/api/projects/{pid}/comparisons")
+async def compare(pid: str, req: CompareReq):
+    return await experiment_comparison.compare(ctx(), pid, req.evaluation_ids)
+
+
+@app.get("/api/projects/{pid}/next-actions")
+async def next_actions(pid: str):
+    st = await orch.project_state(ctx(), await orch.get_project(ctx(), pid))
+    return st.next_actions
+
+
+@app.get("/api/projects/{pid}/graph")
+async def graph(pid: str):
+    from ..services.graph_service import build_graph
+    return await build_graph(ctx(), pid)
+
+
+# ------------------------------------------------------------------ agent demonstrations
+@app.get("/api/planner")
+async def planner():
+    from ..services.agent_collection_service import planner_status
+    return planner_status(ctx())
+
+
+@app.post("/api/projects/{pid}/agent-collections")
+async def start_agent_collection(pid: str, req: StartAgentCollectionRequest, request: Request):
+    from ..services import agent_collection_service as acs
+    return await acs.start_collection(ctx(), await orch.get_project(ctx(), pid), req, actor(request))
+
+
+@app.get("/api/projects/{pid}/agent-collections")
+async def agent_collections(pid: str):
+    from ..services import agent_collection_service as acs
+    return await acs.list_collections(ctx(), pid)
+
+
+@app.get("/api/agent-collections/{cid}")
+async def agent_collection(cid: str):
+    from ..services import agent_collection_service as acs
+    col = await acs.get_collection(ctx(), cid)
+    job = ctx().jobs.get(col.job_id or "")
+    return {"collection": col, "attempts": await acs.list_attempts(ctx(), col.project_id, cid),
+            "job": job.model_dump() if job else None}
+
+
+@app.post("/api/agent-collections/{cid}/stop")
+async def stop_agent_collection(cid: str, request: Request):
+    from ..services import agent_collection_service as acs
+    col = await acs.get_collection(ctx(), cid)
+    if col.job_id:
+        await ctx().jobs.cancel(col.job_id)
+    col.status = "cancelled"
+    await ctx().repo.save("agent_collections", col)
+    await ctx().audit(actor(request), "stop_agent_collection", col.project_id, {"collection_id": cid}, "ok", cid)
+    return col
+
+
+@app.get("/api/agent-collections/{cid}/live")
+async def agent_collection_live(cid: str):
+    """Steps of the attempt in progress (for reconnecting viewers); finished attempts have full traces."""
+    from ..services import agent_collection_service as acs
+    await acs.get_collection(ctx(), cid)
+    return acs.LIVE.get(cid, {"index": None, "start": None, "steps": []})
+
+
+@app.get("/api/projects/{pid}/planner-budget")
+async def planner_budget(pid: str):
+    from ..services import agent_collection_service as acs
+    p = await orch.get_project(ctx(), pid)
+    spent = await acs.spent_usd(ctx(), pid)
+    return {"budget_usd": p.autopilot.model_budget_usd, "spent_usd": spent,
+            "remaining_usd": round(p.autopilot.model_budget_usd - spent, 4)}
+
+
+@app.get("/api/projects/{pid}/agent-attempts")
+async def agent_attempts(pid: str):
+    from ..services import agent_collection_service as acs
+    return await acs.list_attempts(ctx(), pid)
+
+
+@app.get("/api/agent-attempts/{aid}")
+async def agent_attempt(aid: str):
+    from ..services import agent_collection_service as acs
+    return await acs.attempt_trace(ctx(), aid)
+
+
+@app.get("/api/projects/{pid}/collector-comparison")
+async def collector_comparison(pid: str):
+    from ..services import agent_collection_service as acs
+    return acs.compare_collectors(await acs.list_attempts(ctx(), pid))
+
+
+# ------------------------------------------------------------------ autopilot
+@app.post("/api/projects/{pid}/autopilot/start")
+async def ap_start(pid: str):
+    return await autopilot.start(ctx(), await orch.get_project(ctx(), pid))
+
+
+@app.post("/api/projects/{pid}/autopilot/stop")
+async def ap_stop(pid: str):
+    return await autopilot.stop(ctx(), pid)
+
+
+@app.get("/api/projects/{pid}/autopilot")
+async def ap_get(pid: str):
+    return await autopilot.current(ctx(), pid)
+
+
+@app.put("/api/projects/{pid}/autopilot/policy")
+async def ap_policy(pid: str, policy: dict, request: Request):
+    p = await orch.get_project(ctx(), pid)
+    p.autopilot = p.autopilot.model_validate({**p.autopilot.model_dump(), **policy})
+    await ctx().repo.save("projects", p, status="active")
+    await ctx().audit(actor(request), "set_autopilot_policy", pid, policy, "ok", "policy updated")
+    return p.autopilot
+
+
+# ------------------------------------------------------------------ agent
+class ChatReq(BaseModel):
+    message: str
+
+
+@app.post("/api/projects/{pid}/agent")
+async def chat(pid: str, req: ChatReq):
+    return StreamingResponse(agent.chat(ctx(), pid, req.message), media_type="text/event-stream")
+
+
+@app.get("/api/projects/{pid}/agent/history")
+async def history(pid: str):
+    return agent.HISTORY.get(pid, [])
+
+
+# ------------------------------------------------------------------ tools (MCP)
+@app.get("/api/tools")
+async def list_tools():
+    return [{"name": t.name, "description": t.description, "input_schema": t.args.model_json_schema(),
+             "agent_callable": t.agent_callable} for t in orch.TOOLS.values()]
+
+
+@app.post("/api/tools/{name}")
+async def call_tool(name: str, args: dict[str, Any], request: Request):
+    who = "mcp" if request.headers.get("x-cortex-actor", "mcp") != "agent" else "agent"
+    try:
+        return await orch.call_tool(ctx(), name, args, who)
+    except ValidationError as e:
+        raise HTTPException(422, e.errors(include_url=False)) from e

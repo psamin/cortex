@@ -1,4 +1,0 @@
-# ~16-24 GB GPU (measured on NVIDIA L4 24 GB, job 10453)
-sbatch: "--gres=gpu:l4:1 -c 8 --mem=48G"
-env: {DC_MODELS: "qwen3:4b qwen3:8b", OLLAMA_NUM_PARALLEL: 8, OLLAMA_MAX_LOADED_MODELS: 2, OLLAMA_CONTEXT_LENGTH: 4096, DC_WORKERS: 8}
-measured: {qwen3_4b_vram_gb: 7.4, both_models_vram_gb: 17.0, p50_latency_s_4b: 0.76, throughput_calls_s_at_16: 3.0}

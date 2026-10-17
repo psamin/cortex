@@ -1,0 +1,121 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+  Cortex tokens. Graphite workbench + one "servo amber" accent.
+  Provenance is the signature: measured things get solid edges, hypotheses
+  and fallbacks get dashed edges / hatching (see .prov-* below).
+*/
+:root,
+[data-theme="dark"] {
+  --bench: 17 18 20;      /* canvas */
+  --plate: 23 24 27;      /* panels, +~3% */
+  --rail: 31 33 37;       /* hover / popover */
+  --well: 13 14 16;       /* inputs are inset: darker */
+  --ink: 236 237 239;
+  --ink-2: 178 181 188;
+  --ink-3: 128 132 140;
+  --ink-4: 88 92 100;
+  --servo: 240 164 58;    /* accent */
+  --servo-ink: 24 16 4;   /* text on accent */
+  --pass: 74 196 128;
+  --fault: 236 96 96;
+  --caution: 226 196 84;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-soft: rgba(255, 255, 255, 0.05);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --hatch: rgba(255, 255, 255, 0.045);
+  /* chart series (validated reference categorical palette, fixed order) */
+  --series-1: #3987e5;
+  --series-2: #d95926;
+  --series-3: #199e70;
+  --series-4: #c98500;
+  color-scheme: dark;
+}
+
+[data-theme="light"] {
+  --bench: 246 246 244;
+  --plate: 255 255 255;
+  --rail: 238 238 235;
+  --well: 241 241 238;
+  --ink: 22 23 26;
+  --ink-2: 70 74 82;
+  --ink-3: 112 116 124;
+  --ink-4: 156 160 166;
+  --servo: 196 120 18;
+  --servo-ink: 255 250 240;
+  --pass: 22 140 78;
+  --fault: 200 52 52;
+  --caution: 160 120 0;
+  --line: rgba(0, 0, 0, 0.09);
+  --line-soft: rgba(0, 0, 0, 0.055);
+  --line-strong: rgba(0, 0, 0, 0.18);
+  --hatch: rgba(0, 0, 0, 0.04);
+  --series-1: #2a78d6;
+  --series-2: #eb6834;
+  --series-3: #1baf7a;
+  --series-4: #eda100;
+  color-scheme: light;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bench text-ink font-sans text-base;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  font-feature-settings: "cv11", "ss01";
+}
+
+h1, h2, h3 { text-wrap: balance; }
+p { text-wrap: pretty; }
+
+*:focus-visible {
+  outline: 2px solid rgb(var(--servo) / 0.7);
+  outline-offset: 1px;
+  border-radius: 4px;
+}
+
+.num { font-variant-numeric: tabular-nums; }
+
+/* Provenance marks */
+.prov-measured {
+  border: 1px solid var(--line-strong);
+}
+.prov-hypothesis {
+  border: 1px dashed rgb(var(--ink-3) / 0.55);
+  background-image: repeating-linear-gradient(
+    135deg,
+    var(--hatch) 0 1px,
+    transparent 1px 7px
+  );
+}
+.prov-fallback {
+  border: 1px dashed rgb(var(--caution) / 0.6);
+}
+
+.scroll-thin { scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+
+@keyframes pulse-dot { 0%, 100% { opacity: 1 } 50% { opacity: .35 } }
+.live-dot { animation: pulse-dot 1.4s ease-in-out infinite; }
+
+@keyframes shimmer { 0% { background-position: -200px 0 } 100% { background-position: 200px 0 } }
+.skeleton {
+  background: linear-gradient(90deg, rgb(var(--rail)) 0, rgb(var(--rail) / .4) 50%, rgb(var(--rail)) 100%);
+  background-size: 400px 100%;
+  animation: shimmer 1.2s linear infinite;
+}
+
+@keyframes enter { from { opacity: 0; transform: translateY(3px) } to { opacity: 1; transform: none } }
+.enter { animation: enter 180ms cubic-bezier(0.23, 1, 0.32, 1) both; }
+
+dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
+
+@media (prefers-reduced-motion: reduce) {
+  .live-dot, .skeleton, .enter { animation: none; }
+}

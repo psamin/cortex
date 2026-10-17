@@ -1,3 +1,0 @@
-# ~8 GB GPU: qwen3:4b only (7.4 GB measured at ctx 4096, NUM_PARALLEL 8 -> reduce both)
-sbatch: "--gres=gpu:1 -c 4 --mem=24G"
-env: {DC_MODELS: "qwen3:4b", OLLAMA_NUM_PARALLEL: 2, OLLAMA_MAX_LOADED_MODELS: 1, OLLAMA_CONTEXT_LENGTH: 2048, DC_WORKERS: 2}

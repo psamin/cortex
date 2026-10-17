@@ -1,3 +1,0 @@
-# CPU fallback: tests and the surrogate (non-LLM) pipeline only; no LLM inference on laptops.
-run: "scripts/run_local.sh"
-fast: {kind: surrogate}
