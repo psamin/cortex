@@ -1,0 +1,64 @@
+{
+  "timestamp": "2026-10-17T01:14:19.568091",
+  "config": {
+    "split": "dev",
+    "n_seeds": 5,
+    "envs": [
+      "MiniGrid-Dynamic-Obstacles-8x8-v0"
+    ],
+    "fast": {
+      "kind": "surrogate"
+    },
+    "defaults": {
+      "spec": {
+        "k": 3,
+        "horizon": 5,
+        "samples": 4,
+        "rollout_policy": "sim_bfs",
+        "candidates": "llm_rank"
+      },
+      "evaluator": {
+        "kind": "shaped"
+      }
+    },
+    "methods": [
+      {
+        "name": "A_greedy",
+        "agent": {
+          "trigger": "never"
+        }
+      },
+      {
+        "name": "B_always",
+        "agent": {
+          "trigger": "always"
+        }
+      },
+      {
+        "name": "C_selective_0.4",
+        "agent": {
+          "trigger": "threshold",
+          "threshold": 0.4
+        }
+      },
+      {
+        "name": "I_planner_sim",
+        "kind": "planner_sim"
+      }
+    ]
+  },
+  "git_commit": "0f964338e711c6fae7aa072e3fca905482edd7bb",
+  "git_dirty": true,
+  "python": "3.12.13 (main, Mar  3 2026, 12:39:30) [Clang 21.0.0 (clang-2100.0.123.102)]",
+  "platform": "macOS-27.0.1-arm64-arm-64bit",
+  "hostname": "ipsec-10-2-130-62.vpn.gatech.edu",
+  "slurm_job": null,
+  "gpu": null,
+  "packages": {
+    "minigrid": "3.0.0",
+    "gymnasium": "1.4.0",
+    "numpy": "2.5.4",
+    "pydantic": "2.14.1",
+    "httpx": "0.28.1"
+  }
+}
