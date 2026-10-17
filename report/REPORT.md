@@ -5,7 +5,7 @@
 **Held-out test (§2)** uses seeds 10000–10099. Method definitions were frozen in commit `d4b646d` before any test episode ran. The run was split across three GPU jobs for time, with identical definitions, and episodes were deduplicated by (method, seed). §1 and §3–§6 come from validation seeds 1000–1049, which informed the choices.
 
 ## TL;DR
-1. **Decision speculation works, and *where* you trigger it matters a lot.** Held-out test (100 seeds): risk-triggered speculation reaches 1.00 success at a 32% trigger rate, vs 0.37 for random triggering at a matched rate (paired +0.63, p<0.001), vs 0.17 for 4b greedy and 0.38 for 8b greedy. Validation numbers:
+1. **Decision speculation works, and *where* you trigger it matters a lot.** Held-out test (300 seeds): risk-triggered speculation reaches 1.00 success at a 30% trigger rate, vs 0.33 for random triggering at a matched rate (paired +0.67 [0.62, 0.73], p<0.001), vs 0.17 for 4b greedy and 0.41 for 8b greedy. **But the risk trigger is task-specific.** On DoorKey it never fires (0.00), while always-on rollouts reach 0.69. Validation numbers:
 
    | Method | Trigger rate | Success |
    |---|---|---|
@@ -108,6 +108,22 @@ Notes:
 - **Lossless drafting vs 8b greedy:** −0.04 [−0.16, +0.08], p=0.57. It's equivalent in success, as expected for a lossless method, at +649 model-s / ep.
 - **SwiftSage trigger vs 8b greedy:** −0.18 [−0.30, −0.06], p=0.006. Its stuck/repeat rule fires on only 8% of steps, and it misses imminent collisions.
 - **Best-of-K without rollouts vs 8b:** +0.17 [+0.04, +0.31], p=0.019. Observable-risk filtering helps, but far less than simulated rollouts (1.00).
+
+### 2a. Extension to 300 test seeds (key methods; seeds 10000–10299)
+`report/data/test_dyn8_300/`. These are the frozen definitions; seeds 10100–10299 ran in `test_dyn8_ext`.
+
+| Method | n | Success [95% CI] | Trigger rate | Model-s / ep |
+|---|---|---|---|---|
+| A greedy 4b | 300 | 0.17 [0.13, 0.21] | 0 | 124.3 |
+| L greedy 8b | 300 | 0.41 [0.35, 0.46] | 0 | 136.8 |
+| B always-on rollouts | 300 | **1.00** | 1.00 | **103.1** |
+| C risk only, 0.4 | 300 | **1.00** | 0.30 | 264.2 |
+| E random, 0.25 | 300 | 0.33 [0.28, 0.38] | 0.24 | 120.7 |
+
+Paired results:
+- Risk trigger vs matched random: **+0.673 [+0.620, +0.727]**, p<0.001.
+- Risk trigger vs always-on: Δ success 0.000, Δ model-s +161 [+146, +176].
+- 8b greedy vs always-on: −0.593 [−0.650, −0.537].
 
 ### 2b. Baseline H: extra model reasoning instead of rollouts (test seeds, n=100, 60-step cap)
 `report/data/test_dyn8_think/`
