@@ -21,10 +21,18 @@ DOWN = np.array([0.0, 0.0, -1.0])
 MAX_DEG_PER_STEP = 4.0
 
 
+def side_approach(xy: np.ndarray) -> np.ndarray:
+    """Horizontal approach axis pointing away from the arm base, for side grasps of tall objects."""
+    v = np.array([xy[0], xy[1], 0.0])
+    return v / (np.linalg.norm(v) or 1.0)
+
+
 def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw: float | None = None,
-             iters: int = 200, ori_weight: float = 0.3) -> tuple[np.ndarray, float]:
+             iters: int = 200, ori_weight: float = 0.3, approach: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """Joint degrees (5 arm joints) placing the gripper site at `target` with its
-    approach axis pointing down. Returns (q_deg, position error in metres)."""
+    approach axis along `approach` (default: pointing down, a top grasp).
+    Returns (q_deg, position error in metres)."""
+    axis = DOWN if approach is None else np.asarray(approach, dtype=np.float64)
     w = env.world
     m = w.model
     d = mujoco.MjData(m)
@@ -42,7 +50,7 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
         x = d.site_xpos[env.site]
         R = d.site_xmat[env.site].reshape(3, 3)
         e_p = target - x
-        e_o = np.cross(R[:, 0], DOWN) * ori_weight
+        e_o = np.cross(R[:, 0], axis) * ori_weight
         err_p = float(np.linalg.norm(e_p))
         if err_p < 1e-3 and np.linalg.norm(e_o) < 1e-2:
             break
@@ -52,7 +60,7 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
         dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), e)
         d.qpos[qadr] = np.clip(d.qpos[qadr] + np.clip(dq, -0.2, 0.2), lo, hi)
     q = np.rad2deg(d.qpos[qadr]).copy()
-    if yaw is not None:
+    if yaw is not None and approach is None:
         # Align the jaws with the cube faces: roll relative to the arm's pan angle.
         rel = (yaw - d.qpos[qadr[0]] + np.pi / 4) % (np.pi / 2) - np.pi / 4
         q[4] = np.clip(np.rad2deg(rel), np.rad2deg(lo[4]), np.rad2deg(hi[4]))
