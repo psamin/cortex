@@ -61,6 +61,7 @@ def run_task(client, ws, meta, speculator, max_steps=12, replay=False):
             out, ok = "finished", "ok"
         tool_s = time.perf_counter() - t1
         steps.append({"step": step, "op": op, "think_s": think_s, "tool_s": tool_s, "sched_s": sched_s,
+                      "t_think": t0 - t_task, "t_tool": t1 - t_task, "t_end": time.perf_counter() - t_task,
                       "fate": info["fate"], "llm_seconds": cost.llm_seconds, "gen_tokens": cost.gen_tokens,
                       "snapshot": snap, "prev_op": prev_op, "last_ok": last_ok, "family": meta["family"]})
         hist.append({"op": op, "out": out[-600:]})
@@ -70,4 +71,5 @@ def run_task(client, ws, meta, speculator, max_steps=12, replay=False):
     wall = time.perf_counter() - t_task
     final = execute("run_tests", ws)   # correctness check, outside the timed region
     return {"task": meta["task"], "family": meta["family"], "success": final["rc"] == 0, "wall_s": wall,
+            "t0": t_task,
             "steps": steps, "n_steps": len(steps)}

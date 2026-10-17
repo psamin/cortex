@@ -38,7 +38,7 @@ def run_split(split, client, policy, predictor, fp, replay, out_f, rep=0, run_ta
         pol = policy.split("_")[0].replace("topk2", "topk")
         sp = Speculator(pol, predictor, fp=fp, k=2)
         r = run_task(client, ws, meta, sp, replay=replay)
-        r["spec"] = sp.finalize()
+        r["spec"] = sp.finalize(r.get("t0"))
         r.update(policy=policy, split=split, rep=rep, run=run_tag)
         out_f.write(json.dumps(r) + "\n")
         out_f.flush()

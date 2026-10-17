@@ -146,8 +146,9 @@ class Speculator:
             self.results[key] = {"op": op, "snapshot": snap, "fp": self.fp, "fate": "memo", "future": f}
         return out, {"critical_s": crit, "reused": False, "fate": "executed"}
 
-    def finalize(self):
+    def finalize(self, t0=None):
         st = Counter()
+        events = []
         spec_cpu = wasted_cpu = spec_wall = copy_s = 0.0
         for rec in self.results.values():
             if rec["fate"] == "memo":
@@ -160,6 +161,9 @@ class Speculator:
             copy_s += rec.get("copy_overhead_s", 0.0)
             if fate == "unused":
                 wasted_cpu += out["cpu"]
+            if t0 is not None:
+                events.append({"op": rec["op"], "fate": fate, "launch": rec["launch"] - t0,
+                               "start": rec.get("start", rec["launch"]) - t0, "finish": rec.get("finish", rec["launch"]) - t0})
         self.pool.shutdown(wait=True)
         return {"launched": sum(st.values()), **dict(st), "spec_cpu_s": spec_cpu, "wasted_cpu_s": wasted_cpu,
-                "spec_wall_s": spec_wall, "copy_overhead_s": copy_s}
+                "spec_wall_s": spec_wall, "copy_overhead_s": copy_s, "events": events}

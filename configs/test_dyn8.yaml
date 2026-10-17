@@ -18,10 +18,15 @@ methods:
   - {name: C_sel_0.6, agent: {trigger: threshold, threshold: 0.6}}
   - {name: C_risk_only_0.4, agent: {trigger: threshold, threshold: 0.4, detector: {alpha: 0, beta: 0, gamma: 1}}}
   - {name: D_oracle, agent: {trigger: oracle, oracle_delta: 0.2, oracle_samples: 8}}
-  - {name: E_random_matched, agent: {trigger: random, rate: RATE_FROM_VAL}}
+  # random-trigger controls at the same pre-registered rates as val; the one matched to the
+  # val-selected C's val trigger rate is designated post hoc using VAL data only
+  - {name: E_random_0.25, agent: {trigger: random, rate: 0.25}}
+  - {name: E_random_0.5, agent: {trigger: random, rate: 0.5}}
   - {name: G_bestofk_norollout, agent: {trigger: always, resolve: norollout}}
   - {name: I_planner_sim, kind: planner_sim}
   - {name: I_planner_obs, kind: planner_obs}
   - {name: J_verify_sel_0.4, agent: {trigger: threshold, threshold: 0.4, resolve: verify}}
   - {name: K_specdraft_L4, agent: {mode: spec_draft, plan_len: 4}}
+  - {name: K2_lossless_draft_L4, agent: {mode: spec_draft_lossless, plan_len: 4}}
+  - {name: S_swiftsage_cascade, agent: {trigger: swiftsage, resolve: cascade}}
   - {name: N_mcts_sel_0.4, agent: {trigger: threshold, threshold: 0.4, resolve: mcts, mcts_iterations: 60, mcts_depth: 8}}
