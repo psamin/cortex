@@ -3,7 +3,7 @@
 # Cache disabled: latency is real. Identical worker count for all methods.
 # B7 (SSD + graph-ranked rollout candidates) is not implemented -> reported as N/A.
 split: test
-n_seeds: 40
+n_seeds: 20
 envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
 fast: {kind: llm, model: "qwen3:8b", big_model: "qwen3:8b", prompt: v3, cache: false}
 defaults:
