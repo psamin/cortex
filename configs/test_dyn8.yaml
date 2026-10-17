@@ -1,0 +1,27 @@
+# Phase 4: HELD-OUT TEST, seeds 10000-10099. Configuration frozen before this run. The
+# primary selective threshold is chosen on validation by a pre-stated rule (see
+# report: highest val success among thresholds whose trigger rate <= 0.5; ties -> lower
+# compute). Other thresholds are run as reported ablations, not used for selection.
+split: test
+n_seeds: 100
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: A_greedy, agent: {trigger: never}}
+  - {name: L_greedy_8b, fast: {model: "qwen3:8b"}, agent: {trigger: never}}
+  - {name: B_always, agent: {trigger: always}}
+  - {name: C_sel_0.4, agent: {trigger: threshold, threshold: 0.4}}
+  - {name: C_sel_0.6, agent: {trigger: threshold, threshold: 0.6}}
+  - {name: C_risk_only_0.4, agent: {trigger: threshold, threshold: 0.4, detector: {alpha: 0, beta: 0, gamma: 1}}}
+  - {name: D_oracle, agent: {trigger: oracle, oracle_delta: 0.2, oracle_samples: 8}}
+  - {name: E_random_matched, agent: {trigger: random, rate: RATE_FROM_VAL}}
+  - {name: G_bestofk_norollout, agent: {trigger: always, resolve: norollout}}
+  - {name: I_planner_sim, kind: planner_sim}
+  - {name: I_planner_obs, kind: planner_obs}
+  - {name: J_verify_sel_0.4, agent: {trigger: threshold, threshold: 0.4, resolve: verify}}
+  - {name: K_specdraft_L4, agent: {mode: spec_draft, plan_len: 4}}
+  - {name: N_mcts_sel_0.4, agent: {trigger: threshold, threshold: 0.4, resolve: mcts, mcts_iterations: 60, mcts_depth: 8}}

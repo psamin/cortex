@@ -11,7 +11,10 @@ cleanup() {
 }
 trap cleanup EXIT TERM INT
 
-export OLLAMA_HOST="127.0.0.1:${DC_OLLAMA_PORT:-11434}"
+# Unique port per job: several jobs can share a node, and a second server on the same
+# port silently fails to bind (requests would then hit another job's server).
+export DC_OLLAMA_PORT="${DC_OLLAMA_PORT:-$((20000 + SLURM_JOB_ID % 20000))}"
+export OLLAMA_HOST="127.0.0.1:${DC_OLLAMA_PORT}"
 export OLLAMA_MODELS="$SCR/models"
 export OLLAMA_NUM_PARALLEL="${OLLAMA_NUM_PARALLEL:-8}"
 export OLLAMA_MAX_LOADED_MODELS="${OLLAMA_MAX_LOADED_MODELS:-2}"
@@ -35,6 +38,7 @@ ollama --version || true
 ollama serve > "${DC_LOG_DIR:-.}/ollama-${SLURM_JOB_ID}.log" 2>&1 &
 OLLAMA_PID=$!
 for i in $(seq 1 60); do curl -fs "http://$OLLAMA_HOST/api/version" >/dev/null && break; sleep 1; done
+kill -0 "$OLLAMA_PID" 2>/dev/null || { echo "FATAL: ollama serve exited (port $DC_OLLAMA_PORT in use?)" >&2; exit 1; }
 for m in ${DC_MODELS:-qwen3:4b}; do ollama pull "$m"; done
 cd - >/dev/null
 

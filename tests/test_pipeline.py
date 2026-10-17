@@ -7,7 +7,6 @@ from dreamcache.detection.uncertainty import normalized_entropy
 from dreamcache.environments.cloning import state_fingerprint
 from dreamcache.environments.minigrid_adapter import make_env
 from dreamcache.experiments.runner import run_episode
-from dreamcache.policies.heuristic import SimBFSPolicy
 from dreamcache.policies.ollama_policy import parse_reply
 from dreamcache.policies.surrogate import SurrogatePolicy
 from dreamcache.speculation.executor import SpecConfig
@@ -77,3 +76,29 @@ def test_mcts_does_not_mutate_env():
     before = state_fingerprint(env)
     a, stats, cost = mcts_decide(env, [0, 1, 2], 20, 6, EvalConfig(), seed=0)
     assert state_fingerprint(env) == before and a in (0, 1, 2) and cost.sim_steps > 0
+
+
+def test_lossless_spec_actions_match_actor():
+    """Executed actions must be the actor's (big model's) own decisions."""
+    from dreamcache.agents.lossless import LosslessSpecAgent
+    from dreamcache.environments.observations import features
+    from dreamcache.types import Cost, Decision
+
+    class Actor:  # deterministic stand-in actor (a pure function of the observation)
+        def decide(self, obs, history):
+            a = 1 if features(obs).front_blocked or len(history) % 4 == 3 else 2
+            return Decision(a, {0: 0.2, 1: 0.3, 2: 0.5}, Cost(llm_calls=1))
+
+    env, obs = make_env(DYN, 5)
+    ag = LosslessSpecAgent(Actor(), None, [0, 1, 2], guessers=["obs_heuristic"])
+    ref = Actor()
+    hist = []
+    for t in range(12):
+        a, rec = ag.act(env, obs, hist, t)
+        assert a == ref.decide(obs, hist).action
+        obs, r, term, trunc, _ = env.step(a)
+        hist.append(a)
+        if term or trunc:
+            break
+    st = ag.finalize()
+    assert st["hits"] + st["misses"] == len(hist)

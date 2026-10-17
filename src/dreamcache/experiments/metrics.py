@@ -30,7 +30,18 @@ def episode_metrics(ep: dict) -> dict:
          "decision_latency_mean": float(np.mean(lat)) if lat else 0.0}
     for k in COST_KEYS:
         m[k] = float(sum(c.get(k, 0) for c in costs))
+    if ep.get("extra"):  # lossless speculation: actor calls incl. wasted prefetches
+        ex = ep["extra"]
+        for k in COST_KEYS:
+            m[k] += float(ex["actor_cost"].get(k, 0))
+        m["prefetch_hit_rate"] = ex["hits"] / max(1, ex["hits"] + ex["misses"])
+        m["actor_calls_per_step"] = ex["actor_calls"] / max(1, len(recs))
     # Total compute proxy: model-server seconds + simulator CPU seconds (reported separately too).
     m["compute_seconds"] = m["llm_seconds"] + m["sim_cpu_seconds"]
+    acc = [r["verify_accept"] for r in recs if "verify_accept" in r]
+    m["verify_accept_rate"] = float(np.mean(acc)) if acc else float("nan")
+    drafts = [r for r in recs if "draft" in r]
+    m["draft_accepted_mean"] = float(np.mean([r["accepted"] for r in drafts])) if drafts else float("nan")
+    m["draft_calls_per_step"] = len(drafts) / len(recs) if drafts and recs else float("nan")
     m["_latencies"] = lat
     return m

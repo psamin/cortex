@@ -20,7 +20,7 @@ from dreamcache.experiments.statistics import bootstrap_ci, paired_diff  # noqa:
 
 COLS = ["success", "failure", "return", "steps", "trigger_rate", "llm_calls", "gen_tokens",
         "llm_seconds", "sim_steps", "sim_cpu_seconds", "compute_seconds", "episode_seconds",
-        "decision_latency_mean"]
+        "decision_latency_mean", "verify_accept_rate", "draft_accepted_mean", "draft_calls_per_step", "prefetch_hit_rate", "actor_calls_per_step"]
 
 
 def main(argv=None):
@@ -44,7 +44,8 @@ def main(argv=None):
     for (env, meth), ms in sorted(by.items()):
         s = {"env": env, "method": meth, "n": len(ms)}
         for c in COLS:
-            mean, lo, hi = bootstrap_ci([m[c] for m in ms])
+            vals = [m[c] for m in ms if c in m and not (isinstance(m[c], float) and np.isnan(m[c]))]
+            mean, lo, hi = bootstrap_ci(vals)
             s[c], s[c + "_lo"], s[c + "_hi"] = mean, lo, hi
         lat = np.concatenate([m["_latencies"] for m in ms]) if ms else np.array([0.0])
         s.update({f"lat_p{q}": float(np.percentile(lat, q)) for q in (50, 95, 99)})

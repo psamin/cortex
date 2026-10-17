@@ -16,7 +16,7 @@ import sys
 import time
 import traceback
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import fields, is_dataclass
+from dataclasses import fields
 from importlib import metadata
 
 import yaml
@@ -58,6 +58,7 @@ def make_fast(spec: dict, legal, seed, family="dynamic"):
         return SurrogatePolicy(legal, seed=seed, eps=spec.get("eps", 0.25))
     from dreamcache.policies.ollama_policy import LLMPolicy, OllamaClient
     client = OllamaClient(model=spec.get("model", "qwen3:4b"), think=spec.get("think", False),
+                          cache_path="" if spec.get("cache") is False else None,
                           num_predict=spec.get("num_predict", 1024 if spec.get("think") else
                                                160 if spec.get("prompt") == "v3" else 80))
     return LLMPolicy(client, legal, proposal_temperature=spec.get("proposal_temperature", 1.0),
@@ -69,13 +70,18 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
     env, obs = make_env(env_id, seed)
     kind = method.get("kind", "agent")
     t_start = time.perf_counter()
-    steps, records, history = [], [], []
+    records, history = [], []
     total_r, success, failure = 0.0, False, False
     if kind == "agent":
         fast = make_fast(fast_spec, legal, seed, family)
         big = (make_fast({**fast_spec, "model": fast_spec["big_model"]}, legal, seed, family)
                if fast_spec.get("big_model") else None)
         agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed, big=big)
+    elif kind == "lossless":
+        from dreamcache.agents.lossless import LosslessSpecAgent
+        small = make_fast(fast_spec, legal, seed, family)
+        big = make_fast({**fast_spec, "model": fast_spec["big_model"]}, legal, seed, family)
+        agent = LosslessSpecAgent(big, small, legal, guessers=method.get("guessers", ["obs_heuristic"]), seed=seed)
     elif kind == "planner_sim":
         planner = SimBFSPolicy()
     elif kind == "planner_obs":
@@ -84,7 +90,7 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
         planner = RandomPolicy(legal, seed)
     limit = max_steps or env.unwrapped.max_steps
     for t in range(limit):
-        if kind == "agent":
+        if kind in ("agent", "lossless"):
             a, rec = agent.act(env, obs, history, t)
         else:
             t0 = time.perf_counter()
@@ -99,7 +105,8 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
         if term or trunc:
             success, failure = is_success(r, term), is_failure(r, term)
             break
-    return {"env": env_id, "seed": seed, "method": method["name"], "success": success,
+    extra = agent.finalize() if kind == "lossless" else None
+    return {"env": env_id, "seed": seed, "method": method["name"], "success": success, "extra": extra,
             "failure": failure, "return": total_r, "steps": len(records),
             "episode_seconds": time.perf_counter() - t_start, "records": records}
 
