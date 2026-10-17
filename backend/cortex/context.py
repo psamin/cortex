@@ -29,6 +29,7 @@ class Ctx:
     data_dir: Path
     openrouter_key: str | None = None
     vlm_source: str = "disabled"
+    gateway_error: str | None = None  # why the InsForge Model Gateway gave no key (e.g. plan restriction)
     notes: list[str] = field(default_factory=list)
 
     # ------------------------------------------------------------ files
@@ -80,7 +81,7 @@ async def build_ctx(s: Settings) -> Ctx:
     store: Store
     blobs: BlobStore
     if s.insforge_enabled:
-        from .store.insforge import InsForgeBlobStore, InsForgeStore, fetch_openrouter_key
+        from .store.insforge import InsForgeBlobStore, InsForgeStore
 
         store = InsForgeStore(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
         blobs = InsForgeBlobStore(s.insforge_base_url, s.insforge_api_key, s.insforge_bucket)  # type: ignore[arg-type]
@@ -91,17 +92,19 @@ async def build_ctx(s: Settings) -> Ctx:
     await store.init()
     await blobs.init()
 
-    key, src = None, "disabled"
+    key, src, gw_err = None, "disabled", None
     if s.openrouter_api_key:
         key, src = s.openrouter_api_key, "openrouter (OPENROUTER_API_KEY)"
     elif s.insforge_enabled:
-        from .store.insforge import fetch_openrouter_key
+        from .store.insforge import gateway_key
 
-        key = await fetch_openrouter_key(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
+        key, gw_err = await gateway_key(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
         src = "insforge model gateway (openrouter)" if key else "disabled"
     if not key:
-        notes.append("No VLM key: VLM diagnostics disabled; telemetry-based failure analysis still runs.")
+        why = f"InsForge Model Gateway: {gw_err}" if gw_err else "no InsForge Model Gateway key"
+        notes.append(f"Models disabled ({why}). GPT-6 Astra planning and VLM diagnostics are off; the scripted "
+                     "oracle, telemetry analysis and everything else still run.")
 
     bus = EventBus()
     return Ctx(settings=s, store=store, blobs=blobs, repo=Repo(store), bus=bus, jobs=JobManager(bus),
-               data_dir=s.data_dir, openrouter_key=key, vlm_source=src, notes=notes)
+               data_dir=s.data_dir, openrouter_key=key, vlm_source=src, gateway_error=gw_err, notes=notes)

@@ -8,11 +8,11 @@ when the provider is not configured. `GET /api/health` reports the active provid
 |---|---|---|---|
 | Simulation | `lerobot/so101-tabletop-mujoco` @ `12e504e8` (EnvHub, Apache-2.0), MuJoCo 3.16 | **verified** on macOS arm64 | none needed |
 | Datasets | LeRobotDataset v3 via `lerobot==0.6.1` | **verified** (written, reloaded by LeRobot) | none needed |
-| Metadata DB | InsForge Postgres (REST records API, migrations API) | implemented, unverified | SQLite (**verified**) |
-| Asset storage | InsForge storage, private bucket, presigned download URLs | implemented, unverified | local disk (**verified**) |
-| VLM diagnostics | InsForge Model Gateway → OpenRouter → `anthropic/claude-sonnet-5.5` | implemented, unverified | VLM step skipped and disclosed; telemetry and quality analysis still run |
+| Metadata DB | InsForge Postgres (REST records API, migrations API) | **verified** on InsForge Cloud 2.3.4 (us-west), 2026-10-17: migrations 001–003 applied, full e2e smoke 18/18 | SQLite (**verified**) |
+| Asset storage | InsForge storage, private bucket, presigned download URLs | **verified**: private `cortex-assets` bucket, videos/npz/LeRobot files uploaded, signed `cdn.insforge.dev` URLs play without auth | local disk (**verified**) |
+| VLM diagnostics | InsForge Model Gateway → OpenRouter → `anthropic/claude-sonnet-5.5` | **blocked by plan**: the project's org is on a free plan; `/api/ai/*` returns 403 "AI is only available on paid plans" | VLM step skipped and disclosed; telemetry and quality analysis still run |
 | Studio agent | same gateway, OpenAI-compatible tool calling | implemented, unverified | deterministic intent planner (**verified**) |
-| Manipulation planner | GPT-6 Astra: InsForge gateway → OpenRouter `openai/gpt-6-astra` (catalog lists image input, tools, structured outputs), the only route | planner loop **verified against a local stub**; no real Astra call yet (no key) | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
+| Manipulation planner | GPT-6 Astra: InsForge gateway → OpenRouter `openai/gpt-6-astra` (catalog lists image input, tools, structured outputs), the only route | planner loop **verified against a local stub**; no real Astra call yet: blocked until the InsForge org is on a paid plan | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
 | Training | ACT via `lerobot-train` on GT Futurama Slurm over SSH | implemented, unverified (VPN was off) | manual command bundle + checkpoint registration |
 | MCP | mcp-use v2 server, Manufact hosting | see [mcp/README.md](../mcp/README.md) | local MCP server |
 | Evaluation workers | parallel local processes | **verified** | n/a |
