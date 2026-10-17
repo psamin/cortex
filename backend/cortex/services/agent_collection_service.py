@@ -65,9 +65,10 @@ def resolve_planner(ctx: Ctx) -> dict[str, Any] | None:
 def planner_status(ctx: Ctx) -> dict[str, Any]:
     p = resolve_planner(ctx)
     if not p:
-        return {"available": False, "model": "gpt-6-astra", "provider": None,
-                "reason": "No InsForge Model Gateway key: set INSFORGE_BASE_URL and INSFORGE_API_KEY "
-                          "(self-hosted InsForge: OPENROUTER_API_KEY)."}
+        reason = (f"InsForge Model Gateway: {ctx.gateway_error}" if ctx.gateway_error else
+                  "No InsForge Model Gateway key: set INSFORGE_BASE_URL and INSFORGE_API_KEY "
+                  "(self-hosted InsForge: OPENROUTER_API_KEY).")
+        return {"available": False, "model": "gpt-6-astra", "provider": None, "reason": reason}
     return {"available": True, "model": p["model"], "provider": p["provider"], "route": p["label"],
             "pricing_per_m_tokens": {"input": 10.0, "output": 50.0}}
 
