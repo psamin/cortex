@@ -23,6 +23,11 @@ Media is never streamed. Episodes and evaluations come back as ids and storage k
 | `cortex.compare_experiments` | `compare_experiments` | read-only |
 | `cortex.get_next_actions` | `get_next_actions` | read-only |
 | `cortex.get_job` | `get_job` | read-only; poll background jobs |
+| `cortex.start_intake` | `start_intake` | spec v2: creates a draft project; returns typed questions, each with a ready-to-send `patch` |
+| `cortex.update_intake` | `update_intake` | merges a partial spec; lists merge by `name`; unknown keys are rejected |
+| `cortex.get_intake_status` | `get_intake_status` | read-only |
+| `cortex.build_simulation` | `build_simulation` | builds the MuJoCo scene, checks feasibility; returns a preview image |
+| `cortex.capture_frame` | `capture_frame` | read-only; returns an image of `top`, `front` or `wrist_cam` |
 
 There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an agent through the whole loop: create the project, record demonstrations, analyze, recommend, build a dataset version, propose training, ask the human for approval, evaluate in simulation, compare, and get the next actions.
 

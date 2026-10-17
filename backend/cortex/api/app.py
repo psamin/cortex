@@ -236,7 +236,7 @@ async def simulation_build(pid: str, request: Request):
     from ..services import intake_service
 
     out = await intake_service.build_simulation(ctx(), await orch.get_project(ctx(), pid), actor(request))
-    out["preview"].pop("image_jpeg_base64", None)
+    out["preview"].pop("image_b64", None)
     return out
 
 
@@ -247,7 +247,7 @@ async def simulation_frame(pid: str, camera: str = "top", seed: int = 0):
     from ..services import intake_service
 
     out = await intake_service.capture_frame(ctx(), await orch.get_project(ctx(), pid), camera, seed)
-    return Response(base64.b64decode(out["image_jpeg_base64"]), media_type="image/jpeg",
+    return Response(base64.b64decode(out["image_b64"]), media_type="image/jpeg",
                     headers={"Cache-Control": "no-store"})
 
 

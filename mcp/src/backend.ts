@@ -112,6 +112,7 @@ export async function callTool(tool: string, args: Json, signal?: AbortSignal): 
       ),
       structuredContent: data,
     };
+)
   }
   if (res.status === 403 && data.approval_required === true) return approvalRequired(tool, args, detail);
   if (res.status === 403) {

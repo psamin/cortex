@@ -55,7 +55,7 @@ def test_agent_intake_to_simulation(client):
     out = tool(client, "build_simulation", project_id=pid)
     f = out["feasibility"]
     assert f["objects"][0]["grasp_mode"] == "side" and f["objects"][0]["grasp"]["ok"]
-    assert base64.b64decode(out["image_jpeg_base64"])[:2] == b"\xff\xd8"
+    assert base64.b64decode(out["image_b64"])[:2] == b"\xff\xd8"
 
     fr = tool(client, "capture_frame", project_id=pid, camera="front")
     assert fr["source"] == "sim" and fr["key"].endswith(".jpg")

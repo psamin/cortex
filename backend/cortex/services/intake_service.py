@@ -149,5 +149,5 @@ async def capture_frame(ctx: Ctx, p: Project, camera: str = "top", seed: int = 0
     await ctx.blobs.put_bytes(key, jpg, "image/jpeg")
     out = {"camera": camera, "source": "sim", "scene": info.digest, "key": key, "url": await ctx.media_url(key)}
     if inline:
-        out["image_jpeg_base64"] = base64.b64encode(jpg).decode()
+        out["image_b64"] = base64.b64encode(jpg).decode()
     return out

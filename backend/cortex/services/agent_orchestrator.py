@@ -742,7 +742,7 @@ async def t_build_sim(ctx, a, actor):
     out = await intake_service.build_simulation(ctx, await get_project(ctx, a.project_id), actor)
     f = out["feasibility"]
     return {"summary": f"Scene {out['scene']['digest']} built; {f['summary']}", "ref_ids": [a.project_id],
-            "image_jpeg_base64": out["preview"].pop("image_jpeg_base64", None), **out}
+            "image_b64": out["preview"].pop("image_b64", None), **out}
 
 
 async def t_capture_frame(ctx, a, actor):
