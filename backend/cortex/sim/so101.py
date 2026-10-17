@@ -77,14 +77,17 @@ class Variation:
 class PickPlaceEnv:
     """Gymnasium-style wrapper (reset/step) around the EnvHub SO101Env."""
 
-    def __init__(self, height: int = IMG_H, width: int = IMG_W, episode_steps: int = 300):
+    def __init__(self, height: int = IMG_H, width: int = IMG_W, episode_steps: int = 300,
+                 scene: str | None = None, instruction: str = TASK_TEXT):
         m = envhub_module()
         self.module = m
         cfg = {**m.DEFAULTS}
         # Our reset places the task cube itself; keep only joint noise and camera jitter.
         cfg["randomize"] = {"joints": 2.0, "cameras": cfg["randomize"].get("cameras", {})}
         cfg.update(cameras=CAMERAS, observation_height=height, observation_width=width,
-                   instruction=TASK_TEXT, episode_length=episode_steps)
+                   instruction=instruction, episode_length=episode_steps)
+        if scene is not None:  # a generated scene (sim/scene.py); None = the upstream tabletop
+            cfg["scene"] = scene
         self.env = m.SO101Env(**cfg)
         self.episode_steps = episode_steps
         self.world = None
