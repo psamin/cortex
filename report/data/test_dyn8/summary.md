@@ -1,4 +1,4 @@
-Episodes with runner errors (excluded, listed in episodes.jsonl): 0; duplicate (method, seed) episodes skipped: 42
+Episodes with runner errors (excluded, listed in episodes.jsonl): 0; duplicate (method, seed) episodes skipped: 57
 
 | env | method | n | success [95% CI] | collision | steps | trigger rate | LLM calls/ep | model-s/ep | sim CPU-s/ep | episode s | lat p50/p95 (s) |
 |---|---|---|---|---|---|---|---|---|---|---|---|
@@ -15,7 +15,7 @@ Episodes with runner errors (excluded, listed in episodes.jsonl): 0; duplicate (
 | Dynamic-Obstacles-8x8-v0 | I_planner_sim | 100 | 1.00 [1.00, 1.00] | 0.00 | 18.7 | 0.00 | 0.0 | 0.0 | 0.00 | 0.0 | 0.00/0.00 |
 | Dynamic-Obstacles-8x8-v0 | J_verify_sel_0.4 | 100 | 0.42 [0.33, 0.52] | 0.58 | 32.8 | 0.92 | 161.3 | 1607.5 | 0.00 | 652.9 | 16.50/31.69 |
 | Dynamic-Obstacles-8x8-v0 | K2_lossless_draft_L4 | 100 | 0.34 [0.25, 0.43] | 0.66 | 27.8 | 0.64 | 73.7 | 773.3 | 0.00 | 263.2 | 14.20/17.50 |
-| Dynamic-Obstacles-8x8-v0 | K_specdraft_L4 | 15 | 0.40 [0.13, 0.67] | 0.60 | 91.8 | 1.00 | 183.6 | 520.2 | 0.00 | 506.1 | 5.58/7.67 |
+| Dynamic-Obstacles-8x8-v0 | K_specdraft_L4 | 100 | 0.09 [0.04, 0.15] | 0.22 | 213.9 | 1.00 | 427.7 | 909.4 | 0.00 | 809.3 | 4.29/4.90 |
 | Dynamic-Obstacles-8x8-v0 | L_greedy_8b | 100 | 0.38 [0.29, 0.48] | 0.62 | 29.1 | 0.00 | 29.1 | 124.7 | 0.00 | 121.8 | 4.72/5.77 |
 | Dynamic-Obstacles-8x8-v0 | N_mcts_sel_0.4 | 100 | 1.00 [1.00, 1.00] | 0.00 | 24.2 | 0.89 | 96.6 | 1080.1 | 3.26 | 547.8 | 24.23/27.29 |
 | Dynamic-Obstacles-8x8-v0 | S_swiftsage_cascade | 100 | 0.20 [0.12, 0.28] | 0.80 | 21.3 | 0.08 | 24.1 | 142.7 | 0.00 | 139.0 | 6.59/10.89 |
@@ -48,8 +48,8 @@ Paired differences on common seeds (method minus reference; 95% bootstrap CI; bo
 | Dynamic-Obstacles-8x8-v0 | J_verify_sel_0.4 | B_always | -0.580 [-0.680, -0.480] p=0.000 | +1504.351 [+1309.872, +1704.759] p=0.000 | +568.848 [+476.067, +665.572] p=0.000 |
 | Dynamic-Obstacles-8x8-v0 | K2_lossless_draft_L4 | A_greedy | +0.170 [+0.050, +0.290] p=0.007 | +654.607 [+539.577, +773.744] p=0.000 | +151.051 [+109.670, +193.537] p=0.000 |
 | Dynamic-Obstacles-8x8-v0 | K2_lossless_draft_L4 | B_always | -0.660 [-0.750, -0.570] p=0.000 | +670.156 [+558.904, +785.643] p=0.000 | +179.145 [+142.416, +217.211] p=0.000 |
-| Dynamic-Obstacles-8x8-v0 | K_specdraft_L4 | A_greedy | +0.333 [+0.000, +0.600] p=0.051 | +434.608 [+261.480, +598.803] p=0.000 | +421.200 [+250.816, +581.868] p=0.000 |
-| Dynamic-Obstacles-8x8-v0 | K_specdraft_L4 | B_always | -0.600 [-0.867, -0.333] p=0.000 | +437.917 [+252.910, +615.476] p=0.000 | +439.244 [+256.026, +612.301] p=0.000 |
+| Dynamic-Obstacles-8x8-v0 | K_specdraft_L4 | A_greedy | -0.080 [-0.170, +0.010] p=0.092 | +790.673 [+721.174, +856.680] p=0.000 | +697.130 [+634.449, +757.381] p=0.000 |
+| Dynamic-Obstacles-8x8-v0 | K_specdraft_L4 | B_always | -0.910 [-0.960, -0.850] p=0.000 | +806.223 [+739.768, +869.076] p=0.000 | +725.225 [+666.168, +782.824] p=0.000 |
 | Dynamic-Obstacles-8x8-v0 | L_greedy_8b | A_greedy | +0.210 [+0.110, +0.310] p=0.000 | +6.015 [-18.667, +31.402] p=0.635 | +9.633 [-13.552, +33.719] p=0.429 |
 | Dynamic-Obstacles-8x8-v0 | L_greedy_8b | B_always | -0.620 [-0.710, -0.520] p=0.000 | +21.564 [+2.393, +41.502] p=0.032 | +37.727 [+18.709, +57.314] p=0.000 |
 | Dynamic-Obstacles-8x8-v0 | N_mcts_sel_0.4 | A_greedy | +0.830 [+0.750, +0.900] p=0.000 | +964.724 [+898.799, +1033.329] p=0.000 | +435.593 [+398.303, +473.874] p=0.000 |

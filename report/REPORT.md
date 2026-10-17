@@ -2,7 +2,7 @@
 
 **Scope.** All numbers come from runs on GT Futurama GPUs (H200 and L4) with qwen3:4b / qwen3:8b served by Ollama 0.12.6 (`think: false`). Run directories, manifests, and the scripts that produced every table are listed in [Reproduce](#reproduce). Methods and definitions are in [METHODS.md](METHODS.md). Experiment 2 (graph-based predictive execution) is reported separately in [experiments/speculative_graph/REPORT.md](../experiments/speculative_graph/REPORT.md).
 
-**Held-out test (§2)** uses seeds 10000–10099. Method definitions were frozen in commit `d4b646d` before any test episode ran. The run was split across three GPU jobs for time, with identical definitions, and episodes were deduplicated by (method, seed). §1 and §3–§6 come from validation seeds 1000–1049, which informed the choices.
+**Held-out test (§2)** uses seeds 10000–10099. Method definitions were frozen in commit `d4b646d` before any test episode ran. The run was split across GPU jobs for time, with identical definitions, and episodes were deduplicated by (method, seed). §1 and §3–§6 come from validation seeds 1000–1049, which informed the choices.
 
 ## TL;DR
 1. **Decision speculation works, and *where* you trigger it matters a lot.** Held-out test (300 seeds): risk-triggered speculation reaches 1.00 success at a 30% trigger rate, vs 0.33 for random triggering at a matched rate (paired +0.67 [0.62, 0.73], p<0.001), vs 0.17 for 4b greedy and 0.41 for 8b greedy. **But the risk trigger is task-specific.** On DoorKey it never fires (0.00), while always-on rollouts reach 0.69. Validation numbers:
@@ -95,7 +95,7 @@ Notes:
 | G best-of-K, no rollouts | 0.55 [0.45, 0.65] | 0.45 | 39.9 | 1.00 | 39.9 | 213.3 | 0 |
 | J 4b draft → 8b verify on trigger | 0.42 [0.33, 0.52] | 0.58 | 32.8 | 0.92 | 161.3 | 1607.5 | 0 |
 | K2 lossless speculative drafting, L=4 | 0.34 [0.25, 0.43] | 0.66 | 27.8 | 0.64 | 73.7 | 773.3 | 0 |
-| K plan drafting, self-reported (n=15, stopped early) | 0.40 [0.13, 0.67] | 0.60 | 91.8 | 1.00 | 183.6 | 520.2 | 0 |
+| K plan drafting, self-reported (n=100) | 0.15 [0.08, 0.23] | 0.29 | 191.3 | 1.00 | 382.7 | 830.6 | 0 |
 | N UCT-MCTS on trigger | 1.00 | 0 | 24.2 | 0.89 | 96.6 | 1080.1 | 3.26 |
 | S SwiftSage fast/slow trigger → 8b | 0.20 [0.12, 0.28] | 0.80 | 21.3 | 0.08 | 24.1 | 142.7 | 0 |
 | I planner, SimBFS (privileged) / ObsBFS (observation-only) | 1.00 / 1.00 | 0 | 18.7 / 55.3 | — | 0 | 0 | — |
