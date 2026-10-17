@@ -141,6 +141,10 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
         if term or trunc:
             success, failure = is_success(r, term), is_failure(r, term)
             break
+    from dreamcache.speculation.executor import _POOLS   # nested branch pools would block worker exit
+    for pool in _POOLS.values():
+        pool.shutdown(wait=True)
+    _POOLS.clear()
     extra = agent.finalize() if kind == "lossless" else None
     if kind == "agent" and method.get("prefetch"):
         extra = {"prefetch": agent.fast.finalize()}
