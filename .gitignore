@@ -1,1 +1,16 @@
+__pycache__/
+*.pyc
+.venv/
+results/
+logs/
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
 .claude/settings.local.json
+GIT_COMMIT
+.gstack/
+.env
+.cortex-data/
+node_modules/
+dist/
+.DS_Store

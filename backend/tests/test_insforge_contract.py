@@ -1,0 +1,122 @@
+"""Contract test for the InsForge adapters against a strict in-memory fake that
+follows InsForge's documented REST shapes (docs/sdks/rest/{database,storage,ai}.mdx).
+It checks our request shapes and round-trips; it is not a substitute for a run
+against a real InsForge project."""
+
+import json
+import re
+from urllib.parse import parse_qs, unquote
+
+import httpx
+import pytest
+
+from cortex.models import AgentAttempt, AgentCollection, Scenario, StartAgentCollectionRequest
+from cortex.store.base import Repo
+from cortex.store.insforge import InsForgeBlobStore, InsForgeStore, fetch_openrouter_key
+
+KEY = "ik_test"
+
+
+class FakeInsForge:
+    def __init__(self):
+        self.migrations: list[dict] = []
+        self.tables: dict[str, dict[str, dict]] = {}
+        self.buckets: dict[str, dict] = {}
+        self.objects: dict[tuple[str, str], bytes] = {}
+
+    def __call__(self, req: httpx.Request) -> httpx.Response:
+        assert req.headers["authorization"] == f"Bearer {KEY}"
+        path, q = req.url.path, parse_qs(req.url.query.decode())
+        if path == "/api/database/migrations":
+            if req.method == "GET":
+                return httpx.Response(200, json=self.migrations)
+            body = json.loads(req.content)
+            assert set(body) == {"version", "name", "sql"} and re.fullmatch(r"[a-z0-9-]+", body["name"])
+            assert "BEGIN" not in body["sql"].upper().split()
+            self.migrations.append(body)
+            for t in re.findall(r"CREATE TABLE IF NOT EXISTS (\w+)", body["sql"]):
+                self.tables.setdefault(t, {})
+            return httpx.Response(201, json={"ok": True})
+        if m := re.fullmatch(r"/api/database/records/(\w+)", path):
+            table = self.tables[m.group(1)]  # KeyError -> unknown table, like PostgREST 404
+            if req.method == "POST":
+                assert "merge-duplicates" in req.headers.get("prefer", "")
+                rows = json.loads(req.content)
+                assert isinstance(rows, list), "InsForge requires array bodies"
+                for r in rows:
+                    table[r["id"]] = {**table.get(r["id"], {}), **r}
+                return httpx.Response(201)
+            rows = list(table.values())
+            for col, cond in q.items():
+                if col in ("order", "limit", "offset", "select"):
+                    continue
+                op, val = cond[0].split(".", 1)
+                assert op == "eq"
+                rows = [r for r in rows if str(r.get(col)) == val]
+            if "order" in q:
+                rows.sort(key=lambda r: r.get("created_at") or "")
+            return httpx.Response(200, json=rows[: int(q.get("limit", ["100"])[0])])
+        if path == "/api/storage/buckets" and req.method == "POST":
+            body = json.loads(req.content)
+            assert body["isPublic"] is False
+            if body["bucketName"] in self.buckets:
+                return httpx.Response(409, json={"error": "bucket already exists"})
+            self.buckets[body["bucketName"]] = body
+            return httpx.Response(201, json=body)
+        if m := re.fullmatch(r"/api/storage/buckets/([^/]+)/download-strategy/objects/(.+)", path):
+            return httpx.Response(200, json={"method": "presigned", "url": f"https://s3.example/{unquote(m.group(2))}?sig=x"})
+        if m := re.fullmatch(r"/api/storage/buckets/([^/]+)/objects/(.+)", path):
+            k = (m.group(1), unquote(m.group(2)))
+            if req.method == "PUT":
+                assert req.headers["content-type"].startswith("multipart/form-data")
+                assert b'name="file"' in req.content
+                self.objects[k] = req.content.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n--", 1)[0]
+                return httpx.Response(201, json={"key": k[1]})
+            return httpx.Response(200, content=self.objects[k])
+        if path == "/api/ai/openrouter/api-key":
+            return httpx.Response(200, json={"apiKey": "sk-or-test", "maskedKey": "sk-or-***"})
+        return httpx.Response(404, json={"error": f"no route {req.method} {path}"})
+
+
+@pytest.fixture
+def fake():
+    return FakeInsForge()
+
+
+async def test_migrations_records_and_agent_artifacts(fake):
+    t = httpx.MockTransport(fake)
+    store = InsForgeStore("https://app.insforge.test", KEY, transport=t)
+    await store.init()
+    assert [m["name"] for m in fake.migrations] == ["cortex-001-init", "cortex-002-autopilot", "cortex-003-agent-demos"]
+    await store.init()  # idempotent: history is read first
+    assert len(fake.migrations) == 3
+
+    repo = Repo(store)
+    from cortex.models import CreateProjectRequest
+    from cortex.services.project_service import create_project
+    p = create_project(CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
+    await repo.save("projects", p, status="active")
+    col = AgentCollection(project_id=p.id, collector="astra", provider="InsForge Model Gateway → OpenRouter",
+                          model="openai/gpt-6-astra", request=StartAgentCollectionRequest(num_demos=2))
+    await repo.save("agent_collections", col)
+    for i, st in enumerate(("success", "failed")):
+        await repo.save("agent_attempts", AgentAttempt(
+            project_id=p.id, collection_id=col.id, index=i, collector="astra", seed=20_000 + i, scenario=Scenario(),
+            status=st, provider=col.provider, model=col.model, usage={"calls": 9, "cost_usd": 0.41}))
+    got = await repo.list("agent_attempts", AgentAttempt, project_id=p.id)
+    assert [a.status for a in got] == ["success", "failed"] and got[0].model == "openai/gpt-6-astra"
+    assert len(await repo.list("agent_attempts", AgentAttempt, project_id=p.id, status="failed")) == 1
+    assert (await repo.get("projects", p.id, type(p))).name == p.name
+    assert fake.tables["projects"][p.id]["project_id"] == p.id  # uniform (id, project_id, status, data) rows
+
+
+async def test_storage_roundtrip_presign_and_gateway_key(fake):
+    t = httpx.MockTransport(fake)
+    blobs = InsForgeBlobStore("https://app.insforge.test", KEY, "cortex-assets", transport=t)
+    await blobs.init()
+    await blobs.init()  # existing bucket is fine
+    key = "projects/prj_x/attempts/at_1/trace.json"
+    await blobs.put_bytes(key, b'{"trace": []}', "application/json")
+    assert await blobs.get_bytes(key) == b'{"trace": []}'
+    assert (await blobs.url(key)).startswith("https://s3.example/")
+    assert await fetch_openrouter_key("https://app.insforge.test", KEY, transport=t) == "sk-or-test"
