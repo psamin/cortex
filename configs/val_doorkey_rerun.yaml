@@ -1,0 +1,16 @@
+# RERUN of methods that failed with the old 60 s Ollama timeout in the first DoorKey val job.
+# Secondary benchmark (validation seeds). Episodes are capped at 60 steps to bound LLM
+# compute (env default is 640); capped episodes count as failures-to-succeed (truncated).
+split: val
+n_seeds: 15
+max_steps: 60
+envs: [MiniGrid-DoorKey-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 2, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {agent: {trigger: never}, fast: {model: 'qwen3:8b'}, name: L_greedy_8b}
+  - {agent: {resolve: verify, threshold: 0.4, trigger: threshold}, name: J_verify_sel_0.4}
+  - {agent: {mode: spec_draft, plan_len: 4}, name: K_specdraft_L4}
