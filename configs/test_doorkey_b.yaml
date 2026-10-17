@@ -1,0 +1,12 @@
+# DoorKey-8x8 held-out test, part B (val-run selective variant).
+split: test
+n_seeds: 100
+max_steps: 60
+envs: [MiniGrid-DoorKey-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: C_sel_0.4, agent: {trigger: threshold, threshold: 0.4, spec: {samples: 2}}}

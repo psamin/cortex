@@ -101,3 +101,15 @@ def test_runner_prefetch_with_surrogate(tmp_path):
          "prefetch": {"predictor": "personalized", "rows": str(rows), "workflow": "w", "sched": {"policy": "top1"}}}
     r = run_episode(DYN, 1, m, {"kind": "surrogate"}, max_steps=8)
     assert r["extra"]["prefetch"]["launched"] >= 1
+
+
+def test_b7_graph_ranked_candidates(tmp_path):
+    import json as _json
+    from dreamcache.experiments.runner import run_episode
+    rows = tmp_path / "rows.jsonl"
+    rows.write_text("\n".join(_json.dumps({"workflow": "w", "env": DYN, "context": "x", "prev_op": -1, "op": 2})
+                              for _ in range(5)))
+    m = {"name": "B7", "agent": {"trigger": "always", "spec": {"k": 2, "candidates": "graph"}},
+         "graph_rank": {"predictor": "personalized", "rows": str(rows), "workflow": "w"}}
+    r = run_episode(DYN, 1, m, {"kind": "surrogate"}, max_steps=5)
+    assert any("graph_probs" in rec for rec in r["records"])

@@ -70,9 +70,10 @@ class AgentConfig:
 
 
 class Agent:
-    def __init__(self, fast, legal, family, cfg: AgentConfig, seed: int, big=None):
+    def __init__(self, fast, legal, family, cfg: AgentConfig, seed: int, big=None, graph=None):
         self.fast, self.legal, self.family, self.cfg = fast, legal, family, cfg
         self.big = big
+        self.graph = graph   # B7: callable(obs, history) -> P(next executed action), learned from history
         self.queue: list[int] = []
         self.rng = np.random.default_rng(seed + 99991)
         self.seed = seed
@@ -127,7 +128,16 @@ class Agent:
 
         action = dec.action
         if trig:
-            cands = generate(c.spec.candidates, c.spec.k, dec, self.legal, proposals, obs)
+            if c.spec.candidates == "graph" and self.graph is not None:
+                # B7: rank rollout candidates by the LLM scores blended 50/50 with the
+                # execution-graph predictor learned from this agent's past trajectories
+                g = self.graph(obs, history)
+                blended = {a: 0.5 * dec.probs.get(a, 0.0) + 0.5 * g.get(a, 0.0) for a in self.legal}
+                rec["graph_probs"] = {str(a): v for a, v in g.items()}
+                from dreamcache.types import Decision as _D
+                cands = generate("llm_rank", c.spec.k, _D(dec.action, blended), self.legal, proposals, obs)
+            else:
+                cands = generate(c.spec.candidates, c.spec.k, dec, self.legal, proposals, obs)
             rec["candidates"] = cands
             if c.resolve == "rollout":
                 out = speculate(env, cands, history, self.legal, c.spec, c.evaluator,

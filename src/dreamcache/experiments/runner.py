@@ -110,7 +110,15 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
         pf_cfg = method.get("prefetch")
         if pf_cfg:
             fast = make_prefetcher(fast, pf_cfg, legal, env_id, fast_spec, seed)
-        agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed, big=big)
+        graph = None
+        if method.get("graph_rank"):
+            gp = make_prefetcher(fast, {**method["graph_rank"], "sched": {"policy": "none"}}, legal, env_id, fast_spec, seed)
+            from dreamcache.specgraph.graph import context_key
+
+            def graph(obs, history, gp=gp):
+                return gp.predictor.predict({"env": env_id, "context": context_key(obs, history),
+                                             "prev_op": history[-1] if history else -1, "heuristic_op": None})
+        agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed, big=big, graph=graph)
     elif kind == "lossless":
         from dreamcache.agents.lossless import LosslessSpecAgent
         small = make_fast(fast_spec, legal, seed, family)
@@ -210,7 +218,10 @@ def main(argv=None):
     a = ap.parse_args(argv)
     cfg = yaml.safe_load(open(a.config))
     defaults = cfg.get("defaults", {})
-    seeds = list(SPLITS[cfg["split"]])[: cfg.get("n_seeds")]
+    seeds = list(SPLITS[cfg["split"]])
+    if "seed_range" in cfg:   # explicit [start, end) extension of a split, e.g. test seeds 10100-10299
+        seeds = list(range(*cfg["seed_range"]))
+    seeds = seeds[: cfg.get("n_seeds")]
     fast_spec = cfg.get("fast", {"kind": "llm"})
     name = os.path.splitext(os.path.basename(a.config))[0]
     run_dir = os.path.join(a.out, f"{dt.datetime.now():%Y%m%d-%H%M%S}-{name}")
