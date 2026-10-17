@@ -20,6 +20,7 @@ MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
 
 
 def pg_to_sqlite(sql: str) -> str:
+    sql = re.sub(r"(?im)^\s*ALTER TABLE \w+ ENABLE ROW LEVEL SECURITY;\s*$", "", sql)  # Postgres-only
     sql = re.sub(r"\bJSONB\b", "TEXT", sql)
     sql = re.sub(r"\bTIMESTAMPTZ\b", "TEXT", sql)
     return sql.replace("DEFAULT now()", "DEFAULT CURRENT_TIMESTAMP")

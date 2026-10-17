@@ -31,8 +31,28 @@ when the provider is not configured. `GET /api/health` reports the active provid
   or from `OPENROUTER_API_KEY` when self-hosting. InsForge's own chat proxy is deprecated upstream,
   so Cortex calls OpenRouter directly with the key the gateway provisions.
 - **Auth:** the backend uses the admin (`ik_`) key server-side only. The browser never receives it.
-- **Limitation:** `project_members` (per-project roles and approval rights) exists in the schema, but
-  this build is single-user and does not yet enforce row-level security.
+- **Row-level security:** tables created by raw-SQL migrations start with RLS off on InsForge. On
+  2026-10-17 we verified that the public anon key could read `episodes`. Migration
+  [004_enable_rls.sql](../backend/migrations/004_enable_rls.sql) enables RLS on all 19 tables with no
+  policies. It was verified live: anon reads return 0 rows and anon writes return 401, while the
+  backend's admin key, which bypasses RLS, works as before. `project_members` (per-project roles) exists
+  in the schema but isn't enforced: this build is single-user.
+- **Migrations:** InsForge rejects any migration version that isn't newer than the latest applied one.
+  Cortex now skips a migration only if its name is already in the history; any other rejection fails loudly.
+- **AI requires a paid org plan.** The free plan returns 403 `AI_UPSTREAM_UNAVAILABLE`. The self-serve paid
+  plan is Pro, at $25/month or $240/year, upgraded via the dashboard or
+  `npx @insforge/cli billing upgrade pro`.
+  - **Included credit:** sources disagree on whether Pro includes any AI credit, so budget for
+    pay-as-you-go.
+  - **Spend caps:** paid orgs get uncapped gateway keys, so Cortex's own per-episode and per-project
+    caps are the only spend limits.
+  - **Hackathon credits:** InsForge has granted credits at past events, but nothing is published. Ask the
+    sponsor team or their Discord.
+  - **Current route:** until the org is upgraded, Cortex uses the team's own `OPENROUTER_API_KEY`, and
+    attempts are labelled with that route.
+- **Storage limits:** REST uploads cap at 200 MB per file (default 50 MB, buffered in server RAM). ACT
+  checkpoints (about 200 MB) are therefore kept locally for now; large files will need InsForge's
+  S3-compatible gateway. Free plans get 1 GB of storage and 5 GB/month of egress; Pro gets 100 GB and 250 GB.
 
 ## Training on Futurama
 
