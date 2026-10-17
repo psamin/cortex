@@ -63,9 +63,13 @@ class InsForgeStore(Store):
             try:
                 await self.c.req("POST", "/api/database/migrations", json=body)
                 log.info("applied migration %s", name)
-            except InsForgeError as e:
-                # IF NOT EXISTS makes re-application safe; a duplicate version is fine.
-                if "already" not in str(e).lower() and "duplicate" not in str(e).lower():
+            except InsForgeError:
+                # Only tolerate a race where the same migration name got applied meanwhile.
+                # InsForge also rejects versions that are not newer than the latest applied one
+                # (DATABASE_MIGRATION_ALREADY_EXISTS) - that must fail loudly, not be skipped.
+                hist = (await self.c.req("GET", "/api/database/migrations")).json()
+                rows = hist if isinstance(hist, list) else hist.get("migrations", [])
+                if name not in {str(m.get("name")) for m in rows if isinstance(m, dict)}:
                     raise
 
     async def put(self, table: str, row: dict[str, Any]) -> None:

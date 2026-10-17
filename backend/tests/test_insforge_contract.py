@@ -87,9 +87,11 @@ async def test_migrations_records_and_agent_artifacts(fake):
     t = httpx.MockTransport(fake)
     store = InsForgeStore("https://app.insforge.test", KEY, transport=t)
     await store.init()
-    assert [m["name"] for m in fake.migrations] == ["cortex-001-init", "cortex-002-autopilot", "cortex-003-agent-demos"]
+    assert [m["name"] for m in fake.migrations] == ["cortex-001-init", "cortex-002-autopilot", "cortex-003-agent-demos",
+                                                    "cortex-004-enable-rls"]
+    assert "ENABLE ROW LEVEL SECURITY" in fake.migrations[-1]["sql"]
     await store.init()  # idempotent: history is read first
-    assert len(fake.migrations) == 3
+    assert len(fake.migrations) == 4
 
     repo = Repo(store)
     from cortex.models import CreateProjectRequest
@@ -120,3 +122,15 @@ async def test_storage_roundtrip_presign_and_gateway_key(fake):
     assert await blobs.get_bytes(key) == b'{"trace": []}'
     assert (await blobs.url(key)).startswith("https://s3.example/")
     assert await fetch_openrouter_key("https://app.insforge.test", KEY, transport=t) == "sk-or-test"
+
+
+async def test_rejected_migration_fails_loudly(fake):
+    """InsForge rejects versions not newer than the latest applied one; that must not be skipped silently."""
+    def handler(req):
+        if req.url.path == "/api/database/migrations" and req.method == "POST":
+            return httpx.Response(400, json={"error": "DATABASE_MIGRATION_ALREADY_EXISTS",
+                                             "message": "version already exists or is not newer"})
+        return fake(req)
+    store = InsForgeStore("https://app.insforge.test", KEY, transport=httpx.MockTransport(handler))
+    with pytest.raises(Exception, match="ALREADY_EXISTS"):
+        await store.init()
