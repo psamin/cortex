@@ -26,9 +26,6 @@ class Settings(BaseSettings):
     agent_model: str = "anthropic/claude-sonnet-5.5"
     # Only needed on self-hosted InsForge; InsForge Cloud provisions it via its Model Gateway.
     openrouter_api_key: str | None = None
-    # Direct OpenAI route for GPT-6 Astra, used only if the InsForge gateway is unavailable.
-    openai_api_key: str | None = None
-    planner_model: str = "gpt-6-astra"
 
     # Training on the Futurama Slurm cluster (submitted over SSH)
     futurama_ssh_host: str | None = None  # e.g. pi34@planetexpress-login.cc.gatech.edu

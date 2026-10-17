@@ -31,7 +31,7 @@ flowchart LR
 sequenceDiagram
   participant S as agent_collection_service
   participant W as agent_worker (subprocess)
-  participant A as GPT-6 Astra (InsForge gateway → OpenRouter, or OpenAI)
+  participant A as GPT-6 Astra (InsForge Model Gateway → OpenRouter)
   participant M as ManipulationSession (MuJoCo + IK)
   S->>W: scenarios (seed, cube region, lighting, offsets), budgets; API key via env only
   loop per attempt (≤16 model calls, ≤$1.50)

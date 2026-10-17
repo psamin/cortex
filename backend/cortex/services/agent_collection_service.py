@@ -52,16 +52,13 @@ LIVE: dict[str, dict[str, Any]] = {}
 # ------------------------------------------------------------------ planner routing
 
 def resolve_planner(ctx: Ctx) -> dict[str, Any] | None:
-    """InsForge Model Gateway first (OpenRouter key it provisions), then OpenAI directly.
-    Never substitutes another model."""
+    """GPT-6 Astra through the InsForge Model Gateway (the OpenRouter key it provisions),
+    the only route. Never substitutes another model or provider."""
     if ctx.openrouter_key:
         via_insforge = "insforge" in ctx.vlm_source
         return {"provider": "insforge" if via_insforge else "openrouter", "model": "openai/gpt-6-astra",
                 "label": ("InsForge Model Gateway → OpenRouter" if via_insforge else "OpenRouter (OPENROUTER_API_KEY)"),
                 "api_key": ctx.openrouter_key}
-    if ctx.settings.openai_api_key:
-        return {"provider": "openai", "model": "gpt-6-astra", "label": "OpenAI API (direct adapter)",
-                "api_key": ctx.settings.openai_api_key}
     return None
 
 
@@ -69,7 +66,8 @@ def planner_status(ctx: Ctx) -> dict[str, Any]:
     p = resolve_planner(ctx)
     if not p:
         return {"available": False, "model": "gpt-6-astra", "provider": None,
-                "reason": "No InsForge Model Gateway key, OPENROUTER_API_KEY or OPENAI_API_KEY configured."}
+                "reason": "No InsForge Model Gateway key: set INSFORGE_BASE_URL and INSFORGE_API_KEY "
+                          "(self-hosted InsForge: OPENROUTER_API_KEY)."}
     return {"available": True, "model": p["model"], "provider": p["provider"], "route": p["label"],
             "pricing_per_m_tokens": {"input": 10.0, "output": 50.0}}
 
@@ -127,9 +125,8 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
     mode = "privileged" if req.collector == "oracle" else (req.mode or project.autopilot.planning_mode)
     planner = resolve_planner(ctx) if req.collector == "astra" else None
     if req.collector == "astra" and planner is None:
-        raise PlannerUnavailable("GPT-6 Astra is not configured (no InsForge Model Gateway, OPENROUTER_API_KEY or "
-                              "OPENAI_API_KEY). Cortex does not substitute another model; use collector='oracle' "
-                              "for scripted-oracle demos.")
+        raise PlannerUnavailable("GPT-6 Astra is not configured (no InsForge Model Gateway key). Cortex does not "
+                                 "substitute another model; use collector='oracle' for scripted-oracle demos.")
     cap = await check_budget(ctx, project, req) if req.collector == "astra" else 0.0
     prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
     base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)

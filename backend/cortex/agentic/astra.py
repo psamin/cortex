@@ -5,10 +5,10 @@ grip, verify, place); ManipulationSession validates and executes them in MuJoCo
 with IK. The model never emits motor commands. Each episode is bounded by a
 model-call budget, a dollar budget and the session's step limit.
 
-Provider routing (decided by the backend, recorded on every attempt):
-  insforge  InsForge Model Gateway -> OpenRouter, model "openai/gpt-6-astra"
-  openai    OpenAI API directly,     model "gpt-6-astra"
-No other model is substituted: if neither is configured, collection refuses to start.
+Provider routing (decided by the backend, recorded on every attempt): the InsForge
+Model Gateway's OpenRouter key, model "openai/gpt-6-astra" ("openrouter" when a
+self-hosted InsForge supplies OPENROUTER_API_KEY itself). No other model or route is
+substituted: without a gateway key, collection refuses to start.
 """
 
 from __future__ import annotations
@@ -26,8 +26,8 @@ from ..sim.manipulation import PLAN_PX, ManipulationSession, annotate_overhead, 
 
 PRICES_PER_M = {"gpt-6-astra": {"input": 10.0, "cached": 1.0, "output": 50.0}}  # developers.openai.com, Oct 2026
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
-ENDPOINTS = {"insforge": OPENROUTER, "openrouter": OPENROUTER, "openai": "https://api.openai.com/v1/chat/completions"}
-MODEL_IDS = {"insforge": "openai/gpt-6-astra", "openrouter": "openai/gpt-6-astra", "openai": "gpt-6-astra"}
+ENDPOINTS = {"insforge": OPENROUTER, "openrouter": OPENROUTER}
+MODEL_IDS = {"insforge": "openai/gpt-6-astra", "openrouter": "openai/gpt-6-astra"}
 
 SYSTEM = """You control a simulated SO-101 robot arm through tools. Task: {task}
 You never send motor commands; you choose actions and targets, and a local IK controller executes them safely.
@@ -77,7 +77,7 @@ def phase_for(tool: str, args: dict[str, Any], holding: bool) -> str:
 
 @dataclass
 class PlannerConfig:
-    provider: str  # insforge (gateway-provisioned OpenRouter key) | openrouter | openai
+    provider: str  # insforge (gateway-provisioned OpenRouter key) | openrouter (self-hosted InsForge key)
     api_key: str
     model: str = ""
     mode: str = "camera"
@@ -124,11 +124,8 @@ class AstraPlanner:
             raise BudgetExceeded(f"episode cost budget ${self.cfg.max_usd:.2f} reached")
         body: dict[str, Any] = {"model": self.cfg.model, "messages": messages, "tools": tool_schemas(),
                                 "tool_choice": "auto", "parallel_tool_calls": False, "max_completion_tokens": 2000}
-        if self.cfg.provider in ("insforge", "openrouter"):
-            body["reasoning"] = {"effort": self.cfg.reasoning_effort}
-            body["usage"] = {"include": True}
-        else:
-            body["reasoning_effort"] = self.cfg.reasoning_effort
+        body["reasoning"] = {"effort": self.cfg.reasoning_effort}  # OpenRouter's unified reasoning param
+        body["usage"] = {"include": True}  # provider-reported cost
         t0 = time.time()
         r = self.http.post(self.cfg.endpoint, json=body,
                            headers={"Authorization": f"Bearer {self.cfg.api_key}"})
