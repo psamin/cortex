@@ -1,33 +1,35 @@
 # Cortex product spec v2: agent-driven policy training for your arm
 
-Status: **proposed**. This document is the target. [ROADMAP.md](ROADMAP.md) tracks what is built.
+Status: **proposed**. This document is the target; [ROADMAP.md](ROADMAP.md) tracks what is built.
 Where this spec and the code disagree, the code describes today and this spec describes where it is going.
 
 ## 1. One sentence
 
 Any agent connects to Cortex over MCP, describes the arm and the objects in front of it, names a task,
-and Cortex returns a policy tuned for that arm and task. The loop: simulation first, then supervised
-real-world demonstrations that GPT-6 Astra drives and resets itself, then targeted demos or RL until
-the policy meets its target.
+and Cortex returns a policy tuned for that arm and task. It gets there in four steps:
+1. Simulation first.
+2. Rounds of supervised real-world demonstrations that GPT-6 Astra drives and resets itself.
+3. Fine-tuning after each round.
+4. Targeted demos or RL until the policy meets its target.
 
 ## 2. Users
 
-| User | What they do |
+| User | Role |
 |---|---|
-| **Calling agent** (Claude Code, any MCP client) | The primary user. Runs intake, starts stages, reads results, asks a human for approval when Cortex requires it. |
-| **Operator** (a human at the arm) | Arms the hardware, keeps a hand near the e-stop, confirms real-world runs, spot-checks success verdicts. Cortex never moves a real arm without one. |
-| **Studio viewer** (a human in the browser) | Watches progress, approves training and real-robot stages, reviews diagnoses. |
+| **Calling agent** (Claude Code, any MCP client) | The primary user. Runs intake, starts stages, reads results, and asks a human when Cortex requires approval. |
+| **Operator** (a human at the arm) | Arms the hardware and holds the deadman (section 5). Confirms real-world runs, spot-checks success verdicts, and resets by hand when recovery fails. Cortex never moves a real arm without one. |
+| **Studio viewer** (a human in the browser) | Watches progress, approves training and real-robot stages, and reviews diagnoses. |
 
 ## 3. The pipeline
 
 ```
- 0 INTAKE ──► 1 SIM BUILD ──► 2 SIM STAGE ──► 3 REAL STAGE ──► 4 REAL EVAL ──► 5 IMPROVE ──► 6 DELIVER
- (agent      (scene from      (Astra cyclic   (Astra cyclic    (policy rollouts  (more demos      (policy +
-  describes   the agent's      demos in sim,   demos on the     on the arm,       or RL, chosen    model card)
-  arm, items, description,     ACT pretrain,   real arm, fine-  Astra resets      by evidence)        │
-  task)       reach check)     sim eval)       tune on real)    between trials)       │               │
-                                                                     ▲                │               │
-                                                                     └────────────────┘               │
+ 0 INTAKE ─► 1 SIM BUILD ─► 2 SIM STAGE ─► 3 REAL ROUNDS ──────────────────► 4 IMPROVE ─► 5 DELIVER
+ agent       scene from     Astra cyclic    ┌► K real cyclic demos ─┐         more demos,   policy +
+ describes   the spec,      demos with      │                       ▼         RL-distilled  model card
+ arm, items, feasibility    domain random-  │  fine-tune ◄──── short real      demos, or
+ task;       + reach        ization, ACT    └── until target ◄── eval          augmentation
+ calibrates  check          pretrain, eval
+ cameras
 ```
 
 Every stage is a step of the Autopilot state machine. It can be started, stopped and resumed, and it
@@ -35,117 +37,172 @@ writes its evidence to the lineage graph.
 
 ### 3.0 Intake (MCP-first)
 
-The calling agent does not need to know Cortex's schema up front. It calls `cortex.start_intake`, and
-Cortex answers with the questions it still needs. The agent answers with whatever it knows, and Cortex
-validates the answers and returns the remaining questions, until the spec is complete.
+The calling agent does not need to know Cortex's schema, and most agents do not know sizes, extrinsics
+or a home pose. Intake is built around that:
 
-| Spec | Fields | Notes |
-|---|---|---|
-| `RobotProfile` | arm model (`so101` now; registry for more), serial port / connection, joint limits, **home pose** ("position 0"), gripper range, max joint speed, calibration file | Unknown arms are refused with the list of supported models. Joint limits default to the model's and can only be narrowed. |
-| `Cameras` | role (`overhead`, `wrist`, `front`), device index or URL, resolution, extrinsics (or "calibrate for me") | Astra needs one overhead or angled view of the table. A camera without extrinsics gets a calibration step before the real stage. |
-| `Workspace` | table bounds, forbidden zones | Defaults come from the arm's reach. |
-| `ObjectSpec[]` | name, shape primitive (`box`, `cylinder`, `sphere`), size, mass, colour, graspable | A water bottle is a `cylinder`, radius 0.033 m, height 0.20 m, 0.5 kg. |
-| `PlaceZone[]` | name, centre and size on the table | "Spot A", "the shelf corner". |
-| `TaskSpec v2` | pick object, place zone(s), **reset policy** (`return_to_origin` / `random_zone` / `cycle_zones`), success target, demo budget, money and GPU limits | |
+- **One idempotent tool.** `update_intake(project_id, patch)` merges a partial spec. Every response
+  returns the merged spec plus typed **questions** `{path, type, options, default, why}`, so the agent
+  only answers what is still open.
+- **Names, not numbers.** The agent can say "water bottle". Cortex maps it to primitive defaults from a
+  catalogue (shape, size, mass, colour), marks those values `assumed`, and asks the agent to confirm them.
+- **Look at the table.** `capture_frame(camera)` returns an image. In sim that is a render; on the real
+  arm it is the configured camera. The agent can then propose objects and zones from what it sees, and
+  Cortex segments the image to suggest object positions.
+- **Read the arm, don't ask.** Joint limits, home pose and gripper range come from the arm model and,
+  for a real arm, from its LeRobot calibration file. Those values can only be narrowed, never widened.
 
-Output: a validated `ProjectSpec`, which also contains the questions Cortex could not resolve itself
-(for example "the bottle (0.5 kg) is above the SO-101's rated payload of 0.25 kg; continue?").
+| Spec | Fields |
+|---|---|
+| `RobotProfile` | Arm model (`so101` today; registry for more), connection port, calibration file, joint limits, **home pose** ("position 0"), gripper range, max real-world speed |
+| `CameraSpec[]` | Role (`overhead`, `front`, `wrist`), device or URL, resolution, extrinsics (from calibration, section 3.1) |
+| `Workspace` | Table bounds and forbidden zones; defaults come from the arm's reach |
+| `ObjectSpec[]` | Name, primitive (`box`, `cylinder`, `sphere`), size, mass, colour; each value tagged `given` or `assumed` |
+| `PlaceZone[]` | Name, centre and size on the table |
+| `TaskSpec v2` | Pick object; place zone(s); **reset policy** (`return_to_origin`, `random_zone` or `cycle_zones`); success targets (sim and real, configurable); demo and round sizes; money and GPU limits |
 
-### 3.1 Sim build
+**Feasibility is checked, not asked.** Cortex measures each object against the arm model:
+- **Payload:** the static gravity torque at the worst carry pose must stay under 70% of each actuator's
+  force limit. The SO-101 sim actuators are limited to ±2.94 N·m.
+- **Grasp:** the object's grasp width must be smaller than the measured jaw opening, with a margin.
+- **Stability:** a tall object (height over 2.5× its base) gets an upright check on placement and needs
+  extra zone clearance.
 
-- Generate a MuJoCo scene from the spec: the pinned EnvHub table, room, cameras and arm, plus the
-  agent's objects as primitives and the place zones as flat markers. The upstream env takes a `scene`
-  path, so Cortex never forks it.
-- **Reachability check**: IK to every object start region and every zone, at grasp and carry height.
-  Unreachable zones are returned to the agent as an intake error, before any compute is spent.
+An infeasible object is **refused** with the reason and the nearest feasible alternative ("a 500 ml
+bottle, 0.5 kg, 65 mm wide, exceeds the jaw opening; a 250 ml bottle fits"). Cortex never asks the
+agent to "continue anyway".
+
+### 3.1 Sim build and calibration
+
+- **Scene.** Cortex generates a MuJoCo scene from the spec: the pinned EnvHub table, room, cameras and
+  arm, plus the agent's objects as primitives and the place zones as flat markers. The upstream env takes
+  a `scene` path, so Cortex never forks it.
+- **Reach check.** IK to every object start region and every zone, at grasp and carry height. The result
+  is reported per object and per zone, with the nearest reachable alternative for anything that fails.
+- **Camera calibration (real arms).** A board seen by the overhead camera gives its extrinsics (an
+  ArUco board is the default; checkerboard also works). The sim camera is then placed at the calibrated
+  pose, so sim images look like real ones. Astra's pixel pointing and the real verifier both use the
+  same calibration.
+- **Arm calibration.** Joint offsets and the gripper range from the LeRobot calibration file are applied
+  to the sim robot.
 
 ### 3.2 The cyclic demonstration protocol (sim and real)
 
-A *cycle* is two segments. Only the first one is training data.
+A *cycle* is a demo segment followed by a reset segment.
 
 ```
- DEMO segment (recorded as a LeRobot episode)       RESET segment (recorded as a reset trace)
- home ─► observe ─► grasp object ─► place in zone ─► home ─► grasp object ─► place at origin or new spot ─► home
+ DEMO  (segment=demo)    home ─► observe ─► grasp object ─► place in target zone ─► home
+ RESET (segment=reset)   home ─► grasp object ─► place at origin or next start ─► home
+ RECOVER (on failure)    locate object by perception ─► grasp ─► place at a valid start ─► home
 ```
 
-- Both segments are driven by GPT-6 Astra through the validated tool API. Astra picks targets and the
-  local IK controller executes them. On real hardware, the safety controller vets every tick.
-- **Episode boundaries are home-to-home.** That gives the policy a consistent start and end state, which
-  matches how it will be run.
+- **Who drives.** By default GPT-6 Astra drives both segments through the validated tool API: it picks
+  targets and the local IK controller executes them. On hardware, the safety controller also vets every
+  control tick. The other demo sources are:
+  - **leader-arm teleoperation** (a labelled fallback when Astra is unavailable or keeps failing);
+  - the **scripted oracle** (sim only).
+
+  Every episode carries its source.
+- **Home to home.** Every recorded segment starts and ends at the home pose. The policy therefore always
+  starts and finishes in the state it will be run from.
+- **Reset segments are data too.** With `random_zone` or `cycle_zones`, a reset is itself a pick-and-place
+  from a new start. Successful reset segments are saved as episodes tagged `segment=reset`, and each
+  dataset version chooses whether to include them. This nearly doubles the real data.
 - **Success comes from a verifier, never from the model's claim.**
-  - In sim it is the simulator's object pose.
-  - On a real arm it is the *perception verifier*: the object is segmented in the overhead camera inside
-    the target zone, the gripper reports open and empty, and the arm reached home.
-  - A failed demo segment is a diagnostic, not an episode. A failed reset segment pauses the loop and
-    asks the operator to reset by hand.
-- **The reset policy decides the next start.**
-  - `return_to_origin` repeats the same start state.
-  - `random_zone` and `cycle_zones` move the start around, which gives positional diversity for free.
-- The same reset segment is reused between **policy evaluation trials** in 3.4. Real evaluation needs no
-  human reset either.
+  - **In sim:** the simulator's object pose.
+  - **On a real arm:** the *perception verifier*. It segments the object in the calibrated overhead camera
+    and checks that the object:
+    - is inside the target zone;
+    - is upright (for tall objects);
+    - is no longer held: gripper present-load is near zero and the commanded and measured positions agree;
+    - and that the arm reached home.
+
+    The verifier's verdicts are `success`, `object_not_found`, `tipped`, `still_held`, `outside_zone`
+    or `unreachable`. Humans can spot-check any verdict, and a confirmed disagreement is stored as a label.
+- **Recovery.** After a failed segment the object is somewhere unknown. Cortex runs a RECOVER segment. If
+  recovery fails twice, the loop pauses and asks the operator to reset by hand.
+- **Measured starts.** The verifier records the object's measured start pose for every demo and every
+  evaluation trial. Coverage and per-zone statistics use that measured pose, not the intended one.
+- **Evaluation trials** reuse RESET segments between trials, so real-world evaluation needs no human
+  reset either.
 
 ### 3.3 Stages and gates
 
-| Stage | Done when | Gate to enter |
-|---|---|---|
-| Sim stage | ACT trained on sim demos reaches `sim_target` (default 0.8) on held-out sim seeds | Spec complete, reach check passed |
-| Real stage | `real_demo_target` verified real demos collected (default 30) | Hardware armed **and** operator present **and** the studio (or operator token) approved the real stage |
-| Real eval | `n` rollouts per zone with Wilson CIs | Same as real stage |
-| Improve | Policy meets `real_target`, or the iteration or money budget is spent | Training approval rules from v1 still apply |
+| Stage | Loop | Done when | Gate to enter |
+|---|---|---|---|
+| Sim stage | Collect sim cycles with domain randomization (lighting, colour, camera jitter around the calibrated pose, object size ±10%, mass ±20%), train ACT, evaluate | Sim success ≥ `sim_target` (default 0.7, configurable) on held-out seeds, or the sim budget is spent | Spec feasible, reach check passed |
+| Real rounds | K real cycles (default 10), fine-tune from the latest checkpoint, short real eval (default 5 trials), repeat | Real success ≥ `real_target`, or the round budget is spent | Hardware armed, live deadman, and a **human** approved the real stage (never a standing policy) |
+| Improve | Section 3.4 | Target met, or budget spent | v1 training approval rules still apply |
 
-The sim-pretrained checkpoint is fine-tuned on real demos. Sim demos stay in the mix, labelled by
-source, so the dataset lineage shows exactly which demos trained what.
+Sim demos stay in every dataset, labelled by source and segment. The lineage graph shows exactly which
+demos trained which checkpoint.
 
-### 3.4 Improve: more demos or RL
+### 3.4 Improve: more demos, RL-distilled demos, or augmentation
 
 After each evaluation, Cortex picks one action from the evidence and records why:
 
 | Evidence | Action |
 |---|---|
-| Failures concentrated in a start region or zone that has few demos (coverage gap) | **Targeted demos** there: real if the failure shows on the real arm, else sim |
-| Failures spread out with near misses (grasp offset, release too early) and enough demos | **RL refinement in sim**: a residual policy on top of the ACT checkpoint, trained with PPO against the shaped reward, under domain randomization of the scene the agent described. Re-evaluated in sim, then on the real arm. |
+| Failures cluster in a start region or zone that has few demos | **Targeted real demos** there |
+| Failures are spread out, near misses (grasp offset, early release), demos are plentiful | **RL refinement in sim, distilled.** PPO trains a *state-based* expert in sim with privileged object pose, under the domain randomization of the agent's scene. That expert then generates many extra sim demos, aimed at the failing conditions, which go into the next ACT fine-tune. Nothing trained by RL is deployed directly, so the image sim-to-real gap does not apply to the RL policy. |
 | Lighting or appearance failures | Augmentation (v1) |
 | Target met, or budget spent | Stop and deliver |
 
-RL never runs on the real arm. RL results count only once they are verified on the real arm.
+There is an optional second mode, a **proprioceptive residual** on top of ACT (inputs: joint state plus
+the ACT action). It is proposed only when distillation stalls. RL never runs on the real arm, and RL
+results count only once they are verified on it.
 
 ### 3.5 Deliver
 
-`cortex.get_policy` returns:
+`get_policy` returns:
 - the checkpoint (LeRobot `pretrained_model/`);
-- a **model card**: robot profile, task, scene, data provenance (sim, real, agent, oracle), training
-  runs, success rates in sim and on the real arm with CIs, known weak conditions;
-- a run command for `lerobot` on the agent's own arm.
+- a **model card**: robot profile, task, scene, data provenance by source and segment, training runs,
+  sim and real success with Wilson CIs, and known weak conditions;
+- the `lerobot` command to run the policy on the agent's own arm.
 
-## 4. MCP surface (added in v2)
+## 4. MCP surface added in v2
 
 | Tool | Purpose |
 |---|---|
-| `start_intake(prompt?)` | Creates a draft project; returns `{project_id, questions[]}` |
-| `describe_robot(project_id, robot)` | Sets `RobotProfile` and cameras; returns remaining questions |
-| `describe_workspace(project_id, objects, zones, workspace?)` | Sets objects and zones |
-| `set_task(project_id, pick, place, reset_policy, targets…)` | Sets TaskSpec v2 |
-| `get_intake_status(project_id)` | `{complete, questions[], spec}` |
-| `build_simulation(project_id)` | Scene generation and reach check; returns a preview image key |
-| `start_cyclic_collection(project_id, backend: sim\|real, cycles)` | Starts the 3.2 protocol |
-| `start_rl_refinement(project_id, checkpoint_id, budget)` | Proposes RL refinement (approval rules apply) |
+| `start_intake(prompt?)` | Creates a draft project; returns `{project_id, spec, questions[]}` |
+| `update_intake(project_id, patch)` | Merges a partial spec; returns `{spec, questions[], feasibility, complete}` |
+| `capture_frame(project_id, camera)` | Image for the agent: a render in sim, a real camera frame otherwise |
+| `build_simulation(project_id)` | Scene generation plus feasibility and reach report, with a preview image |
+| `calibrate_cameras(project_id)` | Real arms: computes extrinsics from a calibration board |
+| `start_cyclic_collection(project_id, backend, cycles, driver)` | Starts the cycle protocol (3.2); `backend` is `sim` or `real`; `driver` is `astra`, `teleop` or `oracle` |
+| `start_real_rounds(project_id)` | Real-round loop (3.3); returns `approval_required` until a human approves |
+| `start_rl_refinement(project_id, checkpoint_id, budget)` | Proposes RL distillation (3.4); approval rules apply |
 | `get_policy(project_id)` | Best policy, model card, run command |
 
-All existing v1 tools stay. Real-robot tools return `approval_required` with a studio link, and are
-always refused for remote callers.
+All v1 tools stay. Real-robot tools are always refused for remote callers.
 
-## 5. Safety invariants (unchanged from v1, extended)
+## 5. Safety invariants
 
-1. Astra never emits motor commands. Every target goes through validation, IK and, on hardware, the
-   per-tick safety controller: joint limits, velocity, workspace, watchdog, e-stop.
-2. Real motion requires `CORTEX_ENABLE_HARDWARE=1`, a local caller, an operator-confirmed session and
-   a calibration file. Unattended real mode is refused.
-3. The watchdog trips on a stale command stream and holds position. It is not fed by the loop that
-   checks it.
-4. Training, real-robot stages and paid jobs need human approval or a standing policy the human set.
+1. Astra never emits motor commands. Every target goes through validation and IK, and on hardware the
+   per-tick safety controller checks it: joint limits, velocity, the workspace with the table as a hard
+   floor, the watchdog, and the e-stop.
+2. Real motion requires all of the following:
+   - `CORTEX_ENABLE_HARDWARE=1`;
+   - a local caller;
+   - a calibration file;
+   - a human-approved real stage;
+   - a **live deadman**: an operator heartbeat from the studio or a pedal. If it lapses, the arm stops
+     within one control tick and holds.
+3. The operator re-confirms every N cycles (default 10). The real-world joint speed cap is lower than
+   the sim's.
+4. The watchdog runs on its own thread and trips on a stale command stream. The loop it checks never
+   feeds it.
+5. Training, real-robot stages and paid jobs need human approval. A standing Autopilot policy can
+   approve free training. It can never approve real motion.
 
-## 6. Non-goals for v2
+## 6. Prerequisites and risks
 
-- Arms other than SO-101 are not shipped. The `RobotProfile` registry is the extension point.
-- No mesh import for objects (primitives only), no deformables.
-- No RL on hardware.
+| Risk | Mitigation |
+|---|---|
+| GPT-6 Astra is blocked (the InsForge plan) and its accuracy is unmeasured | Measure Astra's success rate and cost per demo in sim **before** the real stage is built on it (roadmap P6b). Keep teleop as the labelled fallback. |
+| Sim-to-real gap for image policies | Calibrated cameras, domain randomization, real fine-tune rounds, RL used only through distillation |
+| The cylinder grasp is harder than a cube | The `sim_target` is configurable, and the payload and grasp checks run at intake |
+
+## 7. Non-goals for v2
+
+Arms other than SO-101 (the `RobotProfile` registry is the extension point), mesh import for objects,
+deformable objects, and RL on hardware.
