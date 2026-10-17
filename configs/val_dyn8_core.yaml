@@ -1,0 +1,27 @@
+# Phase 3: tuning on VALIDATION seeds 1000-1049 (thresholds, trigger budget).
+split: val
+n_seeds: 50
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {agent: {trigger: never}, name: A_greedy}
+  - {agent: {threshold: 99, trigger: threshold}, name: A_greedy_logged}
+  - {agent: {trigger: always}, name: B_always}
+  - {agent: {threshold: 0.2, trigger: threshold}, name: C_sel_0.2}
+  - {agent: {threshold: 0.4, trigger: threshold}, name: C_sel_0.4}
+  - {agent: {threshold: 0.6, trigger: threshold}, name: C_sel_0.6}
+  - {agent: {threshold: 0.8, trigger: threshold}, name: C_sel_0.8}
+  - {agent: {oracle_delta: 0.2, oracle_samples: 8, trigger: oracle}, name: D_oracle}
+  - {agent: {resolve: norollout, trigger: always}, name: G_bestofk_norollout}
+  - {kind: planner_sim, name: I_planner_sim}
+  - {kind: planner_obs, name: I_planner_obs}
+  - {agent: {detector: {alpha: 1, beta: 0, gamma: 0}, threshold: 0.4, trigger: threshold}, name: C_entropy_only_0.4}
+  - {agent: {detector: {alpha: 0, beta: 0, gamma: 1}, threshold: 0.4, trigger: threshold}, name: C_risk_only_0.4}
+  - {agent: {rate: 0.25, trigger: random}, name: E_random_0.25}
+  - {agent: {rate: 0.5, trigger: random}, name: E_random_0.5}
+  - {agent: {period: 4, trigger: periodic}, name: F_periodic_4}
+  - {agent: {period: 2, trigger: periodic}, name: F_periodic_2}

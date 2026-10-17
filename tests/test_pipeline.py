@@ -57,3 +57,23 @@ def test_episode_methods_run_with_surrogate():
               {"name": "bok", "agent": {"trigger": "always", "resolve": "norollout"}}]:
         r = run_episode(DYN, 2, m, fs, max_steps=15)
         assert r["steps"] >= 1
+
+
+def test_new_methods_run_with_surrogate():
+    fs = {"kind": "surrogate", "big_model": "surrogate"}
+    for m in [{"name": "verify", "agent": {"trigger": "always", "resolve": "verify"}},
+              {"name": "cascade", "agent": {"trigger": "threshold", "threshold": 0.3, "resolve": "cascade"}},
+              {"name": "vote", "agent": {"trigger": "always", "resolve": "vote", "vote_n": 3}},
+              {"name": "mcts", "agent": {"trigger": "always", "resolve": "mcts", "mcts_iterations": 12}},
+              {"name": "draft", "agent": {"mode": "spec_draft", "plan_len": 3}}]:
+        r = run_episode(DYN, 3, m, fs, max_steps=10)
+        assert r["steps"] >= 1, m
+
+
+def test_mcts_does_not_mutate_env():
+    from dreamcache.speculation.evaluator import EvalConfig
+    from dreamcache.speculation.mcts_search import mcts_decide
+    env, _ = make_env(DYN, 4)
+    before = state_fingerprint(env)
+    a, stats, cost = mcts_decide(env, [0, 1, 2], 20, 6, EvalConfig(), seed=0)
+    assert state_fingerprint(env) == before and a in (0, 1, 2) and cost.sim_steps > 0

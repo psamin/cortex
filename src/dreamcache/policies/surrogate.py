@@ -44,3 +44,15 @@ class SurrogatePolicy:
             p = np.array([s[b] for b in self.legal])
             acts.append(int(self.rng.choice(self.legal, p=p / p.sum())))
         return acts, Cost(llm_calls=n)
+
+    # CPU stand-ins for the draft/verify interface (tests only)
+    def verify(self, obs, history, proposed):
+        a = self.base.act(obs)
+        return a == proposed, a, Cost(llm_calls=1)
+
+    def draft_plan(self, obs, history, length):
+        return [self._scores(obs)[1]] * length, Cost(llm_calls=1)
+
+    def verify_plan(self, obs, history, plan):
+        a = self.base.act(obs)
+        return (1 if plan and plan[0] == a else 0), a, Cost(llm_calls=1)

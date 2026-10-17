@@ -79,7 +79,7 @@ this table.
 | Policies (LLM, heuristic, candidates) | `src/dreamcache/policies/` | Ollama client lives here. |
 | Difficulty detection | `src/dreamcache/detection/` | Observation-only. See §5. |
 | Speculation engine | `src/dreamcache/speculation/` | Rollouts, evaluator, parallelism. |
-| Agents (A–I conditions) | `src/dreamcache/agents/` | One file per condition. |
+| Agents (conditions A–O) | `src/dreamcache/agents/` | Conditions are configs of one `Agent` class in `agent.py`. New conditions add a `resolve`/`mode` branch; add new files for large ones. |
 | Experiments & stats | `src/dreamcache/experiments/` | Runner, metrics, bootstrap. |
 | Analysis & plots | `analysis/`, `report/` | Read results only. Never write to `results/`. |
 | Configs | `configs/` | One file per experiment. Add new files rather than editing shared ones. |

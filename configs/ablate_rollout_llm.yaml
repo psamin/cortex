@@ -1,0 +1,11 @@
+# Ablation 6, expensive arm: the fast LLM itself as rollout policy (1 model call per rollout step).
+split: val
+n_seeds: 10
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", prompt: v3}
+defaults:
+  spec: {k: 3, horizon: 3, samples: 1, rollout_policy: fast, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: roll_fast_llm, agent: {trigger: always}}
+  - {name: roll_sim_bfs_matched, agent: {trigger: always, spec: {rollout_policy: sim_bfs}}}

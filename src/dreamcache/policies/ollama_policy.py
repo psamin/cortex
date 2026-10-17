@@ -220,3 +220,68 @@ class LLMPolicy:
             total += c
         total.wall_seconds = time.perf_counter() - t0
         return acts, total
+
+    # ---- draft / verify (speculative-decoding-style methods) -------------------
+    def _names(self):
+        return [ACTION_NAMES[a] for a in self.legal]
+
+    def _ask(self, obs, history, instr, schema, temperature=0.0, seed=0):
+        body = describe(obs, history, self.legal)
+        if self.prompt in ("v2", "v3"):
+            body = RULES[self.family] + "\n\n" + body
+        msgs = [{"role": "system", "content": SYSTEM}, {"role": "user", "content": body + "\n" + instr}]
+        t0 = time.perf_counter()
+        content, cost = self.client.chat(msgs, schema, temperature, seed)
+        cost.wall_seconds = time.perf_counter() - t0
+        try:
+            return json.loads(content), cost
+        except ValueError:
+            m = re.search(r"\{.*\}", content, re.S)
+            try:
+                return (json.loads(m.group(0)) if m else {}), cost
+            except ValueError:
+                cost.malformed = 1
+                return {}, cost
+
+    def verify(self, obs, history, proposed: int):
+        """Big-model check of a drafted action: -> (accepted, action_to_take, Cost)."""
+        names = self._names()
+        schema = {"type": "object", "properties": {"accept": {"type": "boolean"},
+                                                   "action": {"type": "string", "enum": names}},
+                  "required": ["accept", "action"]}
+        instr = (f"A fast assistant proposes the action '{ACTION_NAMES[proposed]}'. If it is a good, "
+                 "safe action right now, set accept=true and repeat it. Otherwise set accept=false "
+                 "and give the best action.")
+        j, cost = self._ask(obs, history, instr, schema)
+        act = NAME_TO_ACTION.get(j.get("action"), proposed)
+        acc = bool(j.get("accept", True)) and act == proposed
+        if act not in self.legal:
+            act = proposed
+        return acc, (proposed if acc else act), cost
+
+    def draft_plan(self, obs, history, length: int):
+        """Small-model draft of the next `length` actions (one call)."""
+        names = self._names()
+        schema = {"type": "object", "properties": {"plan": {"type": "array", "items": {"type": "string", "enum": names},
+                                                            "minItems": 1, "maxItems": length}},
+                  "required": ["plan"]}
+        instr = (f"Plan your next {length} actions in order (obstacles may move, so plan carefully). "
+                 "Return them as a list.")
+        j, cost = self._ask(obs, history, instr, schema)
+        plan = [NAME_TO_ACTION[n] for n in j.get("plan", []) if n in NAME_TO_ACTION and NAME_TO_ACTION[n] in self.legal]
+        return plan[:length] or [self.legal[0]], cost
+
+    def verify_plan(self, obs, history, plan: list[int]):
+        """Big-model check of a drafted plan: -> (n_accepted_prefix, correction, Cost)."""
+        names = self._names()
+        schema = {"type": "object", "properties": {"accepted_steps": {"type": "integer", "minimum": 0, "maximum": len(plan)},
+                                                   "next_action": {"type": "string", "enum": names}},
+                  "required": ["accepted_steps", "next_action"]}
+        listing = ", ".join(f"{i + 1}. {ACTION_NAMES[a]}" for i, a in enumerate(plan))
+        instr = (f"A fast assistant drafted this plan: {listing}. How many of the FIRST steps are correct "
+                 "to execute starting now (0 if the first step is wrong)? Then give the action that "
+                 "should be taken right after the accepted steps (or now, if none are accepted).")
+        j, cost = self._ask(obs, history, instr, schema)
+        n = int(max(0, min(len(plan), j.get("accepted_steps", 0) or 0)))
+        corr = NAME_TO_ACTION.get(j.get("next_action"), plan[0])
+        return n, (corr if corr in self.legal else plan[0]), cost

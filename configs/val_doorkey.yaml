@@ -1,0 +1,20 @@
+# Secondary benchmark (validation seeds). Episodes are capped at 60 steps to bound LLM
+# compute (env default is 640); capped episodes count as failures-to-succeed (truncated).
+split: val
+n_seeds: 15
+max_steps: 60
+envs: [MiniGrid-DoorKey-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 2, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: A_greedy, agent: {trigger: never}}
+  - {name: L_greedy_8b, fast: {model: "qwen3:8b"}, agent: {trigger: never}}
+  - {name: B_always, agent: {trigger: always}}
+  - {name: C_sel_0.4, agent: {trigger: threshold, threshold: 0.4}}
+  - {name: J_verify_sel_0.4, agent: {trigger: threshold, threshold: 0.4, resolve: verify}}
+  - {name: K_specdraft_L4, agent: {mode: spec_draft, plan_len: 4}}
+  - {name: I_planner_sim, kind: planner_sim}
+  - {name: I_planner_obs, kind: planner_obs}

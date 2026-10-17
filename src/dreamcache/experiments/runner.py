@@ -73,7 +73,9 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
     total_r, success, failure = 0.0, False, False
     if kind == "agent":
         fast = make_fast(fast_spec, legal, seed, family)
-        agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed)
+        big = (make_fast({**fast_spec, "model": fast_spec["big_model"]}, legal, seed, family)
+               if fast_spec.get("big_model") else None)
+        agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed, big=big)
     elif kind == "planner_sim":
         planner = SimBFSPolicy()
     elif kind == "planner_obs":
