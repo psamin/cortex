@@ -1,0 +1,20 @@
+# Generalization: Dynamic-Obstacles-16x16 with the val-selected 8x8 configuration UNCHANGED
+# (no retuning). 50 test seeds; episodes capped at 200 steps (env default 1024) to bound LLM
+# compute -- capped episodes count as non-success (truncated).
+split: test
+n_seeds: 50
+max_steps: 200
+envs: [MiniGrid-Dynamic-Obstacles-16x16-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {name: A_greedy, agent: {trigger: never}}
+  - {name: L_greedy_8b, fast: {model: "qwen3:8b"}, agent: {trigger: never}}
+  - {name: B_always, agent: {trigger: always}}
+  - {name: C_risk_only_0.4, agent: {trigger: threshold, threshold: 0.4, detector: {alpha: 0, beta: 0, gamma: 1}}}
+  - {name: E_random_0.25, agent: {trigger: random, rate: 0.25}}
+  - {name: I_planner_sim, kind: planner_sim}
+  - {name: I_planner_obs, kind: planner_obs}

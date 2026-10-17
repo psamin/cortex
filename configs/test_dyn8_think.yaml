@@ -1,0 +1,9 @@
+# Baseline H (extra model reasoning instead of environment rollouts), held-out test seeds.
+# qwen3:4b with thinking enabled (num_predict 1024), no rollouts. Compare with A_greedy /
+# B_always / C_risk_only_0.4 from the main test run (same seeds).
+split: test
+n_seeds: 100
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", prompt: v3}
+methods:
+  - {name: H_think_4b, fast: {think: true}, agent: {trigger: never}}
