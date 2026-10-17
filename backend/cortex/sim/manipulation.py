@@ -463,16 +463,26 @@ class ManipulationSession:
         return out, img
 
 
-def annotate_overhead(img: np.ndarray, every: int = 40) -> np.ndarray:
-    """Light pixel grid with labels so the planner can point precisely."""
+def annotate_overhead(img: np.ndarray, point_format: str = "pixels") -> np.ndarray:
+    """Light grid labelled in the units the planner points in: pixels every 40 px, or
+    relative 0-1000 coordinates every 100 (Qwen3-VL's native grounding convention)."""
     im = Image.fromarray(img)
     dr = ImageDraw.Draw(im)
-    for p in range(0, PLAN_PX, every):
+    marks = ([(p, str(p)) for p in range(0, PLAN_PX, 40)] if point_format == "pixels" else
+             [(round(k * PLAN_PX / 1000), str(k)) for k in range(0, 1000, 100)])
+    for p, label in marks:
         dr.line([(p, 0), (p, PLAN_PX)], fill=(255, 255, 255), width=1)
         dr.line([(0, p), (PLAN_PX, p)], fill=(255, 255, 255), width=1)
-        dr.text((p + 2, 2), str(p), fill=(30, 30, 30))
-        dr.text((2, p + 2), str(p), fill=(30, 30, 30))
+        dr.text((p + 2, 2), label, fill=(30, 30, 30))
+        dr.text((2, p + 2), label, fill=(30, 30, 30))
     return np.asarray(im)
+
+
+def from_model_point(point: dict[str, Any], point_format: str) -> dict[str, Any]:
+    """Convert a model-reported image point to overhead-image pixels."""
+    if point_format == "norm1000":
+        return {"u": float(point.get("u", 0)) * PLAN_PX / 1000, "v": float(point.get("v", 0)) * PLAN_PX / 1000}
+    return point
 
 
 def to_data_url(img: np.ndarray, quality: int = 85) -> str:
@@ -481,10 +491,16 @@ def to_data_url(img: np.ndarray, quality: int = 85) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def tool_schemas() -> list[dict[str, Any]]:
-    """OpenAI-style function tool definitions generated from the Pydantic models."""
+def tool_schemas(point_format: str = "pixels") -> list[dict[str, Any]]:
+    """OpenAI-style function tool definitions generated from the Pydantic models. For
+    norm1000 planners, image points are described (and bounded) in relative 0-1000 units;
+    the planner loop converts them to pixels before validation."""
     out = []
     for name, (model, desc) in ManipulationSession.TOOLS.items():
         schema = model.model_json_schema()
+        if point_format == "norm1000" and "ImagePoint" in schema.get("$defs", {}):
+            props = schema["$defs"]["ImagePoint"]["properties"]
+            props["u"].update(maximum=1000, description="relative x in the overhead image, 0 = left edge, 1000 = right")
+            props["v"].update(maximum=1000, description="relative y in the overhead image, 0 = top edge, 1000 = bottom")
         out.append({"type": "function", "function": {"name": name, "description": desc, "parameters": schema}})
     return out

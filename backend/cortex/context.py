@@ -19,6 +19,26 @@ log = logging.getLogger(__name__)
 
 
 @dataclass
+class ModelRoute:
+    """Where every model call goes. One route serves planning, diagnostics and chat."""
+
+    provider: str  # selfhosted | insforge | openrouter
+    label: str  # shown in the studio and recorded on every attempt
+    base_url: str  # OpenAI-compatible base, e.g. https://openrouter.ai/api/v1
+    api_key: str
+    planner_model: str
+    vlm_model: str
+    agent_model: str
+    point_format: str = "pixels"  # how the model reports image points: pixels | norm1000
+    openrouter_extras: bool = True  # send OpenRouter-only fields (reasoning, usage.include)
+    price_per_m: dict[str, float] | None = None  # None = no per-token charge (self-hosted)
+
+    @property
+    def chat_url(self) -> str:
+        return self.base_url.rstrip("/") + "/chat/completions"
+
+
+@dataclass
 class Ctx:
     settings: Settings
     store: Store
@@ -27,7 +47,7 @@ class Ctx:
     bus: EventBus
     jobs: JobManager
     data_dir: Path
-    openrouter_key: str | None = None
+    model: ModelRoute | None = None
     vlm_source: str = "disabled"
     gateway_error: str | None = None  # why the InsForge Model Gateway gave no key (e.g. plan restriction)
     notes: list[str] = field(default_factory=list)
@@ -92,19 +112,41 @@ async def build_ctx(s: Settings) -> Ctx:
     await store.init()
     await blobs.init()
 
-    key, src, gw_err = None, "disabled", None
-    if s.openrouter_api_key:
-        key, src = s.openrouter_api_key, "openrouter (OPENROUTER_API_KEY)"
-    elif s.insforge_enabled:
-        from .store.insforge import gateway_key
-
-        key, gw_err = await gateway_key(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
-        src = "insforge model gateway (openrouter)" if key else "disabled"
-    if not key:
-        why = f"InsForge Model Gateway: {gw_err}" if gw_err else "no InsForge Model Gateway key"
-        notes.append(f"Models disabled ({why}). GPT-6 Astra planning and VLM diagnostics are off; the scripted "
+    route, gw_err = await resolve_model_route(s)
+    src = route.label if route else "disabled"
+    if not route:
+        why = f"InsForge Model Gateway: {gw_err}" if gw_err else "no model endpoint configured"
+        notes.append(f"Models disabled ({why}). Agent planning and VLM diagnostics are off; the scripted "
                      "oracle, telemetry analysis and everything else still run.")
 
     bus = EventBus()
     return Ctx(settings=s, store=store, blobs=blobs, repo=Repo(store), bus=bus, jobs=JobManager(bus),
-               data_dir=s.data_dir, openrouter_key=key, vlm_source=src, gateway_error=gw_err, notes=notes)
+               data_dir=s.data_dir, model=route, vlm_source=src, gateway_error=gw_err, notes=notes)
+
+
+OPENROUTER_BASE = "https://openrouter.ai/api/v1"
+ASTRA = "openai/gpt-6-astra"
+
+
+async def resolve_model_route(s: Settings) -> tuple[ModelRoute | None, str | None]:
+    """Self-hosted endpoint first (our own model), then OpenRouter via the InsForge gateway
+    (or a self-hosted InsForge's OPENROUTER_API_KEY). Never mixes providers within a run."""
+    if s.planner_base_url:
+        m = s.selfhosted_model
+        return ModelRoute(provider="selfhosted", label=f"self-hosted {m} ({s.planner_base_url})",
+                          base_url=s.planner_base_url, api_key=s.planner_api_key or "none", planner_model=m,
+                          vlm_model=m, agent_model=m, point_format=s.selfhosted_point_format,
+                          openrouter_extras=False, price_per_m=None), None
+    key, gw_err, label, provider = None, None, "", ""
+    if s.openrouter_api_key:
+        key, label, provider = s.openrouter_api_key, "OpenRouter (OPENROUTER_API_KEY)", "openrouter"
+    elif s.insforge_enabled:
+        from .store.insforge import gateway_key
+
+        key, gw_err = await gateway_key(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
+        label, provider = "InsForge Model Gateway → OpenRouter", "insforge"
+    if not key:
+        return None, gw_err
+    return ModelRoute(provider=provider, label=label, base_url=OPENROUTER_BASE, api_key=key, planner_model=ASTRA,
+                      vlm_model=s.vlm_model, agent_model=s.agent_model, point_format="pixels",
+                      openrouter_extras=True, price_per_m={"input": 10.0, "output": 50.0}), None

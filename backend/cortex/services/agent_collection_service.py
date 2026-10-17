@@ -1,7 +1,8 @@
 """Autonomous demonstration collection.
 
 Collectors:
-  astra   GPT-6 Astra plans through the validated tool API; IK executes in MuJoCo
+  agent   a vision-language planner (our self-hosted Qwen3-VL, or GPT-6 Astra via OpenRouter)
+          plans through the validated tool API; IK executes in MuJoCo
   oracle  the existing scripted IK expert (privileged state) on the same scenes
 
 Every attempt is persisted (agent_attempts + trace/video/trajectory in storage).
@@ -52,25 +53,50 @@ LIVE: dict[str, dict[str, Any]] = {}
 # ------------------------------------------------------------------ planner routing
 
 def resolve_planner(ctx: Ctx) -> dict[str, Any] | None:
-    """GPT-6 Astra through the InsForge Model Gateway (the OpenRouter key it provisions),
-    the only route. Never substitutes another model or provider."""
-    if ctx.openrouter_key:
-        via_insforge = "insforge" in ctx.vlm_source
-        return {"provider": "insforge" if via_insforge else "openrouter", "model": "openai/gpt-6-astra",
-                "label": ("InsForge Model Gateway → OpenRouter" if via_insforge else "OpenRouter (OPENROUTER_API_KEY)"),
-                "api_key": ctx.openrouter_key}
-    return None
+    """The configured model route (self-hosted first, else OpenRouter). Never substitutes
+    another model or provider when the configured one is unavailable."""
+    r = ctx.model
+    if r is None:
+        return None
+    return {"provider": r.provider, "model": r.planner_model, "label": r.label, "api_key": r.api_key,
+            "endpoint": r.chat_url, "point_format": r.point_format, "openrouter_extras": r.openrouter_extras,
+            "price_per_m": r.price_per_m}
 
 
-def planner_status(ctx: Ctx) -> dict[str, Any]:
+async def selfhosted_reachable(ctx: Ctx) -> str | None:
+    """None if the self-hosted endpoint answers /models, else the reason it doesn't."""
+    import httpx
+
+    r = ctx.model
+    if r is None or r.provider != "selfhosted":
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=4) as c:
+            resp = await c.get(r.base_url.rstrip("/") + "/models", headers={"Authorization": f"Bearer {r.api_key}"})
+        if resp.status_code >= 400:
+            return f"self-hosted endpoint {r.base_url} answered {resp.status_code}"
+        served = [m.get("id") for m in resp.json().get("data", [])]
+        if r.planner_model not in served:
+            return f"self-hosted endpoint serves {served}, not {r.planner_model}"
+        return None
+    except Exception as e:
+        return (f"self-hosted endpoint {r.base_url} is not reachable ({type(e).__name__}); start it with "
+                "scripts/vlm_futurama.sh up (needs the GT VPN)")
+
+
+async def planner_status(ctx: Ctx) -> dict[str, Any]:
     p = resolve_planner(ctx)
     if not p:
         reason = (f"InsForge Model Gateway: {ctx.gateway_error}" if ctx.gateway_error else
-                  "No InsForge Model Gateway key: set INSFORGE_BASE_URL and INSFORGE_API_KEY "
-                  "(self-hosted InsForge: OPENROUTER_API_KEY).")
-        return {"available": False, "model": "gpt-6-astra", "provider": None, "reason": reason}
+                  "No model endpoint: set PLANNER_BASE_URL (self-hosted) or an InsForge/OpenRouter key.")
+        return {"available": False, "model": None, "provider": None, "reason": reason}
+    down = await selfhosted_reachable(ctx)
+    if down:
+        return {"available": False, "model": p["model"], "provider": p["provider"], "route": p["label"],
+                "reason": down}
     return {"available": True, "model": p["model"], "provider": p["provider"], "route": p["label"],
-            "pricing_per_m_tokens": {"input": 10.0, "output": 50.0}}
+            "point_format": p["point_format"],
+            "pricing_per_m_tokens": p["price_per_m"] or "self-hosted: no per-token charge"}
 
 
 # ------------------------------------------------------------------ scenarios
@@ -124,11 +150,15 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                               "hardware adapter with an operator present.")
     # the scripted oracle always reads simulator object poses, so it is privileged by construction
     mode = "privileged" if req.collector == "oracle" else (req.mode or project.autopilot.planning_mode)
-    planner = resolve_planner(ctx) if req.collector == "astra" else None
-    if req.collector == "astra" and planner is None:
-        raise PlannerUnavailable("GPT-6 Astra is not configured (no InsForge Model Gateway key). Cortex does not "
-                                 "substitute another model; use collector='oracle' for scripted-oracle demos.")
-    cap = await check_budget(ctx, project, req) if req.collector == "astra" else 0.0
+    planner = resolve_planner(ctx) if req.collector == "agent" else None
+    if req.collector == "agent" and planner is None:
+        raise PlannerUnavailable("No agent planner is configured (self-hosted endpoint or InsForge/OpenRouter key). "
+                                 "Cortex does not substitute another model; use collector='oracle' for "
+                                 "scripted-oracle demos.")
+    if req.collector == "agent" and (down := await selfhosted_reachable(ctx)):
+        raise PlannerUnavailable(down)
+    paid = bool(planner and planner["price_per_m"])
+    cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
     prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
     base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)
     scenarios = plan_scenarios(project, req, base_seed)
@@ -175,9 +205,13 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                 col.status = "budget_exhausted"
                 col.totals["stopped_reason"] = f"collection budget reached after ${ev['spent_usd']:.2f}"
 
-        if req.collector == "astra":
-            cfg = {"task": req.task or project.spec.goal, "mode": mode, "live_dir": str(live_dir), "max_total_usd": cap,
-                   "planner": {"provider": planner["provider"], "model": planner["model"],  # type: ignore[index]
+        if req.collector == "agent":
+            p = planner or {}
+            cfg = {"task": req.task or project.spec.goal, "mode": mode, "live_dir": str(live_dir),
+                   "max_total_usd": cap if paid else 1e9,
+                   "planner": {"provider": p["provider"], "model": p["model"], "endpoint": p["endpoint"],
+                               "point_format": p["point_format"], "openrouter_extras": p["openrouter_extras"],
+                               "price_per_m": p["price_per_m"],
                                "max_calls": req.max_calls_per_episode, "max_usd": req.max_usd_per_episode,
                                "reasoning_effort": "low"},
                    "attempts": [{"seed": a.seed, "scenario": a.scenario.model_dump(),
@@ -249,10 +283,10 @@ async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: A
     if success and "episode" in a.artifacts and a.num_frames:
         eps = await list_episodes(ctx, project.id)
         ep = Episode(project_id=project.id, index=len(eps), condition=a.scenario.condition, seed=a.seed,
-                     source=EpisodeSource.sim_agent if a.collector == "astra" else EpisodeSource.sim_scripted,
+                     source=EpisodeSource.sim_agent if a.collector == "agent" else EpisodeSource.sim_scripted,
                      num_frames=a.num_frames, fps=30, success=True,
                      artifacts={k: v for k, v in a.artifacts.items() if k in ("episode", "front", "thumb")},
-                     provenance={"planner": "gpt-6-astra" if a.collector == "astra" else "scripted_ik_oracle",
+                     provenance={"planner": a.model if a.collector == "agent" else "scripted_ik_oracle",
                                  "provider": a.provider, "model": a.model, "mode": a.mode,
                                  "attempt_id": a.id, "collection_id": col.id, "scenario": a.scenario.model_dump()})
         ep.quality = quality_for(ctx, ep, blur_ref)
@@ -313,7 +347,7 @@ async def attempt_trace(ctx: Ctx, attempt_id: str) -> dict[str, Any]:
 def compare_collectors(attempts: list[AgentAttempt]) -> dict[str, Any]:
     """Per-collector metrics over matched scenes (no claims beyond the counts)."""
     out: dict[str, Any] = {}
-    for coll in ("astra", "oracle"):
+    for coll in ("agent", "oracle"):
         rows = [a for a in attempts if a.collector == coll]
         if not rows:
             continue

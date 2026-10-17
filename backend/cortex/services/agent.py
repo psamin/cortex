@@ -19,7 +19,6 @@ from ..context import Ctx
 from . import agent_orchestrator as orch
 from . import autopilot
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 MAX_TURNS = 8
 HISTORY: dict[str, list[dict[str, Any]]] = {}
 
@@ -83,7 +82,7 @@ async def chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
     hist = HISTORY.setdefault(pid, [])
     hist.append({"role": "user", "content": message})
     await ctx.audit("gui", "agent_message", pid, {"message": message[:500]}, "ok", "user message")
-    if ctx.openrouter_key:
+    if ctx.model:
         async for chunk in _llm(ctx, pid, hist):
             yield chunk
     else:
@@ -101,8 +100,10 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
     msgs: list[dict[str, Any]] = [{"role": "system", "content": sysmsg}, *hist[-20:]]
     async with httpx.AsyncClient(timeout=120) as http:
         for _ in range(MAX_TURNS):
-            r = await http.post(OPENROUTER_URL, headers={"Authorization": f"Bearer {ctx.openrouter_key}"}, json={
-                "model": ctx.settings.agent_model, "messages": msgs, "tools": tool_specs(), "max_tokens": 1200})
+            route = ctx.model
+            assert route is not None
+            r = await http.post(route.chat_url, headers={"Authorization": f"Bearer {route.api_key}"}, json={
+                "model": route.agent_model, "messages": msgs, "tools": tool_specs(), "max_tokens": 1200})
             if r.status_code >= 400:
                 yield _sse("text", {"delta": f"Model Gateway error {r.status_code}: {r.text[:200]}"})
                 return
@@ -180,6 +181,6 @@ async def _rules(ctx: Ctx, pid: str, message: str, hist: list[dict[str, Any]]) -
             text = "Here's what I'd do next: " + "; ".join(f"{n.action} ({n.reason})" for n in st.next_actions[:4])
     except Exception as e:
         text = f"That failed: {type(e).__name__}: {e}"
-    note = " (rule-based planner: add an InsForge key to enable the LLM agent)"
+    note = " (rule-based planner: configure a model endpoint to enable the LLM agent)"
     yield _sse("text", {"delta": text + note})
     hist.append({"role": "assistant", "content": text})

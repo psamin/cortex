@@ -7,9 +7,10 @@ version and augment datasets, train an ACT policy, evaluate it in parallel MuJoC
 results, and recommend the next step. **Autopilot** runs that loop unattended within the approvals
 you grant up front.
 
-Demonstrations are generated autonomously: **GPT-6 Astra** looks at the rendered MuJoCo scene and picks
-actions through validated tools (point at the cube, move, grip, verify, place), and a local IK
-controller executes them. Only simulator-verified successes become LeRobot episodes. The existing
+Demonstrations are generated autonomously: an **agent planner**, by default our own self-hosted
+**Qwen3-VL** (or GPT-6 Astra via OpenRouter), looks at the rendered MuJoCo scene and picks actions
+through validated tools (point at the cube, move, grip, verify, place), and a local IK controller
+executes them. Only simulator-verified successes become LeRobot episodes. The existing
 scripted IK oracle stays available as a labelled baseline for A/B comparison.
 
 Hugging Face's LeLab is a GUI for LeRobot. Cortex is an experiment orchestrator and data-collection
@@ -46,7 +47,8 @@ claude mcp add --transport http cortex http://localhost:3000/mcp
 | Generate sample demos without the UI | `uv --project backend run python scripts/generate_demos.py --out sample_data --per-condition 2` |
 | Expose backend for a hosted MCP server | `scripts/dev.sh --tunnel` |
 | Agent-demo walkthrough (live action stream) | `uv --project backend run python scripts/demo_agent.py --demos 3` (`--collector oracle` needs no key) |
-| A/B: scripted oracle vs GPT-6 Astra | `uv --project backend run python scripts/ab_oracle_vs_astra.py collect --n 10` then `train`, `evaluate` |
+| Serve our own planner model on Futurama | `scripts/vlm_futurama.sh up` (then restart the backend); `status`, `down` |
+| A/B: scripted oracle vs agent planner | `uv --project backend run python scripts/ab_oracle_vs_astra.py collect --n 10` then `train`, `evaluate` |
 
 ## Repository
 

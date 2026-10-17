@@ -21,7 +21,6 @@ from PIL import Image
 
 from ..models import EpisodeDiagnosis, Hypothesis
 
-OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions"
 TAXONOMY = {
     "grasp_miss": "gripper closes without securing the cube",
     "slip_during_transport": "cube slips or falls while being carried",
@@ -88,8 +87,10 @@ def parse_hypotheses(text: str) -> list[Hypothesis]:
     return out
 
 
-async def diagnose(api_key: str, model: str, ref_id: str, frames: list[np.ndarray], task: str,
+async def diagnose(route, ref_id: str, frames: list[np.ndarray], task: str,
                    telemetry: dict[str, Any]) -> EpisodeDiagnosis:
+    """route: context.ModelRoute (self-hosted or OpenRouter); its vlm_model reviews the keyframes."""
+    model = route.vlm_model
     img = base64.b64encode(contact_sheet(frames)).decode()
     text = PROMPT.format(task=task, n=len(frames), telemetry=json.dumps(telemetry),
                          taxonomy="\n".join(f"- {k}: {v}" for k, v in TAXONOMY.items()))
@@ -101,7 +102,7 @@ async def diagnose(api_key: str, model: str, ref_id: str, frames: list[np.ndarra
     }
     try:
         async with httpx.AsyncClient(timeout=90) as c:
-            r = await c.post(OPENROUTER_URL, json=body, headers={"Authorization": f"Bearer {api_key}"})
+            r = await c.post(route.chat_url, json=body, headers={"Authorization": f"Bearer {route.api_key}"})
             r.raise_for_status()
             reply = r.json()["choices"][0]["message"]["content"]
         return EpisodeDiagnosis(episode_id=ref_id, model=model, hypotheses=parse_hypotheses(reply))

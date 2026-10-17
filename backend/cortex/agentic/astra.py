@@ -1,14 +1,16 @@
-"""GPT-6 Astra as a manipulation planner over the validated tool API.
+"""Vision-language manipulation planner over the validated tool API.
 
-Astra chooses semantic actions and waypoints (observe, point at the cube, move,
+The model chooses semantic actions and waypoints (observe, point at the cube, move,
 grip, verify, place); ManipulationSession validates and executes them in MuJoCo
 with IK. The model never emits motor commands. Each episode is bounded by a
 model-call budget, a dollar budget and the session's step limit.
 
-Provider routing (decided by the backend, recorded on every attempt): the InsForge
-Model Gateway's OpenRouter key, model "openai/gpt-6-astra" ("openrouter" when a
-self-hosted InsForge supplies OPENROUTER_API_KEY itself). No other model or route is
-substituted: without a gateway key, collection refuses to start.
+The backend picks one route per run and records it on every attempt:
+  selfhosted  our own open model (e.g. Qwen3-VL on Futurama via vLLM), OpenAI-compatible,
+              points in relative 0-1000 coordinates, no per-token cost
+  insforge    OpenRouter via the InsForge Model Gateway key, GPT-6 Astra, pixel points
+  openrouter  OpenRouter with OPENROUTER_API_KEY, GPT-6 Astra
+No other model is substituted when the configured one is unavailable.
 """
 
 from __future__ import annotations
@@ -22,7 +24,9 @@ from typing import Any
 import httpx
 import numpy as np
 
-from ..sim.manipulation import PLAN_PX, ManipulationSession, annotate_overhead, to_data_url, tool_schemas
+from ..sim.manipulation import (
+    PLAN_PX, ManipulationSession, annotate_overhead, from_model_point, to_data_url, tool_schemas,
+)
 
 PRICES_PER_M = {"gpt-6-astra": {"input": 10.0, "cached": 1.0, "output": 50.0}}  # developers.openai.com, Oct 2026
 OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
@@ -34,7 +38,7 @@ You never send motor commands; you choose actions and targets, and a local IK co
 
 Frames and units:
 - Robot base frame in metres: +x forward (away from the base), +y to the robot's left, z = height above the table.
-- The overhead image is {px}x{px} pixels with a labelled grid every 40 px. Image up = +x, image left = +y.
+- {image_text} Image up = +x, image left = +y.
 - The red cube is 3 cm wide. The green open box is the "bowl": place the cube inside it.
 
 Planning mode: {mode_text}
@@ -44,7 +48,7 @@ move_end_effector(pregrasp) -> move_end_effector(grasp) -> set_gripper(closed) -
 move_end_effector(lift to z≈0.075) -> place_object(image_point at the centre of the green box) -> check_task_success
 -> finish_episode.
 Rules:
-- Point at the object's centre in the most recent overhead image. Pixel coordinates are (u = column, v = row).
+- Point at the object's centre in the most recent overhead image. {point_text}
 - If a tool returns ok=false, read the error code and adjust (different point, lower/closer target) instead of repeating it.
 - If verify_grasp says holding_object=false: open the gripper, observe again, re-propose the grasp and retry.
 - Call one tool at a time. Be brief in text. Finish when check_task_success is true or you cannot make progress."""
@@ -54,6 +58,13 @@ MODE_TEXT = {
               "pixels in the overhead image.",
     "privileged": "PRIVILEGED-STATE PLANNING. observe_scene also returns simulator ground-truth object poses; "
                   "you may use them directly.",
+}
+
+POINT_TEXT = {
+    "pixels": ("The overhead image is {px}x{px} pixels with a labelled grid every 40 px.",
+               "Image points are pixel coordinates (u = column, v = row)."),
+    "norm1000": ("The overhead image uses relative coordinates from 0 to 1000 on both axes (grid labelled every 100).",
+                 "Image points are relative coordinates 0-1000 (u = x from the left edge, v = y from the top edge)."),
 }
 
 PHASES = {
@@ -77,7 +88,7 @@ def phase_for(tool: str, args: dict[str, Any], holding: bool) -> str:
 
 @dataclass
 class PlannerConfig:
-    provider: str  # insforge (gateway-provisioned OpenRouter key) | openrouter (self-hosted InsForge key)
+    provider: str  # selfhosted | insforge | openrouter
     api_key: str
     model: str = ""
     mode: str = "camera"
@@ -85,9 +96,16 @@ class PlannerConfig:
     max_usd: float = 1.50
     reasoning_effort: str = "low"
     timeout_s: float = 120.0
-    endpoint: str = ""  # test hook: CORTEX_PLANNER_BASE_URL; recorded on every attempt
+    endpoint: str = ""  # chat/completions URL; recorded on every attempt
+    point_format: str = "pixels"  # how the model reports image points: pixels | norm1000
+    openrouter_extras: bool = True  # OpenRouter-only request fields (reasoning, usage.include)
+    price_per_m: dict[str, float] | None = field(default_factory=lambda: dict(PRICES_PER_M["gpt-6-astra"]))
 
     def __post_init__(self) -> None:
+        if self.provider == "selfhosted":
+            if not (self.endpoint and self.model):
+                raise ValueError("self-hosted planner needs an endpoint and a model")
+            return
         self.model = self.model or MODEL_IDS[self.provider]
         self.endpoint = self.endpoint or ENDPOINTS[self.provider]
 
@@ -122,11 +140,16 @@ class AstraPlanner:
             raise BudgetExceeded(f"model-call budget of {self.cfg.max_calls} reached")
         if usage.cost_usd >= self.cfg.max_usd:
             raise BudgetExceeded(f"episode cost budget ${self.cfg.max_usd:.2f} reached")
-        body: dict[str, Any] = {"model": self.cfg.model, "messages": messages, "tools": tool_schemas(),
-                                "tool_choice": "auto", "parallel_tool_calls": False,
-                                "max_completion_tokens": 600}  # tool calls are ~100-300 tokens; OpenRouter reserves credit for the max
-        body["reasoning"] = {"effort": self.cfg.reasoning_effort}  # OpenRouter's unified reasoning param
-        body["usage"] = {"include": True}  # provider-reported cost
+        body: dict[str, Any] = {"model": self.cfg.model, "messages": messages,
+                                "tools": tool_schemas(self.cfg.point_format), "tool_choice": "auto",
+                                "parallel_tool_calls": False}
+        if self.cfg.openrouter_extras:
+            body["max_completion_tokens"] = 600  # tool calls are ~100-300 tokens; OpenRouter reserves credit for the max
+            body["reasoning"] = {"effort": self.cfg.reasoning_effort}  # OpenRouter's unified reasoning param
+            body["usage"] = {"include": True}  # provider-reported cost
+        else:  # plain OpenAI-compatible server (vLLM)
+            body["max_tokens"] = 600
+            body["temperature"] = 0.0
         t0 = time.time()
         r = self.http.post(self.cfg.endpoint, json=body,
                            headers={"Authorization": f"Bearer {self.cfg.api_key}"})
@@ -142,10 +165,13 @@ class AstraPlanner:
         if "cost" in u:
             usage.cost_usd += float(u["cost"])
             usage.cost_source = "provider-reported (OpenRouter usage.cost)"
+        elif self.cfg.price_per_m is None:
+            usage.cost_source = "self-hosted: no per-token charge (GPU time on our own cluster)"
         else:
             cached = int((u.get("prompt_tokens_details") or {}).get("cached_tokens", 0))
-            p = PRICES_PER_M["gpt-6-astra"]
-            usage.cost_usd += ((pin - cached) * p["input"] + cached * p["cached"] + pout * p["output"]) / 1e6
+            p = self.cfg.price_per_m
+            usage.cost_usd += ((pin - cached) * p["input"] + cached * p.get("cached", p["input"])
+                               + pout * p["output"]) / 1e6
         if data.get("model"):
             usage.models_reported.add(data["model"])
         return data["choices"][0]["message"]
@@ -155,7 +181,10 @@ class AstraPlanner:
         usage = Usage()
         trace: list[dict[str, Any]] = []
         messages: list[dict[str, Any]] = [
-            {"role": "system", "content": SYSTEM.format(task=task, px=PLAN_PX, mode_text=MODE_TEXT[self.cfg.mode])},
+            {"role": "system", "content": SYSTEM.format(
+                task=task, mode_text=MODE_TEXT[self.cfg.mode],
+                image_text=POINT_TEXT[self.cfg.point_format][0].format(px=PLAN_PX),
+                point_text=POINT_TEXT[self.cfg.point_format][1])},
             {"role": "user", "content": "Begin. The arm is at its home pose with the gripper half open."},
         ]
         finished, claim, summary, stop_reason, recoveries = False, None, "", None, 0
@@ -186,7 +215,10 @@ class AstraPlanner:
                     result: dict[str, Any] = {"ok": True}
                     img = None
                 else:
-                    result, img = session.call(name, args)
+                    executed = dict(args)
+                    if isinstance(args.get("image_point"), dict):
+                        executed["image_point"] = from_model_point(args["image_point"], self.cfg.point_format)
+                    result, img = session.call(name, executed)
                 ok = bool(result.get("ok"))
                 if ok and name in last_failed:
                     recoveries += 1
@@ -199,6 +231,7 @@ class AstraPlanner:
                     recoveries += 1
                     last_failed.discard("verify_grasp_retry")
                 step = {"i": len(trace), "tool": name, "args": args, "phase": phase, "ok": ok,
+                        **({"args_executed": executed} if name != "finish_episode" and executed != args else {}),
                         "result": {k: v for k, v in result.items() if k not in ("wall_ms",)},
                         "sim_step": len(session.rec), "model_call": usage.calls}
                 trace.append(step)
@@ -207,7 +240,7 @@ class AstraPlanner:
                 if img is not None:
                     images.append((name, img))
             for name, img in images:
-                shown = annotate_overhead(img) if session.last_overhead is img else img
+                shown = annotate_overhead(img, self.cfg.point_format) if session.last_overhead is img else img
                 messages.append({"role": "user", "content": [
                     {"type": "text", "text": f"Image returned by {name} ({img.shape[1]}x{img.shape[0]} px)."},
                     {"type": "image_url", "image_url": {"url": to_data_url(shown)}}]})

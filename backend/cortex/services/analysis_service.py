@@ -54,7 +54,7 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
                         failures.append({"eval_id": ev["run"].id, "branch": b, "ep": e})
 
         # 3) VLM hypotheses on failed eval episodes with video, then failed/flagged demos
-        if use_vlm and ctx.openrouter_key:
+        if use_vlm and ctx.model:
             targets: list[tuple[str, list, dict[str, Any]]] = []
             for f in failures:
                 if f["ep"].video_key and len(targets) < max_vlm:
@@ -72,11 +72,11 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
                         "outcome": "success" if ep.success else "failure",
                         "quality_flags": [fl.code for fl in ep.quality.flags] if ep.quality else []}))
             ctx.jobs.update(job, message=f"VLM review of {len(targets)} episodes", progress=0.5)
-            diags = await asyncio.gather(*(vlm.diagnose(ctx.openrouter_key, ctx.settings.vlm_model, ref, fr,
-                                                         project.spec.goal, tel) for ref, fr, tel in targets))
+            diags = await asyncio.gather(*(vlm.diagnose(ctx.model, ref, fr, project.spec.goal, tel)
+                                           for ref, fr, tel in targets))
             an.diagnoses = list(diags)
         elif use_vlm:
-            an.summary += "VLM skipped: no Model Gateway key configured. "
+            an.summary += "VLM skipped: no model endpoint configured. "
 
         # 4) clusters
         ctx.jobs.update(job, message="clustering failures", progress=0.9)

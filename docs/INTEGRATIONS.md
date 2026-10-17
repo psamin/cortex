@@ -12,7 +12,7 @@ when the provider is not configured. `GET /api/health` reports the active provid
 | Asset storage | InsForge storage, private bucket, presigned download URLs | **verified**: private `cortex-assets` bucket, videos/npz/LeRobot files uploaded, signed `cdn.insforge.dev` URLs play without auth | local disk (**verified**) |
 | VLM diagnostics | InsForge Model Gateway → OpenRouter → `anthropic/claude-sonnet-5.5` | **blocked by plan**: the project's org is on a free plan; `/api/ai/*` returns 403 "AI is only available on paid plans" | VLM step skipped and disclosed; telemetry and quality analysis still run |
 | Studio agent | same gateway, OpenAI-compatible tool calling | implemented, unverified | deterministic intent planner (**verified**) |
-| Manipulation planner | GPT-6 Astra: InsForge gateway → OpenRouter `openai/gpt-6-astra` (catalog lists image input, tools, structured outputs), the only route | planner loop **verified against a local stub**; no real Astra call yet: blocked until the InsForge org is on a paid plan | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
+| Manipulation planner | **Default: our own model.** `Qwen/Qwen3-VL-8B-Instruct` (Apache-2.0), served by vLLM 0.31 on a Futurama L40S ([serve_vlm.sbatch](../infra/futurama/serve_vlm.sbatch), [vlm_futurama.sh](../scripts/vlm_futurama.sh)); no per-token cost. Alternative: GPT-6 Astra via OpenRouter (InsForge gateway or our own key) | planner loop **verified against a local stub**; no real Astra call yet: blocked until the InsForge org is on a paid plan | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
 | Training | ACT via `lerobot-train` on GT Futurama Slurm over SSH | implemented, unverified (VPN was off) | manual command bundle + checkpoint registration |
 | MCP | mcp-use v2 server, Manufact hosting | see [mcp/README.md](../mcp/README.md) | local MCP server |
 | Evaluation workers | parallel local processes | **verified** | n/a |
@@ -73,7 +73,25 @@ when the provider is not configured. `GET /api/health` reports the active provid
   Cloudflare quick tunnel) and deploy with `CORTEX_API_URL` and `CORTEX_MCP_KEY`.
 - **Remote access:** remote callers can only reach `/api/tools`.
 
-## GPT-6 Astra
+## Self-hosted planner (our own model)
+
+- **Model:** `Qwen/Qwen3-VL-8B-Instruct` (Apache-2.0, ungated). It is trained for 2D grounding and GUI/tool
+  agents and reports points in **relative 0–1000 coordinates**, per Qwen's cookbook
+  `cookbooks/2d_grounding.ipynb` ("changed from the absolute coordinates used in Qwen2.5-VL to relative
+  coordinates ranging from 0 to 1000").
+- **Coordinate handling:** for this route, Cortex describes image points in 0–1000, labels the grid in the
+  same units, converts to pixels before validation, and records both the model's point and the executed
+  pixels in each trace step.
+- **Serving:** vLLM's OpenAI-compatible server with `--enable-auto-tool-choice --tool-call-parser hermes` and
+  up to 8 images per prompt. It runs on a Futurama compute node and is reached through an SSH tunnel.
+- **Routing:** when `PLANNER_BASE_URL` is set, this route takes precedence over OpenRouter for planning, VLM
+  diagnostics and the assistant. Cortex probes `/v1/models` first and refuses with a clear reason if the
+  endpoint is down.
+- **Unverified:** whether the `hermes` tool parser handles Qwen3-VL's tool-call format in vLLM 0.31, and the
+  model's pointing accuracy on our scenes. The planner loop is verified against a local stub that answers in
+  0–1000 coordinates.
+
+## GPT-6 Astra (alternative)
 
 - **Model availability:** checked on 2026-10-17. The OpenRouter catalog lists `openai/gpt-6-astra` with image,
   tools and structured outputs, at $10 / $50 per 1M input / output tokens. OpenAI's model page lists Chat

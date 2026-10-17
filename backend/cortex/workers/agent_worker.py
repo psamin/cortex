@@ -68,11 +68,14 @@ def main() -> None:
     cfg = json.loads(Path(sys.argv[1]).read_text())
     key = os.environ.get("CORTEX_PLANNER_API_KEY", "")
     pc = cfg["planner"]
-    planner = AstraPlanner(PlannerConfig(provider=pc["provider"], api_key=key, model=pc.get("model", ""),
-                                         mode=cfg.get("mode", "camera"), max_calls=pc.get("max_calls", 16),
-                                         max_usd=pc.get("max_usd", 1.5),
-                                         reasoning_effort=pc.get("reasoning_effort", "low"),
-                                         endpoint=os.environ.get("CORTEX_PLANNER_BASE_URL", "")))
+    planner = AstraPlanner(PlannerConfig(
+        provider=pc["provider"], api_key=key, model=pc.get("model", ""), mode=cfg.get("mode", "camera"),
+        max_calls=pc.get("max_calls", 16), max_usd=pc.get("max_usd", 1.5),
+        reasoning_effort=pc.get("reasoning_effort", "low"),
+        # CORTEX_PLANNER_BASE_URL: test hook (a local stub); the endpoint actually called is recorded per attempt
+        endpoint=os.environ.get("CORTEX_PLANNER_BASE_URL") or pc.get("endpoint", ""),
+        point_format=pc.get("point_format", "pixels"), openrouter_extras=pc.get("openrouter_extras", True),
+        price_per_m=pc.get("price_per_m", {"input": 10.0, "cached": 1.0, "output": 50.0})))
     env = PickPlaceEnv(episode_steps=10_000)
     on_frame = live_writer(Path(cfg["live_dir"]))
     total_cost, results = 0.0, []

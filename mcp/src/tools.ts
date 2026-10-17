@@ -226,20 +226,20 @@ const TOOLS: Def[] = [
     annotations: READ,
   },
 
-  // ---- autonomous demonstrations (GPT-6 Astra plans, validated IK executes in MuJoCo)
+  // ---- autonomous demonstrations (an agent VLM plans, validated IK executes in MuJoCo)
   {
     name: "create_policy_project",
     title: "Create policy project",
     description:
       "One call to start training a manipulation policy: creates the project and (by default) starts autonomous " +
-      "demonstration collection, where GPT-6 Astra plans from rendered camera images and a validated IK controller executes " +
+      "demonstration collection, where Cortex's agent planner (our self-hosted Qwen3-VL, or GPT-6 Astra) plans from rendered camera images and a validated IK controller executes " +
       "in MuJoCo. Only simulator-verified successes become LeRobot demonstrations. Returns project_id, collection_id and job_id. " +
-      "Planner spend is capped by the server's standing budget; you can lower it but never raise it. If Astra is not " +
+      "Paid planner spend is capped by the server's standing budget; you can lower it but never raise it. If the planner is not " +
       "configured, collection_not_started explains why (Cortex never substitutes another model).",
     inputSchema: z.object({
       task_prompt: z.string().describe("e.g. 'Train an SO-101 policy to pick up a cube and place it in a bowl'"),
       num_demos: z.number().int().min(1).max(50).optional().describe("Autonomous attempts to run (default 20)"),
-      start_collection: z.boolean().optional().describe("Start Astra collection right away (default true)"),
+      start_collection: z.boolean().optional().describe("Start agent collection right away (default true)"),
       diversity: z.enum(["plan", "medium", "high"]).optional().describe(
         "Scene variety: plan = the project's condition grid; medium = + jittered cube positions and lighting; high = + moved goal box",
       ),
@@ -251,7 +251,7 @@ const TOOLS: Def[] = [
     name: "start_agent_collection",
     title: "Start agent collection",
     description:
-      "Generate demonstrations autonomously in fresh simulator seeds. collector='astra' (default): GPT-6 Astra chooses actions " +
+      "Generate demonstrations autonomously in fresh simulator seeds. collector='agent' (default): the agent planner (self-hosted VLM or GPT-6 Astra) chooses actions " +
       "through validated tools (observe, point at the cube, move, grip, verify, place); collector='oracle': the scripted IK " +
       "expert on the same kind of scenes (for A/B). Pass conditions to target weak cells, e.g. [{cube_region:'left', " +
       "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex.get_collection_progress. Each attempt takes " +
@@ -264,10 +264,10 @@ const TOOLS: Def[] = [
         cube_region: z.enum(["left", "center", "right"]),
         lighting: z.enum(["dim", "normal", "bright"]).optional(),
       })).nullish().describe("Restrict scenes to these cells (targeted collection)"),
-      collector: z.enum(["astra", "oracle"]).optional(),
+      collector: z.enum(["agent", "oracle"]).optional().describe("agent (VLM planner) or oracle (scripted IK expert)"),
       max_total_usd: z.number().positive().nullish().describe("Spend cap for this collection (within the project budget)"),
       mode: z.enum(["camera", "privileged"]).nullish().describe(
-        "camera (default): Astra only sees images + proprioception. privileged: also simulator object poses (labelled as such).",
+        "camera (default): the planner only sees images + proprioception. privileged: also simulator object poses (labelled as such).",
       ),
     }),
     annotations: WRITE,
@@ -285,7 +285,7 @@ const TOOLS: Def[] = [
     name: "get_demonstration_results",
     title: "Get demonstration results",
     description:
-      "Every attempt with provenance (astra vs scripted oracle, provider, model, planning mode), outcome, episode_id for " +
+      "Every attempt with provenance (agent planner model vs scripted oracle, provider, planning mode), outcome, episode_id for " +
       "successes, recoveries, model calls and cost, plus per-collector metrics. Failed attempts are diagnostics only and are " +
       "never used as training data. Report differences between collectors only as measured here.",
     inputSchema: z.object({
@@ -298,7 +298,7 @@ const TOOLS: Def[] = [
     name: "train_from_agent_demonstrations",
     title: "Train from agent demonstrations",
     description:
-      "Build a LeRobotDataset v3 version from accepted demos of the chosen sources (default only GPT-6 Astra demos) and " +
+      "Build a LeRobotDataset v3 version from accepted demos of the chosen sources (default only agent-planner demos) and " +
       "propose ACT training. Returns job_id; its result_ref is the proposed training job id. Training does NOT start until a " +
       "human approves it in the studio (or the project's standing approval covers it). Never claim a policy was retrained " +
       "until a checkpoint exists.",
@@ -328,7 +328,7 @@ const TOOLS: Def[] = [
     title: "Improve policy",
     description:
       "Close the loop once: find the weakest measured condition of the latest learned-policy evaluation (or the top coverage " +
-      "gap), collect targeted Astra demonstrations there in fresh seeds within the budget, build a new dataset version and " +
+      "gap), collect targeted agent demonstrations there in fresh seeds within the budget, build a new dataset version and " +
       "propose retraining (needs approval). Returns the target cell, the evidence, collection_id and job_id.",
     inputSchema: z.object({
       project_id: projectId,
