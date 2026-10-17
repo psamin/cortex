@@ -123,7 +123,8 @@ class AstraPlanner:
         if usage.cost_usd >= self.cfg.max_usd:
             raise BudgetExceeded(f"episode cost budget ${self.cfg.max_usd:.2f} reached")
         body: dict[str, Any] = {"model": self.cfg.model, "messages": messages, "tools": tool_schemas(),
-                                "tool_choice": "auto", "parallel_tool_calls": False, "max_completion_tokens": 2000}
+                                "tool_choice": "auto", "parallel_tool_calls": False,
+                                "max_completion_tokens": 600}  # tool calls are ~100-300 tokens; OpenRouter reserves credit for the max
         body["reasoning"] = {"effort": self.cfg.reasoning_effort}  # OpenRouter's unified reasoning param
         body["usage"] = {"include": True}  # provider-reported cost
         t0 = time.time()
