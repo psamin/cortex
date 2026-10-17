@@ -13,7 +13,10 @@ def test_prompt_seeds_catalogue_objects_as_assumed():
     assert [o.name for o in spec.objects] == ["water_bottle"]
     assert spec.objects[0].shape == "cylinder" and spec.objects[0].assumed == {"shape", "size", "mass_kg"}
     assert spec.task.pick == "water_bottle"
-    assert "objects[water_bottle]" in paths(intake.status(spec))
+    st = intake.status(spec)
+    q = next(q for q in st.questions if q.path == "objects.water_bottle")
+    assert q.type == "enum" and "small water bottle" in q.options and q.patch is not None
+    assert "objects.water_bottle.mass_kg" in st.still_assumed
 
 
 def test_longest_catalogue_match_wins():
@@ -83,3 +86,54 @@ def test_bad_values_are_refused_with_a_reason():
     with pytest.raises(intake.IntakeError, match="cylinder size needs 2"):
         intake.apply_patch(intake.start(), {"objects": [{"name": "x", "shape": "cylinder", "size": [0.05],
                                                         "mass_kg": 0.1}]})
+
+
+def test_prompt_seeding_skips_ordinary_words():
+    spec = intake.start("Can you pick up the bottle and put it in the box?")
+    assert [o.name for o in spec.objects] == ["water_bottle"] and spec.task.pick == "water_bottle"
+
+
+def test_alias_updates_existing_object_instead_of_duplicating():
+    spec = intake.start("pick up the bottle")
+    before = spec
+    spec = intake.apply_patch(spec, {"objects": [{"name": "bottle", "mass_kg": 0.3}]})
+    assert [o.name for o in spec.objects] == ["water_bottle"] and spec.objects[0].mass_kg == 0.3
+    assert intake.status(spec, before).changed == ["objects.water_bottle.mass_kg"]
+
+
+def test_typos_and_assumed_are_refused():
+    with pytest.raises(intake.IntakeError, match="pick_object"):
+        intake.apply_patch(intake.start(), {"task": {"pick_object": "cube"}})
+    with pytest.raises(intake.IntakeError, match="assumed"):
+        intake.apply_patch(intake.start("cube"), {"objects": [{"name": "cube", "assumed": []}]})
+
+
+def test_sanity_checks_on_zones_home_and_resets():
+    with pytest.raises(intake.IntakeError, match="outside the workspace"):
+        intake.apply_patch(intake.start(), {"zones": [{"name": "far", "center": [5, 5]}]})
+    with pytest.raises(intake.IntakeError, match="home pose"):
+        intake.apply_patch(intake.start(), {"robot": {"home_pose": [500, 0, 0, 0, 0, 0]}})
+    spec = intake.apply_patch(intake.start("cube"), {"objects": [{"name": "cube", "confirm": True}],
+                                                    "zones": [{"name": "a", "center": [0.22, 0.1]}],
+                                                    "task": {"place": ["a"], "reset_policy": "cycle_zones"}})
+    assert not intake.status(spec).complete
+
+
+def test_every_required_question_patch_is_accepted():
+    spec = intake.start("bottle")
+    for _ in range(6):
+        st = intake.status(spec)
+        if st.complete:
+            break
+        q = next(q for q in st.questions if q.required and q.patch)
+        spec = intake.apply_patch(spec, q.patch)
+    assert intake.status(spec).complete
+
+
+def test_environment_and_obstacles():
+    spec = intake.apply_patch(intake.start(), {"environment": {
+        "lighting": "dim", "description": "white desk",
+        "obstacles": [{"name": "shelf", "shape": "box", "size": [0.1, 0.3, 0.2], "center": [0.35, 0.0]}]}})
+    assert spec.environment.lighting == "dim" and "lighting" not in spec.environment.assumed
+    spec = intake.apply_patch(spec, {"environment": {"obstacles": [{"name": "shelf", "_delete": True}]}})
+    assert spec.environment.obstacles == []

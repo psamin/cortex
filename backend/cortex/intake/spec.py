@@ -14,12 +14,18 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Vec2 = tuple[float, float]
 Shape = Literal["box", "cylinder", "sphere"]
 ResetPolicy = Literal["return_to_origin", "random_zone", "cycle_zones"]
 CameraRole = Literal["overhead", "front", "wrist"]
+
+
+class Strict(BaseModel):
+    """Unknown keys are errors, so an agent's typo is reported instead of silently dropped."""
+
+    model_config = ConfigDict(extra="forbid")
 
 SUPPORTED_ARMS = ("so101",)
 # The EnvHub env's HOME: arm folded above the table, gripper half open.
@@ -27,7 +33,7 @@ SO101_HOME = [0.0, -60.0, 60.0, 35.0, 0.0, 30.0]
 SO101_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
 
 
-class RobotProfile(BaseModel):
+class RobotProfile(Strict):
     model: Literal["so101"] = "so101"
     port: str | None = None  # e.g. COM5 or /dev/ttyACM0; real arms only
     calibration_file: str | None = None  # LeRobot so101_follower calibration JSON; real arms only
@@ -38,7 +44,7 @@ class RobotProfile(BaseModel):
     assumed: set[str] = Field(default_factory=lambda: {"home_pose"})
 
 
-class CameraSpec(BaseModel):
+class CameraSpec(Strict):
     name: str
     role: CameraRole
     device: str | None = None  # index or URL for a real camera; None in sim
@@ -49,19 +55,19 @@ class CameraSpec(BaseModel):
     xyaxes: tuple[float, float, float, float, float, float] | None = None
 
 
-class Rect(BaseModel):
+class Rect(Strict):
     center: Vec2
     half_size: Vec2
 
 
-class Workspace(BaseModel):
+class Workspace(Strict):
     x: Vec2 = (0.08, 0.36)
     y: Vec2 = (-0.22, 0.24)
     forbidden: list[Rect] = []
     assumed: set[str] = Field(default_factory=lambda: {"x", "y"})
 
 
-class ObjectSpec(BaseModel):
+class ObjectSpec(Strict):
     """A graspable primitive. ``size``: box = full x, y, z extents; cylinder = diameter, height;
     sphere = diameter."""
 
@@ -93,30 +99,54 @@ class ObjectSpec(BaseModel):
         return {"box": self.size[-1], "cylinder": self.size[1], "sphere": self.size[0]}[self.shape]
 
 
-class PlaceZone(BaseModel):
+class PlaceZone(Strict):
     name: str
     center: Vec2
     half_size: Vec2 = (0.04, 0.04)
 
 
-class TaskV2(BaseModel):
+class TaskV2(Strict):
     pick: str | None = None  # ObjectSpec.name
     place: list[str] = []  # PlaceZone names; one is the target, the rest feed cycle_zones
     reset_policy: ResetPolicy = "return_to_origin"
     sim_target: float = Field(0.7, ge=0, le=1)
-    real_target: float = Field(0.8, ge=0, le=1)
+    twin_target: float = Field(0.8, ge=0, le=1)  # MVP: success target in the physics-sim twin
+    real_target: float = Field(0.8, ge=0, le=1)  # hardware track (post-MVP)
     demos_per_round: int = Field(10, ge=1, le=200)
     eval_trials: int = Field(5, ge=1, le=100)
     max_rounds: int = Field(5, ge=1, le=50)
     model_budget_usd: float = Field(10.0, ge=0)
 
 
-class IntakeSpec(BaseModel):
+class Obstacle(Strict):
+    """A static, non-graspable primitive the arm must avoid (a shelf, a wall, a mug stand)."""
+
+    name: str
+    shape: Shape
+    size: list[float] = Field(min_length=1, max_length=3)  # same conventions as ObjectSpec.size
+    center: Vec2
+    z: float = 0.0  # bottom of the obstacle above the table surface
+    rgba: tuple[float, float, float, float] = (0.5, 0.5, 0.5, 1.0)
+
+
+class Environment(Strict):
+    """Everything around the objects that the sim scene should match."""
+
+    table_size: Vec2 = (0.80, 0.80)  # metres, centred 0.2 m in front of the arm base
+    table_rgba: tuple[float, float, float, float] = (0.80, 0.72, 0.60, 1.0)
+    lighting: Literal["dim", "normal", "bright"] = "normal"
+    obstacles: list[Obstacle] = []
+    description: str = ""  # free text from the agent, e.g. "white desk by a window, afternoon light"
+    assumed: set[str] = Field(default_factory=lambda: {"table_size", "table_rgba", "lighting"})
+
+
+class IntakeSpec(Strict):
     prompt: str = ""
     mode: Literal["sim", "real"] = "sim"
     robot: RobotProfile = Field(default_factory=RobotProfile)
     cameras: list[CameraSpec] = Field(default_factory=lambda: [CameraSpec(name="top", role="overhead")])
     workspace: Workspace = Field(default_factory=Workspace)
+    environment: Environment = Field(default_factory=Environment)
     objects: list[ObjectSpec] = []
     zones: list[PlaceZone] = []
     task: TaskV2 = Field(default_factory=TaskV2)
@@ -132,6 +162,8 @@ class Question(BaseModel):
     options: list[str] = []
     default: object | None = None
     required: bool = True
+    # A ready-to-send update_intake patch that accepts the default (or the first option).
+    patch: dict | None = None
 
 
 class IntakeStatus(BaseModel):
@@ -139,3 +171,5 @@ class IntakeStatus(BaseModel):
     questions: list[Question]
     complete: bool
     notes: list[str] = []
+    changed: list[str] = []  # paths the last patch changed
+    still_assumed: list[str] = []  # values Cortex filled in that nobody has confirmed
