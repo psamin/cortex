@@ -65,6 +65,37 @@ def make_fast(spec: dict, legal, seed, family="dynamic"):
                      prompt=spec.get("prompt", "v1"), family=family)
 
 
+_PRED_CACHE = {}
+
+
+def make_prefetcher(fast, pf: dict, legal, env_id, fast_spec, seed):
+    """Wrap the actor policy with predictive execution (experiment 2, specgraph)."""
+    from dreamcache.policies.heuristic import ObsBFSPolicy
+    from dreamcache.specgraph import predictors as P
+    from dreamcache.specgraph.prefetch import PrefetchingPolicy
+    from dreamcache.specgraph.scheduler import SchedConfig, Scheduler
+    name = pf.get("predictor", "context")
+    key = (name, pf.get("rows"), tuple(legal))
+    if key not in _PRED_CACHE:
+        cls = {"frequency": P.FrequencyPredictor, "transition": P.TransitionPredictor,
+               "context": P.ContextPredictor, "personalized": P.PersonalizedPredictor,
+               "heuristic": P.HeuristicPredictor}[name]
+        rows = [json.loads(line) for line in open(pf["rows"])] if pf.get("rows") else []
+        wf = pf.get("workflow")
+        rows = [{**r, "env": f"{r['env']}|{r['workflow']}"} for r in rows]
+        _PRED_CACHE[key] = cls(legal).fit(rows)
+    pred = _PRED_CACHE[key]
+    wf = pf.get("workflow", "")
+
+    class _Keyed:  # personalization key = env x workflow, matching training rows
+        def predict(self, row):
+            return pred.predict({**row, "env": f"{row['env']}|{wf}"})
+
+    fp = f"{fast_spec.get('model')}|{fast_spec.get('prompt', 'v1')}"
+    return PrefetchingPolicy(fast, legal, _Keyed(), Scheduler(build(SchedConfig, pf.get("sched")), legal, seed),
+                             env_id, fp, max_workers=pf.get("workers", 4), heuristic=ObsBFSPolicy(seed=seed))
+
+
 def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
     legal, family = legal_actions(env_id), env_family(env_id)
     env, obs = make_env(env_id, seed)
@@ -76,6 +107,9 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
         fast = make_fast(fast_spec, legal, seed, family)
         big = (make_fast({**fast_spec, "model": fast_spec["big_model"]}, legal, seed, family)
                if fast_spec.get("big_model") else None)
+        pf_cfg = method.get("prefetch")
+        if pf_cfg:
+            fast = make_prefetcher(fast, pf_cfg, legal, env_id, fast_spec, seed)
         agent = Agent(fast, legal, family, build(AgentConfig, method.get("agent")), seed, big=big)
     elif kind == "lossless":
         from dreamcache.agents.lossless import LosslessSpecAgent
@@ -91,6 +125,8 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
     limit = max_steps or env.unwrapped.max_steps
     for t in range(limit):
         if kind in ("agent", "lossless"):
+            if kind == "agent" and method.get("prefetch"):
+                agent.fast.speculate(env, obs, history, t)
             a, rec = agent.act(env, obs, history, t)
         else:
             t0 = time.perf_counter()
@@ -106,17 +142,25 @@ def run_episode(env_id, seed, method: dict, fast_spec: dict, max_steps=None):
             success, failure = is_success(r, term), is_failure(r, term)
             break
     extra = agent.finalize() if kind == "lossless" else None
+    if kind == "agent" and method.get("prefetch"):
+        extra = {"prefetch": agent.fast.finalize()}
     return {"env": env_id, "seed": seed, "method": method["name"], "success": success, "extra": extra,
             "failure": failure, "return": total_r, "steps": len(records),
             "episode_seconds": time.perf_counter() - t_start, "records": records}
 
 
-def _job(args):
-    try:
-        return run_episode(*args)
-    except Exception:  # keep the sweep alive; failures are logged, never dropped silently
-        return {"error": traceback.format_exc(), "env": args[0], "seed": args[1],
-                "method": args[2]["name"]}
+def _job(args, attempts=3):
+    """Retry a failed episode from scratch (same seed) so transient server errors do not
+    silently drop (and bias) episodes; persistent failures are logged, never dropped."""
+    err = None
+    for i in range(attempts):
+        try:
+            r = run_episode(*args)
+            r["attempts"] = i + 1
+            return r
+        except Exception:  # noqa: BLE001
+            err = traceback.format_exc()
+    return {"error": err, "env": args[0], "seed": args[1], "method": args[2]["name"]}
 
 
 def manifest(cfg, fast_spec):
@@ -125,8 +169,9 @@ def manifest(cfg, fast_spec):
             return subprocess.run(c, capture_output=True, text=True, timeout=10).stdout.strip()
         except Exception:
             return None
+    gc = open("GIT_COMMIT").read().strip() if os.path.exists("GIT_COMMIT") else sh("git", "rev-parse", "HEAD")
     m = {"timestamp": dt.datetime.now().isoformat(), "config": cfg,
-         "git_commit": sh("git", "rev-parse", "HEAD"), "git_dirty": bool(sh("git", "status", "--porcelain")),
+         "git_commit": gc, "git_dirty": bool(sh("git", "status", "--porcelain")),
          "python": sys.version, "platform": platform.platform(), "hostname": platform.node(),
          "slurm_job": os.environ.get("SLURM_JOB_ID"), "gpu": sh("nvidia-smi", "--query-gpu=name,driver_version,memory.total", "--format=csv,noheader"),
          "packages": {p: _ver(p) for p in ("minigrid", "gymnasium", "numpy", "pydantic", "httpx")}}

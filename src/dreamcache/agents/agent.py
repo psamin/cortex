@@ -15,7 +15,19 @@ how a triggered decision is resolved. Every condition uses the same fast policy.
   N mcts          on trigger, UCT search over cloned simulators (SIMULATOR-ASSISTED)
   K spec_draft    speculative action drafting: small drafts L actions in one call, BIG
                   verifies the plan in one call; the accepted prefix runs without more
-                  BIG calls (speculative decoding analogue). Mode, not a trigger.
+                  BIG calls (speculative decoding analogue). Mode, not a trigger. NOT
+                  lossless: trusts the big model's self-reported accepted-prefix count.
+  K* spec_draft_lossless  faithful greedy speculative decoding over actions, after Dynamic
+                  Speculative Planning (arXiv 2509.01920) / ISP (arXiv 2410.00079): the small
+                  model drafts L actions; the drafted states are produced in simulator clones
+                  sharing the real RNG; the BIG model decides on every drafted state IN
+                  PARALLEL; accept the longest prefix where draft == big argmax, then append
+                  the big model's own action at the first mismatch (the "bonus token").
+                  Executed actions equal the big model's greedy choices (lossless w.r.t.
+                  L_greedy). SIMULATOR-ASSISTED (clones produce drafted states).
+  S swiftsage     trigger rule ported from SwiftSage (arXiv 2305.17390, eval_agent_fast_slow.py):
+                  stay fast if step < 10, or < 5 steps since last slow call, or the fast
+                  action is not among the last 3 actions; otherwise call the slow (BIG) model.
 """
 from __future__ import annotations
 
@@ -75,6 +87,8 @@ class Agent:
         c = self.cfg
         if c.mode == "spec_draft":
             return self._spec_draft(obs, history, t)
+        if c.mode == "spec_draft_lossless":
+            return self._spec_draft_lossless(env, obs, history, t)
         t0 = time.perf_counter()
         dec = self.fast.decide(obs, history)
         cost = Cost()
@@ -98,6 +112,11 @@ class Agent:
             trig = bool(self.rng.random() < c.rate)
         elif c.trigger == "periodic":
             trig = t % c.period == 0
+        elif c.trigger == "swiftsage":
+            since = t - getattr(self, "_last_slow", -100)
+            trig = not (t < 10 or since < 5 or dec.action not in history[-3:])
+            if trig:
+                self._last_slow = t
         elif c.trigger == "oracle":
             q = q_ref(env, self.legal, history, n=c.oracle_samples, seed=self.seed * 1000 + t)
             rec["oracle_q"] = {str(k): v for k, v in q.items()}
@@ -166,6 +185,50 @@ class Agent:
         else:
             rec["triggered"] = False
         action = self.queue.pop(0)
+        cost.wall_seconds = time.perf_counter() - t0
+        rec.update(action=int(action), changed=False, cost=cost.as_dict())
+        return action, rec
+
+    def _spec_draft_lossless(self, env, obs, history, t):
+        from concurrent.futures import ThreadPoolExecutor
+
+        from dreamcache.environments.cloning import clone_env
+        c = self.cfg
+        t0 = time.perf_counter()
+        cost = Cost()
+        rec = {"t": t, "mode": "spec_draft_lossless"}
+        if self.queue:
+            action = self.queue.pop(0)
+            rec.update(triggered=False, action=int(action), changed=False)
+            cost.wall_seconds = time.perf_counter() - t0
+            rec["cost"] = cost.as_dict()
+            return action, rec
+        plan, dc = self.fast.draft_plan(obs, history, c.plan_len)
+        cost += dc
+        # drafted states: follow the draft in a clone that shares the real RNG
+        states, sim, h, o = [(obs, list(history))], clone_env(env), list(history), obs
+        for a in plan[:-1]:
+            o, _, term, trunc, _ = sim.step(a)
+            h = h + [a]
+            if term or trunc:
+                break
+            states.append((o, h))
+        if not hasattr(self, "_pool"):
+            self._pool = ThreadPoolExecutor(max(2, c.plan_len))
+        decs = list(self._pool.map(lambda st: self.big.decide(st[0], st[1]), states))
+        accepted, n_acc = [], 0
+        for d in decs:
+            cost += d.cost  # all parallel big calls are paid for, used or not
+        for a, d in zip(plan, decs):
+            if d.action == a:
+                accepted.append(int(a))
+                n_acc += 1
+            else:
+                accepted.append(int(d.action))  # bonus: the big model's own action
+                break
+        rec.update(draft=plan, accepted=n_acc, big_calls=len(decs), triggered=True)
+        self.queue = accepted[1:]
+        action = accepted[0]
         cost.wall_seconds = time.perf_counter() - t0
         rec.update(action=int(action), changed=False, cost=cost.as_dict())
         return action, rec

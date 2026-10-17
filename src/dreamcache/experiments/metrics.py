@@ -30,7 +30,18 @@ def episode_metrics(ep: dict) -> dict:
          "decision_latency_mean": float(np.mean(lat)) if lat else 0.0}
     for k in COST_KEYS:
         m[k] = float(sum(c.get(k, 0) for c in costs))
-    if ep.get("extra"):  # lossless speculation: actor calls incl. wasted prefetches
+    if ep.get("extra") and "prefetch" in ep["extra"]:  # predictive execution (specgraph)
+        ex = ep["extra"]["prefetch"]
+        m["llm_seconds"] += ex["wasted_llm_seconds"]   # reused calls are already in step costs
+        m["wasted_llm_seconds"] = ex["wasted_llm_seconds"]
+        n_l = max(1, ex["launched"])
+        m["spec_launched"] = ex["launched"]
+        m["spec_reuse_rate"] = (ex.get("reused", 0) + ex.get("reused_late", 0)) / n_l
+        m["spec_late_rate"] = ex.get("reused_late", 0) / n_l
+        m["spec_unused_rate"] = ex.get("unused", 0) / n_l
+        m["prefetch_hit_rate"] = (ex.get("reused", 0) + ex.get("reused_late", 0)) / max(1, len(recs))
+        m["predict_overhead_s"] = ex["predict_overhead_s"]
+    elif ep.get("extra"):  # lossless speculation: actor calls incl. wasted prefetches
         ex = ep["extra"]
         for k in COST_KEYS:
             m[k] += float(ex["actor_cost"].get(k, 0))

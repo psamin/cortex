@@ -47,7 +47,7 @@ class LLMReply(BaseModel):
 
 
 class OllamaClient:
-    def __init__(self, host=None, model="qwen3:4b", timeout=60.0, retries=3,
+    def __init__(self, host=None, model="qwen3:4b", timeout=300.0, retries=3,
                  num_predict=80, num_ctx=4096, cache_path=None, think=False):
         self.host = host or os.environ.get("OLLAMA_HOST_URL", "http://127.0.0.1:11434")
         self.model, self.retries, self.think = model, retries, think

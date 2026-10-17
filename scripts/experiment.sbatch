@@ -19,8 +19,13 @@ mkdir -p logs results
 export DC_LOG_DIR="$REPO/logs"
 source scripts/ollama_env.sh
 export UV_PYTHON_INSTALL_DIR="$SCR/py"
-cd "$REPO"
-uv sync -q --python 3.12
+# Run from a private snapshot of the code so later syncs cannot change a running job.
+mkdir -p "$SCR/code" && cp -r "$REPO/src" "$REPO/scripts" "$REPO/configs" "$REPO/analysis" "$REPO/pyproject.toml" "$REPO/uv.lock" "$SCR/code/"
+[ -f "$REPO/GIT_COMMIT" ] && cp "$REPO/GIT_COMMIT" "$SCR/code/"
+cd "$SCR/code"
+ln -s "$REPO/results" results
+ln -s "$REPO/logs" logs
+uv sync -q --python 3.12 --extra dev
 export OLLAMA_HOST_URL="http://$OLLAMA_HOST"
 export DC_LLM_CACHE="$SCR/llm_cache.sqlite"
 nvidia-smi --query-gpu=timestamp,utilization.gpu,memory.used --format=csv -l 5 > "logs/gpu-${SLURM_JOB_ID}.csv" &
@@ -33,6 +38,9 @@ if [ "${DC_BENCH:-0}" = "1" ]; then
 fi
 if [ "${DC_PROBE:-0}" = "1" ]; then
   uv run python scripts/prompt_probe.py --models ${DC_MODELS:-qwen3:4b} --out "results/probe-${SLURM_JOB_ID}.json"
+fi
+if [ "${DC_CODEBENCH:-0}" = "1" ]; then
+  uv run python -m dreamcache.codebench.run --out results/codebench --model "${DC_CB_MODEL:-qwen3:4b}" --repeats "${DC_CB_REPEATS:-1}"
 fi
 for cfg in "$@"; do
   uv run python -m dreamcache.experiments.runner "$cfg" --out results --workers "${DC_WORKERS:-8}"

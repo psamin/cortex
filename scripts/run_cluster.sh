@@ -4,6 +4,7 @@
 set -euo pipefail
 HOST="${DC_HOST:-pi34@planetexpress-login.cc.gatech.edu}"
 DEST="${DC_DEST:-dreamcache}"
+{ git rev-parse HEAD; git status --porcelain | head -1 | sed 's/^/DIRTY: /'; } > GIT_COMMIT
 rsync -az --delete --exclude .venv --exclude results --exclude logs --exclude .git \
   --exclude __pycache__ --exclude .claude ./ "$HOST:$DEST/"
 ssh "$HOST" "cd $DEST && mkdir -p logs && sbatch ${DC_SBATCH_ARGS:-} scripts/experiment.sbatch $*"

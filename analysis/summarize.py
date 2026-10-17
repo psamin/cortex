@@ -20,7 +20,8 @@ from dreamcache.experiments.statistics import bootstrap_ci, paired_diff  # noqa:
 
 COLS = ["success", "failure", "return", "steps", "trigger_rate", "llm_calls", "gen_tokens",
         "llm_seconds", "sim_steps", "sim_cpu_seconds", "compute_seconds", "episode_seconds",
-        "decision_latency_mean", "verify_accept_rate", "draft_accepted_mean", "draft_calls_per_step", "prefetch_hit_rate", "actor_calls_per_step"]
+        "decision_latency_mean", "verify_accept_rate", "draft_accepted_mean", "draft_calls_per_step", "prefetch_hit_rate", "actor_calls_per_step",
+        "spec_reuse_rate", "spec_late_rate", "spec_unused_rate", "wasted_llm_seconds", "predict_overhead_s"]
 
 
 def main(argv=None):

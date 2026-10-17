@@ -102,3 +102,29 @@ def test_lossless_spec_actions_match_actor():
             break
     st = ag.finalize()
     assert st["hits"] + st["misses"] == len(hist)
+
+
+def test_lossless_draft_equals_big_greedy():
+    """With the surrogate big model being deterministic per observation, executed actions
+    must equal what the big model alone would choose on the same states."""
+    from dreamcache.environments.observations import features
+    from dreamcache.types import Cost, Decision
+
+    class Big:
+        def decide(self, obs, history):
+            return Decision(1 if features(obs).front_blocked else 2, {0: .1, 1: .3, 2: .6}, Cost(llm_calls=1))
+
+    class Small(Big):
+        def draft_plan(self, obs, history, length):
+            return [2, 2, 0, 2][:length], Cost(llm_calls=1)
+
+    env, obs = make_env(DYN, 6)
+    ag = Agent(Small(), [0, 1, 2], "dynamic", AgentConfig(mode="spec_draft_lossless", plan_len=4), seed=0, big=Big())
+    hist = []
+    for t in range(15):
+        a, rec = ag.act(env, obs, hist, t)
+        assert a == Big().decide(obs, hist).action
+        obs, r, term, trunc, _ = env.step(a)
+        hist.append(a)
+        if term or trunc:
+            break
