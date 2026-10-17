@@ -1,0 +1,22 @@
+# PART 3 of the held-out test (same frozen method definitions; load balancing across GPUs).
+# Phase 4: HELD-OUT TEST, seeds 10000-10099. Configuration frozen before this run. The
+# primary selective threshold is chosen on validation by a pre-stated rule (see
+# report: highest val success among thresholds whose trigger rate <= 0.5; ties -> lower
+# compute). Other thresholds are run as reported ablations, not used for selection.
+split: test
+n_seeds: 100
+envs: [MiniGrid-Dynamic-Obstacles-8x8-v0]
+fast: {kind: llm, model: "qwen3:4b", big_model: "qwen3:8b", prompt: v3}
+defaults:
+  detector: {alpha: 0.4, beta: 0.3, gamma: 0.3, n_proposals: 3}
+  spec: {k: 3, horizon: 5, samples: 4, rollout_policy: sim_bfs, candidates: llm_rank}
+  evaluator: {kind: shaped}
+methods:
+  - {agent: {mode: spec_draft_lossless, plan_len: 4}, name: K2_lossless_draft_L4}
+  - {agent: {resolve: cascade, trigger: swiftsage}, name: S_swiftsage_cascade}
+  - {agent: {mcts_depth: 8, mcts_iterations: 60, resolve: mcts, threshold: 0.4, trigger: threshold}, name: N_mcts_sel_0.4}
+  - {agent: {rate: 0.25, trigger: random}, name: E_random_0.25}
+  - {agent: {rate: 0.5, trigger: random}, name: E_random_0.5}
+  - {agent: {resolve: norollout, trigger: always}, name: G_bestofk_norollout}
+  - {kind: planner_sim, name: I_planner_sim}
+  - {kind: planner_obs, name: I_planner_obs}
