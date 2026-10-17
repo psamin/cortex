@@ -51,6 +51,6 @@ Results are in [REPORT.md](REPORT.md). Code lives in `src/dreamcache/specgraph/`
 | B4 | global context predictor, top-1 | `top1_global` |
 | B5 | personalized, top-1 | `top1_personalized` |
 | B6 | personalized + utility scheduler (and adaptive) | `utility_personalized` |
-| B7 | SSD + graph-ranked rollout candidates: **not implemented** | N/A |
+| B7 | SSD with rollout candidates ranked by the graph predictor (`spec.candidates: graph`, `graph_rank:` in the config) | N/A |
 | B8 | SSD + predictive prefetch of the 4b actor's next call | N/A |
 | extra | top-K=3 (all actions, like Speculative Actions K=3), random scheduler, heuristic predictor | `all`, `random`, `topk2` |
