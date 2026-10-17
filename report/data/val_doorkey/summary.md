@@ -1,4 +1,4 @@
-Episodes with runner errors (excluded, listed in episodes.jsonl): 45
+Episodes with runner errors (excluded, listed in episodes.jsonl): 45; duplicate (method, seed) episodes skipped: 0
 
 | env | method | n | success [95% CI] | collision | steps | trigger rate | LLM calls/ep | model-s/ep | sim CPU-s/ep | episode s | lat p50/p95 (s) |
 |---|---|---|---|---|---|---|---|---|---|---|---|
