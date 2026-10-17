@@ -20,7 +20,7 @@ from dreamcache.policies.ollama_policy import OllamaClient
 
 POLICIES = [("none", None), ("memo", None), ("all", None), ("random", None),
             ("top1_frequency", "frequency"), ("top1_global", "global"), ("top1_personalized", "personalized"),
-            ("topk2_personalized", "personalized"), ("utility_personalized", "personalized")]
+            ("utility_personalized", "personalized")]
 
 
 def rows_of(results):

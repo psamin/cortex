@@ -16,17 +16,22 @@ from dreamcache.codebench.tools import READ_ONLY, edit_function, execute, read_f
 
 SYSTEM = ("You are a coding agent fixing a bug in a small Python package (pkg/core.py, tests in "
           "tests/test_core.py). Tools: read_file(file), edit(function, code) which replaces the WHOLE "
-          "function definition in pkg/core.py, run_tests, lint, deps_check, finish. Typical workflow: "
-          "run tests, read the code, edit the buggy function, re-run tests, finish when tests pass. "
+          "function definition in pkg/core.py, run_tests, lint, deps_check, finish. Rules enforced by "
+          "the harness (like a CI gate): after an edit you must check it with run_tests or lint before "
+          "editing again, and finish is only accepted after run_tests passes. Typical workflow: "
+          "read_file, edit the buggy function, run_tests (optionally lint), repeat, finish. "
           "Respond only with JSON.")
 SCHEMA = {"type": "object", "properties": {"op": {"type": "string", "enum": OPS}, "file": {"type": "string"},
                                            "function": {"type": "string"}, "code": {"type": "string"}},
           "required": ["op"]}
 
 
-def run_task(client, ws, meta, speculator, max_steps=12, replay=False):
+def run_task(client, ws, meta, speculator, max_steps=16, replay=False):
     hist, steps = [], []
     prev_op, last_ok = "start", "na"
+    unchecked_edit, tests_passed = False, False
+    first = execute("run_tests", ws)   # task statement: initial failing-test summary (not timed)
+    failing = [ln for ln in first["out"].splitlines() if ln.startswith(("FAILED", "E "))][:6]
     t_task = time.perf_counter()
     for step in range(max_steps):
         snap = snapshot_hash(ws)
@@ -35,7 +40,8 @@ def run_task(client, ws, meta, speculator, max_steps=12, replay=False):
         sched_s = time.perf_counter() - t_spec
         obs = "\n".join(f"[{h['op']}] {h['out']}" for h in hist[-4:]) or "(no actions yet)"
         msgs = [{"role": "system", "content": SYSTEM},
-                {"role": "user", "content": f"Task: tests are failing; find and fix the bug.\nStep {step + 1}/{max_steps}.\n"
+                {"role": "user", "content": "Task: tests are failing; find and fix the bug.\nInitial test failures:\n"
+                                            + "\n".join(failing) + f"\nStep {step + 1}/{max_steps}.\n"
                                             f"Recent tool outputs:\n{obs}\nChoose the next tool call."}]
         t0 = time.perf_counter()
         content, cost = client.chat(msgs, SCHEMA, 0.0, 0)
@@ -49,14 +55,24 @@ def run_task(client, ws, meta, speculator, max_steps=12, replay=False):
         op = d.get("op") if d.get("op") in OPS else "run_tests"
         t1 = time.perf_counter()
         info = {"critical_s": 0.0, "reused": False, "fate": "local"}
-        if op in READ_ONLY:
+        if op == "edit" and unchecked_edit:
+            out, ok = "edit rejected by CI gate: run_tests or lint the previous edit first", "fail"
+        elif op == "finish" and not tests_passed:
+            out, ok = "finish rejected by CI gate: run_tests must pass on the current version first", "fail"
+        elif op in READ_ONLY:
             res, info = speculator.request(op, ws, snap)
             out, ok = res["out"], "ok" if res["rc"] == 0 else "fail"
+            if op in ("run_tests", "lint"):
+                unchecked_edit = False
+            if op == "run_tests":
+                tests_passed = res["rc"] == 0
         elif op == "read_file":
             out, ok = read_file(ws, d.get("file") or "pkg/core.py"), "ok"
         elif op == "edit":
             out = edit_function(ws, d.get("function", ""), d.get("code", ""))
             ok = "ok" if out.startswith("edited") else "fail"
+            if ok == "ok":
+                unchecked_edit, tests_passed = True, False
         else:
             out, ok = "finished", "ok"
         tool_s = time.perf_counter() - t1
@@ -66,7 +82,7 @@ def run_task(client, ws, meta, speculator, max_steps=12, replay=False):
                       "snapshot": snap, "prev_op": prev_op, "last_ok": last_ok, "family": meta["family"]})
         hist.append({"op": op, "out": out[-600:]})
         prev_op, last_ok = op, ok
-        if op == "finish":
+        if op == "finish" and ok == "ok":
             break
     wall = time.perf_counter() - t_task
     final = execute("run_tests", ws)   # correctness check, outside the timed region
