@@ -109,13 +109,13 @@ Notes:
 - **SwiftSage trigger vs 8b greedy:** −0.18 [−0.30, −0.06], p=0.006. Its stuck/repeat rule fires on only 8% of steps, and it misses imminent collisions.
 - **Best-of-K without rollouts vs 8b:** +0.17 [+0.04, +0.31], p=0.019. Observable-risk filtering helps, but far less than simulated rollouts (1.00).
 
-### 2b. Baseline H: extra model reasoning instead of rollouts (test seeds, n=32, 60-step cap)
+### 2b. Baseline H: extra model reasoning instead of rollouts (test seeds, n=100, 60-step cap)
 `report/data/test_dyn8_think/`
 
 qwen3:4b with thinking enabled (up to 1,024 thinking tokens per decision, about 26 s per call at 32-way concurrency):
 - Success **0.00 [0.00, 0.00]**.
 - Collisions 0.00. Every episode was truncated at 60 steps.
-- **1,552 model-s per episode**, about 15× always-on rollouts (103).
+- **1,552 model-s per episode** in the first 32 seeds (32-way concurrency), about 15× always-on rollouts (103). Across all 100 seeds the average is 3,224, because the 68-seed extension ran 68-way concurrent and each call was slower.
 
 Thinking made the agent avoid walls and obstacles, but it never reached the goal; it turns in place. On this task, spending compute on simulated consequences is decisive, and spending the same or more on reasoning without the environment is not.
 
@@ -135,6 +135,20 @@ Thinking made the agent avoid walls and obstacles, but it never reached the goal
 - It does not transfer in **efficiency**. All 9 failures are 200-step truncations: between triggers the 4b agent dithers, and the bigger grid makes that fatal to the step budget.
 - The observation-only planner also degrades (0.58), because the goal is often out of view.
 - Always-on rollouts stay at 1.00 and are again the cheapest way to get there.
+
+### 2d. DoorKey-8x8 held-out test (seeds 10000–10099, n=100, 60-step cap)
+`report/data/test_doorkey/`
+
+| Method | Success [95% CI] | Steps | Trigger rate | Model-s / ep |
+|---|---|---|---|---|
+| A greedy 4b | 0.00 | 60 | 0 | 358 |
+| L greedy 8b | 0.00 | 60 | 0 | 298 |
+| B always-on rollouts | **0.69** [0.60, 0.78] | 35.2 | 1.00 | 209 |
+| C all signals, 0.4 | 0.61 [0.52, 0.70] | 40.4 | 0.78 | 2168 |
+| C risk only, 0.4 (the Dynamic-Obstacles winner) | **0.00** | 60 | **0.00** | 359 |
+| I planner, SimBFS / ObsBFS | 1.00 / 0.24 | 17.7 / 53.9 | — | 0 |
+
+**The risk trigger does not transfer across tasks.** DoorKey has no hazards, so observable risk never fires; its consequential decisions are about key, door, and route, not collisions. The LLM-uncertainty signals do fire there, at a 78% trigger rate, but they buy nothing over always-on rollouts (Δ −0.08, p=0.12) at 10× the compute. On this evidence, a deployable trigger needs task-specific consequence signals, or a learned detector (tracking package P2).
 
 ## 3. Which signals find consequential decisions? (Ablation 4, offline)
 `report/data/detector_delta0.2/`
@@ -224,6 +238,7 @@ Thinking made the agent avoid walls and obstacles, but it never reached the goal
 ## 7. Threats to validity
 - **Privileged rollouts.** B / C / D / N and the shaped evaluator use the simulator (labeled simulator-assisted). A deployable agent would need a learned or observation-only model; ObsBFS rollouts matched SimBFS in the ablation.
 - **The LLM is a weak policy here,** and a non-LLM observation-only planner solves the task. Absolute LLM numbers are prompt-sensitive; prompt v3 was chosen on dev seeds 0–19 (`results/probe-10453.json`).
+- **The BALROG prompt (v4)** is adapted from balrog-ai/BALROG (MIT) and its Minigrid-fork text descriptions (Apache-2.0). It was probed on the same dev states and did worse than v3 for both models and both environments. Planner agreement: 0.20 vs 0.43 (4b), 0.25 vs 0.53 (8b). Fatal-move rate: 0.23 vs 0.08 (4b). So v3 stays (`report/data/probe-10490.json`).
 - **Response cache.** It makes repeated prompts free in wall-clock terms within one run, so latency columns in the main tables are optimistic. Speedup claims use only the cache-disabled runs in §5.
 - **Server nondeterminism** at temperature 0 under batching. Lossless methods are lossless only up to it.
 - **Episode length couples to compute:** triggers that prevent deaths also lengthen episodes. Model-seconds per episode, not per decision, is the reported cost.
