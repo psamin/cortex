@@ -89,13 +89,16 @@ export async function callTool(tool: string, args: Json, signal?: AbortSignal): 
 
   if (res.ok && body !== undefined) {
     const refs = ids(data);
-    return {
-      content: text(
-        String(data.summary ?? `cortex.${tool} ok`),
-        refs.length > 0 && `ref_ids: ${refs.join(", ")}`,
-      ),
-      structuredContent: data,
-    };
+    // Scene renders come back as base64 JPEG; hand them to the agent as an MCP image, not as text.
+    const { image_jpeg_base64: image, ...rest } = data;
+    const content = text(
+      String(data.summary ?? `cortex.${tool} ok`),
+      refs.length > 0 && `ref_ids: ${refs.join(", ")}`,
+    );
+    if (typeof image === "string" && image.length > 0) {
+      content.push({ type: "image", data: image, mimeType: "image/jpeg" });
+    }
+    return { content, structuredContent: rest };
   }
   if (res.status === 403 && data.approval_required === true) return approvalRequired(tool, args, detail);
   if (res.status === 403) {
