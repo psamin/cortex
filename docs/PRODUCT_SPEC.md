@@ -29,6 +29,26 @@ twin** of the agent's scene instead of hardware:
     verifier's accuracy is measured before the verifier ever meets hardware.
 - **Rounds.** Each round fine-tunes the latest checkpoint and runs a short twin evaluation, until the
   target is met or the budget runs out.
+- **The agent describes the scene and the environment.** That covers objects, place zones, the table
+  (size and colour), lighting, static obstacles and camera placement, all through `update_intake`.
+  Cortex builds the MuJoCo scene from that description. The agent then calls `capture_frame` to look
+  at the render and patches anything that doesn't match.
+- **The twin's gap is structural, not just new seeds.** On top of the scene, the twin adds:
+  - 1–3 ticks of action and observation latency;
+  - PD-gain mismatch, gripper backlash and compliance;
+  - camera intrinsics jitter, sensor noise and JPEG compression;
+  - unseen textures and distractor objects.
+
+  Latency and actuator dynamics are the biggest real-world gaps, so the twin models them.
+- **Three randomization sets.** Set A is used for pretraining, set B for the rounds, and a held-out
+  set C only for the final score and the model card.
+- **Labels the way a real arm would see them.** Twin training data is gated on the verifier's verdict,
+  not on simulator ground truth. Ground truth is logged anyway, so the model card can report the
+  verifier's confusion matrix.
+- **A robot backend interface from day one.** The twin implements the same `RobotBackend` interface
+  that the hardware backend will. Moving to a real arm then means swapping one class.
+- **Running twin rounds without Astra.** A camera-mode scripted oracle with pixel-pointing noise can
+  drive twin rounds, labelled as such, while the Astra route is blocked.
 
 The hardware track (sections 3.1 calibration, 3.3 real gates and 5.2–5.3, plus roadmap P7–P9) is
 **post-MVP**, kept on separate modules and branches. Nothing in the MVP path imports it. The intake
