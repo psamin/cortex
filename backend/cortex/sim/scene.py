@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..intake.spec import IntakeSpec, ObjectSpec
+from .grasp import SIDE_MIN_RADIUS, grasp_mode
 from .so101 import envhub_module
 
 PARK_Z = -0.70  # under the table top, above the floor at -0.75: out of every camera
@@ -60,12 +61,15 @@ def mj_size(o: ObjectSpec) -> str:
 def default_starts(spec: IntakeSpec) -> dict[str, tuple[float, float]]:
     """Objects without a start go to free spots across the front of the workspace, away from zones."""
     taken = [z.center for z in spec.zones] + [o.start for o in spec.objects if o.start]
-    cands = [(0.20, -0.04), (0.25, 0.035), (0.17, -0.12), (0.28, -0.08), (0.15, 0.08), (0.30, 0.10)]
+    near = [(0.20, -0.04), (0.25, 0.035), (0.17, -0.12), (0.28, -0.08), (0.15, 0.08), (0.30, 0.10)]
+    far = [(0.32, -0.02), (0.30, -0.13), (0.31, 0.10), (0.27, -0.20), (0.34, 0.06)]  # side-grasp reach
     out: dict[str, tuple[float, float]] = {}
     for o in spec.objects:
         if o.start:
             out[o.name] = tuple(o.start)  # type: ignore[assignment]
             continue
+        cands = far if grasp_mode(o.height) == "side" else near
+        assert all((c[0] ** 2 + c[1] ** 2) ** 0.5 >= SIDE_MIN_RADIUS - 0.005 for c in far)
         free = [c for c in cands if all((c[0] - t[0]) ** 2 + (c[1] - t[1]) ** 2 > 0.07 ** 2 for t in taken)]
         pick = (free or cands)[0]
         out[o.name] = pick
