@@ -21,7 +21,8 @@ SYSTEM = ("You are a coding agent fixing a bug in a small Python package (pkg/co
           "editing again, and finish is only accepted after run_tests passes. Typical workflow: "
           "read_file, edit the buggy function, run_tests (optionally lint), repeat, finish. "
           "Respond only with JSON.")
-SCHEMA = {"type": "object", "properties": {"op": {"type": "string", "enum": OPS}, "file": {"type": "string"},
+OP_ORDER = ["run_tests", "lint", "deps_check", "read_file", "edit", "finish"]
+SCHEMA = {"type": "object", "properties": {"op": {"type": "string", "enum": OP_ORDER}, "file": {"type": "string"},
                                            "function": {"type": "string"}, "code": {"type": "string"}},
           "required": ["op"]}
 
@@ -39,9 +40,13 @@ def run_task(client, ws, meta, speculator, max_steps=16, replay=False):
         speculator.on_new_snapshot(ws, snap, prev_op, last_ok, meta["family"])
         sched_s = time.perf_counter() - t_spec
         obs = "\n".join(f"[{h['op']}] {h['out']}" for h in hist[-4:]) or "(no actions yet)"
+        allowed = [o for o in OP_ORDER if not (o == "edit" and unchecked_edit) and not (o == "finish" and not tests_passed)]
+        status = ("your last edit has NOT been tested yet" if unchecked_edit else
+                  "tests PASS on the current version" if tests_passed else "tests are failing or not yet run")
         msgs = [{"role": "system", "content": SYSTEM},
                 {"role": "user", "content": "Task: tests are failing; find and fix the bug.\nInitial test failures:\n"
-                                            + "\n".join(failing) + f"\nStep {step + 1}/{max_steps}.\n"
+                                            + "\n".join(failing) + f"\nStep {step + 1}/{max_steps}. Status: {status}.\n"
+                                            f"Allowed tools now: {', '.join(allowed)}.\n"
                                             f"Recent tool outputs:\n{obs}\nChoose the next tool call."}]
         t0 = time.perf_counter()
         content, cost = client.chat(msgs, SCHEMA, 0.0, 0)
@@ -80,7 +85,7 @@ def run_task(client, ws, meta, speculator, max_steps=16, replay=False):
                       "t_think": t0 - t_task, "t_tool": t1 - t_task, "t_end": time.perf_counter() - t_task,
                       "fate": info["fate"], "llm_seconds": cost.llm_seconds, "gen_tokens": cost.gen_tokens,
                       "snapshot": snap, "prev_op": prev_op, "last_ok": last_ok, "family": meta["family"]})
-        hist.append({"op": op, "out": out[-600:]})
+        hist.append({"op": op, "out": out[-2500:] if op == "read_file" else out[-800:]})
         prev_op, last_ok = op, ok
         if op == "finish" and ok == "ok":
             break

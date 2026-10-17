@@ -50,7 +50,7 @@ def run_split(split, client, policy, predictor, fp, replay, out_f, rep=0, run_ta
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", required=True)
-    ap.add_argument("--model", default="qwen3:4b")
+    ap.add_argument("--model", default="qwen3:8b")
     ap.add_argument("--repeats", type=int, default=2)
     a = ap.parse_args()
     run_dir = os.path.join(a.out, f"{dt.datetime.now():%Y%m%d-%H%M%S}-codebench")
