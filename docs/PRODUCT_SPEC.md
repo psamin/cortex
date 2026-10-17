@@ -12,6 +12,29 @@ and Cortex returns a policy tuned for that arm and task. It gets there in four s
 3. Fine-tuning after each round.
 4. Targeted demos or RL until the policy meets its target.
 
+## 1a. MVP scope: everything runs in physics sim
+
+The MVP keeps the whole pipeline in MuJoCo. Stage 3, "real rounds", runs against a **physics-sim
+twin** of the agent's scene instead of hardware:
+
+- **Stage 2 (sim pretrain).** Fast, privileged scripted demos under broad domain randomization, used
+  to pretrain ACT.
+- **Stage 3 (twin rounds).** GPT-6 Astra drives the arm in the twin through the full cycle protocol
+  (3.2): home → pick → place → home → reset → home. The rules mirror a real arm:
+  - **Camera mode only.** Astra sees what a real camera would see and never reads simulator poses.
+  - **Held-out randomization.** The twin uses seeds and physics parameters (friction, mass, lighting,
+    camera pose) that the pretrain never sees. It stands in for the gap between sim and real.
+  - **Success from the perception verifier.** The verifier reads only the overhead image and the
+    gripper, not the simulator's state. The simulator's ground truth is logged next to it, so the
+    verifier's accuracy is measured before the verifier ever meets hardware.
+- **Rounds.** Each round fine-tunes the latest checkpoint and runs a short twin evaluation, until the
+  target is met or the budget runs out.
+
+The hardware track (sections 3.1 calibration, 3.3 real gates and 5.2–5.3, plus roadmap P7–P9) is
+**post-MVP**, kept on separate modules and branches. Nothing in the MVP path imports it. The intake
+still accepts `mode: "real"` so agents can describe hardware, but in the MVP, real-mode stages answer
+"not available yet".
+
 ## 2. Users
 
 | User | Role |
