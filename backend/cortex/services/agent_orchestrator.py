@@ -686,6 +686,87 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "build a new dataset version and propose retraining. Returns job_id.", AgentArgs.Improve, t_improve),
 ]}
 
+# ------------------------------------------------------------------ intake (spec v2)
+
+class IntakeArgs:
+    class Start(BaseModel):
+        prompt: str = Field("", description="The task in plain language, e.g. 'pick up the water bottle and put it "
+                                            "on the coaster'. Objects named here are pre-filled from a catalogue.")
+        mode: Mode = Field(Mode.sim, description="'sim' (the MVP runs everything in physics sim) or 'real'")
+
+    class Update(BaseModel):
+        project_id: str
+        patch: dict[str, Any] = Field(description="Partial intake spec to merge. Each open question carries a "
+                                                  "ready-to-send patch; lists of objects/zones/cameras/obstacles merge "
+                                                  "by name.")
+
+    class Frame(BaseModel):
+        project_id: str
+        camera: Literal["top", "front", "wrist_cam"] = "top"
+        seed: int = Field(0, description="scene randomization seed")
+
+
+async def t_start_intake(ctx, a, actor):
+    from . import intake_service
+
+    p, st = await intake_service.start_intake(ctx, a.prompt, a.mode.value, actor)
+    n = sum(1 for q in st["questions"] if q["required"])
+    return {"summary": f"Project {p.id}: intake started, {n} questions open", "ref_ids": [p.id], "project_id": p.id,
+            **st}
+
+
+async def t_update_intake(ctx, a, actor):
+    from . import intake_service
+
+    st = await intake_service.update_intake(ctx, await get_project(ctx, a.project_id), a.patch, actor)
+    n = sum(1 for q in st["questions"] if q["required"])
+    done = "complete; call build_simulation" if st["complete"] else f"{n} questions open"
+    return {"summary": f"Intake {done}. Changed: {', '.join(st['changed']) or 'nothing'}", "ref_ids": [a.project_id],
+            **st}
+
+
+async def t_intake_status(ctx, a, actor):
+    from ..intake import status
+
+    p = await get_project(ctx, a.project_id)
+    if p.intake is None:
+        raise ValueError("this project has no intake; call start_intake")
+    st = status(p.intake).model_dump(mode="json")
+    st["scene_built"] = p.scene is not None
+    return {"summary": "complete" if st["complete"] else "incomplete", "ref_ids": [p.id], **st}
+
+
+async def t_build_sim(ctx, a, actor):
+    from . import intake_service
+
+    out = await intake_service.build_simulation(ctx, await get_project(ctx, a.project_id), actor)
+    f = out["feasibility"]
+    return {"summary": f"Scene {out['scene']['digest']} built; {f['summary']}", "ref_ids": [a.project_id],
+            "image_jpeg_base64": out["preview"].pop("image_jpeg_base64", None), **out}
+
+
+async def t_capture_frame(ctx, a, actor):
+    from . import intake_service
+
+    out = await intake_service.capture_frame(ctx, await get_project(ctx, a.project_id), a.camera, a.seed)
+    return {"summary": f"{a.camera} camera, scene {out['scene']} (sim render)", "ref_ids": [a.project_id], **out}
+
+
+TOOLS.update({t.name: t for t in [
+    Tool("start_intake", "Start describing a robot-learning task: creates a draft project and returns typed "
+         "questions (each with a ready-to-send patch) about the arm, cameras, objects, place zones, environment and "
+         "task.", IntakeArgs.Start, t_start_intake),
+    Tool("update_intake", "Answer intake questions by merging a partial spec. Returns the merged spec, what changed, "
+         "what is still assumed, and the remaining questions.", IntakeArgs.Update, t_update_intake),
+    Tool("get_intake_status", "The intake spec, open questions, and whether the sim scene is built.",
+         Args.ProjectRef, t_intake_status),
+    Tool("build_simulation", "Build the MuJoCo scene from the completed intake, then check feasibility (jaw opening, "
+         "payload torque, reach to every start and zone, with alternatives). Returns a top-camera preview.",
+         Args.ProjectRef, t_build_sim),
+    Tool("capture_frame", "Render a scene camera (top, front, wrist_cam) so you can check the sim matches the "
+         "real setup you described.", IntakeArgs.Frame, t_capture_frame),
+]})
+
 # Tools that start work the agent should not start without a human click.
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
 
@@ -702,6 +783,6 @@ async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str) -
         await ctx.audit(actor, name, pid, raw_args, "error", f"{type(e).__name__}: {e}"[:300])
         raise
     if name in ("get_project_state", "list_episodes", "get_failure_clusters", "get_next_actions", "get_job",
-                "compare_experiments"):
+                "compare_experiments", "get_intake_status", "capture_frame"):
         await ctx.audit(actor, name, pid, raw_args, "ok", result.get("summary", "")[:300])
     return result
