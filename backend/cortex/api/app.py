@@ -62,6 +62,9 @@ async def lifespan(app: FastAPI):
         log.info("resumed %d autopilot run(s)", resumed)
     app.mount("/files", StaticFiles(directory=CTX.data_dir, check_dir=False), name="files")
     yield
+    from ..services import intake_service
+
+    intake_service.shutdown()  # GL contexts must be released on the thread that made them
 
 
 app = FastAPI(title="Cortex", version="0.1.0", lifespan=lifespan)
@@ -174,6 +177,53 @@ async def get_project(pid: str) -> Project:
 @app.get("/api/projects/{pid}/state")
 async def state(pid: str):
     return await orch.project_state(ctx(), await orch.get_project(ctx(), pid))
+
+
+# ------------------------------------------------------------------ intake (spec v2)
+
+class IntakeStartBody(BaseModel):
+    prompt: str = ""
+    mode: str = "sim"
+
+
+@app.post("/api/intake")
+async def intake_start(body: IntakeStartBody, request: Request):
+    from ..services import intake_service
+
+    p, st = await intake_service.start_intake(ctx(), body.prompt, body.mode, actor(request))
+    return {"project_id": p.id, **st}
+
+
+@app.get("/api/projects/{pid}/intake")
+async def intake_get(pid: str):
+    return await orch.call_tool(ctx(), "get_intake_status", {"project_id": pid}, "gui")
+
+
+@app.patch("/api/projects/{pid}/intake")
+async def intake_patch(pid: str, patch: dict[str, Any], request: Request):
+    from ..services import intake_service
+
+    return await intake_service.update_intake(ctx(), await orch.get_project(ctx(), pid), patch, actor(request))
+
+
+@app.post("/api/projects/{pid}/simulation/build")
+async def simulation_build(pid: str, request: Request):
+    from ..services import intake_service
+
+    out = await intake_service.build_simulation(ctx(), await orch.get_project(ctx(), pid), actor(request))
+    out["preview"].pop("image_jpeg_base64", None)
+    return out
+
+
+@app.get("/api/projects/{pid}/simulation/frame")
+async def simulation_frame(pid: str, camera: str = "top", seed: int = 0):
+    import base64
+
+    from ..services import intake_service
+
+    out = await intake_service.capture_frame(ctx(), await orch.get_project(ctx(), pid), camera, seed)
+    return Response(base64.b64decode(out["image_jpeg_base64"]), media_type="image/jpeg",
+                    headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/projects/{pid}/events")

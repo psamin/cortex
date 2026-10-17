@@ -47,6 +47,21 @@ class SceneInfo:
     notes: list[str] = field(default_factory=list)
 
 
+    def to_dict(self, data_dir: Path) -> dict:
+        d = {k: v for k, v in self.__dict__.items()}
+        d["path"] = self.path.relative_to(data_dir).as_posix() if self.path.is_relative_to(data_dir) else str(self.path)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict, data_dir: Path) -> SceneInfo:
+        d = dict(d)
+        p = Path(d.pop("path"))
+        d.pop("feasibility", None)
+        d["zones"] = {k: (tuple(c), tuple(h)) for k, (c, h) in d["zones"].items()}
+        d["starts"] = {k: tuple(v) for k, v in d["starts"].items()}
+        return cls(path=p if p.is_absolute() else data_dir / p, **d)
+
+
 def body_name(obj: str) -> str:
     return f"obj_{obj}"
 
