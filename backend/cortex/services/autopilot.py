@@ -4,7 +4,7 @@
   -> DATASET_VERSIONED -> TRAINING_REQUESTED -> POLICY_TRAINED -> POLICY_EVALUATED
   -> FAILURES_ANALYZED -> NEXT_EXPERIMENT_SELECTED -> SCENARIO_PLANNED -> ...  -> DONE
 
-Demonstrations come from GPT-6 Astra (agent collector) when it is configured,
+Demonstrations come from the agent planner (self-hosted Qwen3-VL, or GPT-6 Astra) when it is available,
 otherwise from the scripted IK oracle, and the run records which one it used.
 After each evaluation the weakest measured condition becomes the next targeted
 collection, in fresh simulator seeds (evaluation seeds stay disjoint).
@@ -55,12 +55,12 @@ async def start(ctx: Ctx, project: Project) -> AutopilotRun:
     if cur and cur.status in ("running", "waiting_approval") and project.id in _running:
         return cur
     collector = project.autopilot.collector
-    if collector == "astra" and agent_collection_service.resolve_planner(ctx) is None:
+    if collector == "agent" and agent_collection_service.resolve_planner(ctx) is None:
         collector = "oracle"
     run = AutopilotRun(project_id=project.id, collector=collector)
     await _save(ctx, run)
     if collector != project.autopilot.collector:
-        await _step(ctx, run, "plan", "GPT-6 Astra is not configured; this run uses the scripted IK oracle for "
+        await _step(ctx, run, "plan", "No agent planner is configured; this run uses the scripted IK oracle for "
                     "demonstrations (no other model is substituted).", status="skipped")
     _running[project.id] = asyncio.create_task(_loop(ctx, project.id, run))
     await ctx.audit(ACTOR, "autopilot_start", project.id, {**project.autopilot.model_dump(), "collector": collector},
@@ -154,10 +154,11 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
                 await _goto(ctx, run, "SCENARIO_PLANNED")
 
             elif st == "SCENARIO_PLANNED":
-                if run.collector == "astra" and agent_collection_service.resolve_planner(ctx) is None:
+                if run.collector == "agent" and (agent_collection_service.resolve_planner(ctx) is None or
+                                                 await agent_collection_service.selfhosted_reachable(ctx)):
                     run.collector = "oracle"
-                    await _step(ctx, run, "plan", "GPT-6 Astra is not configured; switching this run to the scripted "
-                                "IK oracle (no other model is substituted).", status="skipped")
+                    await _step(ctx, run, "plan", "The agent planner is not available; switching this run to the "
+                                "scripted IK oracle (no other model is substituted).", status="skipped")
                 targeted = c.get("next_conditions")
                 conds = [Condition(**x) for x in targeted] if targeted else None
                 n = pol.demos_per_round if targeted else max(pol.demos_per_round, project.plan.budget_total)
@@ -311,9 +312,9 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
 
 
 def _collector_label(ctx: Ctx, run: AutopilotRun) -> str:
-    if run.collector == "astra":
+    if run.collector == "agent":
         p = agent_collection_service.resolve_planner(ctx)
-        return f"GPT-6 Astra agent ({p['label']})" if p else "GPT-6 Astra agent (not configured)"
+        return f"agent planner {p['model']} ({p['label']})" if p else "agent planner (not configured)"
     return "scripted IK oracle"
 
 

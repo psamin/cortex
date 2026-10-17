@@ -141,10 +141,10 @@ async def health():
     return {
         "db": {"provider": c.store.name, "fallback": not s.insforge_enabled},
         "storage": {"provider": c.blobs.name, "fallback": not s.insforge_enabled},
-        "vlm": {"provider": c.vlm_source, "model": s.vlm_model if c.openrouter_key else None,
-                "fallback": not c.openrouter_key},
-        "agent": {"provider": "llm" if c.openrouter_key else "rule-based planner", "model": s.agent_model,
-                  "fallback": not c.openrouter_key},
+        "vlm": {"provider": c.vlm_source, "model": c.model.vlm_model if c.model else None,
+                "fallback": not c.model},
+        "agent": {"provider": c.model.label if c.model else "rule-based planner",
+                  "model": c.model.agent_model if c.model else None, "fallback": not c.model},
         "executor": {"provider": "parallel local worker processes", "fallback": False},
         "training": {"provider": f"futurama slurm ({s.futurama_ssh_host})" if s.futurama_ssh_host
                      else "manual command bundle", "fallback": not s.futurama_ssh_host},
@@ -515,7 +515,7 @@ async def graph(pid: str):
 @app.get("/api/planner")
 async def planner():
     from ..services.agent_collection_service import planner_status
-    return planner_status(ctx())
+    return await planner_status(ctx())
 
 
 @app.post("/api/projects/{pid}/agent-collections")

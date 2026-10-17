@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 
 from ..context import Ctx
 from ..models import (
+    Collector,
     StartAgentCollectionRequest,
     Augmentation,
     Checkpoint,
@@ -396,7 +397,7 @@ class AgentArgs:
         num_demos: int = Field(6, ge=1, le=50)
         diversity: Literal["plan", "medium", "high"] = "medium"
         conditions: list[Cell] | None = Field(None, description="target these cells only (e.g. a weak condition)")
-        collector: Literal["astra", "oracle"] = "astra"
+        collector: Collector = "agent"
         max_total_usd: float | None = Field(None, gt=0)
         mode: Literal["camera", "privileged"] | None = None
 
@@ -441,15 +442,15 @@ async def t_create_policy_project(ctx, a, actor):
     default = AutopilotPolicy().model_budget_usd
     budget = min(a.model_budget_usd or default, default) if actor != "gui" else (a.model_budget_usd or default)
     p = await create_project(ctx, CreateProjectRequest(task_prompt=a.task_prompt, autopilot=AutopilotPolicy(
-        collector="astra", model_budget_usd=budget)), actor)
+        collector="agent", model_budget_usd=budget)), actor)
     out: dict[str, Any] = {"summary": f"Created {p.id} '{p.name}' (planner budget ${budget:.2f})", "ref_ids": [p.id],
-                           "project_id": p.id, "spec": p.spec.model_dump(), "planner": acs.planner_status(ctx)}
+                           "project_id": p.id, "spec": p.spec.model_dump(), "planner": await acs.planner_status(ctx)}
     if a.start_collection:
         try:
             col = await acs.start_collection(ctx, p, StartAgentCollectionRequest(
                 num_demos=a.num_demos, diversity=a.diversity, reason="initial collection"), actor)
             out.update(collection_id=col.id, job_id=col.job_id)
-            out["summary"] += f"; started {col.id} ({a.num_demos} Astra attempts, job {col.job_id})"
+            out["summary"] += f"; started {col.id} ({a.num_demos} agent attempts with {col.model}, job {col.job_id})"
         except (PermissionError, acs.PlannerUnavailable) as e:
             out["collection_not_started"] = str(e)
     return out
@@ -589,14 +590,14 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("get_next_actions", "What to do next for this project, and why.", Args.ProjectRef, t_next),
     Tool("get_job", "Status/progress of a background job.", Args.JobRef, t_job),
     Tool("create_policy_project", "Create a project for a manipulation policy and (by default) start autonomous "
-         "GPT-6 Astra demonstration collection within the server's planner budget.",
+         "agent demonstration collection (our self-hosted VLM, or GPT-6 Astra) within the planner budget.",
          AgentArgs.CreatePolicyProject, t_create_policy_project),
-    Tool("start_agent_collection", "Generate demonstrations autonomously: GPT-6 Astra plans from camera images, "
+    Tool("start_agent_collection", "Generate demonstrations autonomously: the agent planner (self-hosted VLM or GPT-6 Astra) plans from camera images, "
          "validated IK executes in MuJoCo, simulator-verified successes become LeRobot episodes. Returns job_id.",
          AgentArgs.StartCollection, t_start_collection),
     Tool("get_collection_progress", "Status, successes, failures, model calls and spend of a collection.",
          AgentArgs.CollectionRef, t_progress),
-    Tool("get_demonstration_results", "Per-attempt outcomes with provenance (astra vs scripted oracle), usage and "
+    Tool("get_demonstration_results", "Per-attempt outcomes with provenance (agent planner model vs scripted oracle), usage and "
          "recoveries, plus per-collector metrics.", AgentArgs.DemoResults, t_results),
     Tool("train_from_agent_demonstrations", "Build a dataset version from agent-generated demos and propose ACT "
          "training (training itself needs approval). Returns job_id.", AgentArgs.TrainFromAgent, t_train_from_agent),

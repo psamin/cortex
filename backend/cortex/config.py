@@ -24,6 +24,15 @@ class Settings(BaseSettings):
     insforge_bucket: str = "cortex-assets"
     vlm_model: str = "anthropic/claude-sonnet-5.5"
     agent_model: str = "anthropic/claude-sonnet-5.5"
+
+    # Self-hosted open model (our own agent): any OpenAI-compatible endpoint, e.g. vLLM serving
+    # Qwen3-VL on Futurama behind an SSH tunnel (scripts/vlm_futurama.sh). When PLANNER_BASE_URL is
+    # set it is used for robot planning, VLM diagnostics and the studio assistant.
+    planner_base_url: str | None = None  # e.g. http://127.0.0.1:8001/v1
+    planner_api_key: str | None = None  # vLLM --api-key, if set
+    selfhosted_model: str = "Qwen/Qwen3-VL-8B-Instruct"
+    # Qwen3-VL grounds in relative 0-1000 coordinates (QwenLM/Qwen3-VL cookbooks/2d_grounding.ipynb)
+    selfhosted_point_format: str = "norm1000"
     # Only needed on self-hosted InsForge; InsForge Cloud provisions it via its Model Gateway.
     openrouter_api_key: str | None = None
 

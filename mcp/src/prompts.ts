@@ -7,9 +7,9 @@ Goal: teach the robot this task in simulation: "${task}".
 
 Work through the loop below. After every tool call, read its summary and ref_ids; use ids from results, never invent them.
 ${projectId ? `\n0. A project already exists: ${projectId}. Call cortex.get_project_state and cortex.get_next_actions, then resume at the first step that is not done.\n` : ""}
-1. cortex.create_policy_project {task_prompt, num_demos: 12} -> project_id, collection_id, job_id. GPT-6 Astra now
+1. cortex.create_policy_project {task_prompt, num_demos: 12} -> project_id, collection_id, job_id. Cortex's agent planner
    generates demonstrations autonomously (it plans from camera images; a validated IK controller executes in MuJoCo).
-   If collection_not_started says Astra is unavailable, tell the human and use cortex.start_agent_collection
+   If collection_not_started says the planner is unavailable, tell the human and use cortex.start_agent_collection
    {project_id, collector: "oracle"} instead (the scripted IK oracle), clearly labelled as such.
 2. Poll cortex.get_collection_progress {collection_id} every ~20 s until it finishes. Report successes vs failed attempts,
    model calls and USD spent. Failed attempts are diagnostics, never training data.
@@ -20,9 +20,9 @@ ${projectId ? `\n0. A project already exists: ${projectId}. Call cortex.get_proj
    GPU cluster; never say the policy was retrained before a checkpoint (ck_...) appears in get_project_state.
 6. cortex.evaluate_learned_policy {project_id, checkpoint_id} -> three parallel MuJoCo conditions on held-out seeds;
    poll cortex.get_job. This measures the learned policy, not the oracle.
-7. cortex.improve_policy {project_id, max_new_demos: 5} -> it targets the weakest measured condition with new Astra demos and
+7. cortex.improve_policy {project_id, max_new_demos: 5} -> it targets the weakest measured condition with new agent demos and
    proposes retraining (approval again). Then cortex.compare_experiments after the next evaluation.
-8. cortex.get_next_actions {project_id} and report: demos collected (Astra vs oracle), evaluation results with CIs, the
+8. cortex.get_next_actions {project_id} and report: demos collected (agent planner vs oracle), evaluation results with CIs, the
    weakest condition and what Cortex is doing about it.
 
 Rules: never stream or paste raw video; refer to episodes, evaluations and media by id or storage key.

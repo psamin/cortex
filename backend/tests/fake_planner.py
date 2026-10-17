@@ -42,12 +42,16 @@ def latest_overhead(messages: list[dict]) -> np.ndarray | None:
 
 
 class FakePlanner:
-    def __init__(self, sabotage: set[int] | None = None):
+    def __init__(self, sabotage: set[int] | None = None, point_format: str = "pixels",
+                 model_id: str = "test/fake-planner"):
         self.sabotage = sabotage or set()
+        self.point_format, self.model_id = point_format, model_id
+        self.seen_bodies: list[dict] = []
         self.episode = -1
         self.calls = 0
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), self._handler())
-        self.url = f"http://127.0.0.1:{self.server.server_address[1]}/v1/chat/completions"
+        self.base = f"http://127.0.0.1:{self.server.server_address[1]}/v1"
+        self.url = self.base + "/chat/completions"
 
     def __enter__(self):
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -56,7 +60,13 @@ class FakePlanner:
     def __exit__(self, *exc):
         self.server.shutdown()
 
+    def pt(self, u: float, v: float, w: int = 480) -> dict:
+        if self.point_format == "norm1000":  # answer like Qwen3-VL: relative 0-1000
+            return {"u": round(u * 1000 / w, 1), "v": round(v * 1000 / w, 1)}
+        return {"u": u, "v": v}
+
     def decide(self, body: dict) -> dict:
+        self.seen_bodies.append({k: v for k, v in body.items() if k != "messages"})
         msgs = body["messages"]
         if msgs[-1]["role"] == "user" and msgs[-1]["content"] == "Begin. The arm is at its home pose with the gripper half open.":
             self.episode += 1
@@ -72,7 +82,7 @@ class FakePlanner:
             u, v = blob_center(img, "red") if img is not None else (240, 240)
             if bad:
                 u, v = min(u + 70, 470), v
-            return self._call("propose_grasp", {"object_id": "red_cube", "image_point": {"u": u, "v": v}})
+            return self._call("propose_grasp", {"object_id": "red_cube", "image_point": self.pt(u, v)})
         g = next(d for d in reversed(done) if d["_name"] == "propose_grasp")
         seq = [("set_gripper", {"state": "open"}), ("move_end_effector", {"target": g["pregrasp"]}),
                ("move_end_effector", {"target": g["grasp"]}), ("set_gripper", {"state": "closed"}),
@@ -89,7 +99,7 @@ class FakePlanner:
         if "place_object" not in names:
             img = latest_overhead(msgs)
             u, v = blob_center(img, "green")
-            return self._call("place_object", {"image_point": {"u": u, "v": v}})
+            return self._call("place_object", {"image_point": self.pt(u, v)})
         if names[-1] != "check_task_success":
             return self._call("check_task_success", {})
         return self._call("finish_episode", {"believes_success": bool(done[-1].get("success")), "summary": "ok"})
@@ -106,8 +116,18 @@ class FakePlanner:
             def do_POST(self):  # noqa: N802
                 body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
                 msg = planner.decide(body)
-                out = json.dumps({"model": "test/fake-planner", "choices": [{"message": msg}],
-                                  "usage": {"prompt_tokens": 1200, "completion_tokens": 40, "cost": 0.0}}).encode()
+                usage = {"prompt_tokens": 1200, "completion_tokens": 40}
+                if planner.point_format == "pixels":
+                    usage["cost"] = 0.0  # OpenRouter-style; a vLLM server reports no cost
+                out = json.dumps({"model": planner.model_id, "choices": [{"message": msg}], "usage": usage}).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(out)))
+                self.end_headers()
+                self.wfile.write(out)
+
+            def do_GET(self):  # noqa: N802  (OpenAI-compatible /v1/models)
+                out = json.dumps({"object": "list", "data": [{"id": planner.model_id, "object": "model"}]}).encode()
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(out)))

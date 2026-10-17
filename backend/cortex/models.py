@@ -10,9 +10,9 @@ from __future__ import annotations
 import secrets
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, BeforeValidator, Field
 
 
 def new_id(prefix: str) -> str:
@@ -24,6 +24,10 @@ def now() -> datetime:
 
 
 # ---------------------------------------------------------------- conditions
+
+# "agent" = a vision-language planner (self-hosted Qwen3-VL or GPT-6 Astra) driving validated IK;
+# "oracle" = the scripted IK expert. "astra" is accepted as a legacy alias for "agent".
+Collector = Annotated[Literal["agent", "oracle"], BeforeValidator(lambda v: "agent" if v == "astra" else v)]
 
 CubeRegion = Literal["left", "center", "right"]
 Lighting = Literal["bright", "normal", "dim"]
@@ -89,7 +93,7 @@ class AutopilotPolicy(BaseModel):
     demos_per_round: int = 9
     episodes_per_branch: int = 10
     auto_approve_free_training: bool = True  # Futurama/self-hosted GPUs cost the user nothing
-    collector: Literal["astra", "oracle"] = "astra"  # who generates demonstrations
+    collector: Collector = "agent"  # who generates demonstrations
     model_budget_usd: float = 10.0  # standing approval for planner API spend on this project
     planning_mode: Literal["camera", "privileged"] = "camera"
     max_gpu_hours_per_job: float = 1.5
@@ -133,7 +137,7 @@ class AutopilotRun(BaseModel):
     # explicit state machine (see services/autopilot.py) and the ids it is waiting on, for resume
     state: str = "TASK_REQUESTED"
     context: dict[str, Any] = {}
-    collector: str = "astra"
+    collector: Collector = "agent"
     steps: list[AutopilotStep] = []
     best: dict[str, Any] = {}
     error: str | None = None
@@ -475,7 +479,7 @@ class StartAgentCollectionRequest(BaseModel):
     max_calls_per_episode: int = Field(16, ge=4, le=40)
     max_usd_per_episode: float = Field(1.5, gt=0, le=10)
     mode: Literal["camera", "privileged"] | None = None
-    collector: Literal["astra", "oracle"] = "astra"
+    collector: Collector = "agent"
     recommendation_id: str | None = None
     reason: str = ""
     base_seed: int | None = Field(None, description="fix scenes and seeds (A/B runs use the same value)")
@@ -485,7 +489,7 @@ class StartAgentCollectionRequest(BaseModel):
 class AgentCollection(BaseModel):
     id: str = Field(default_factory=lambda: new_id("ac"))
     project_id: str
-    collector: Literal["astra", "oracle"]
+    collector: Collector
     provider: str | None = None
     model: str | None = None
     mode: str = "camera"
@@ -506,7 +510,7 @@ class AgentAttempt(BaseModel):
     project_id: str
     collection_id: str
     index: int
-    collector: str
+    collector: Collector
     seed: int
     scenario: Scenario
     status: Literal["success", "failed"]
