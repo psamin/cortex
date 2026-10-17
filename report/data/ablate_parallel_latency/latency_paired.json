@@ -1,0 +1,62 @@
+[
+  {
+    "method": "parallel4",
+    "n": 20,
+    "success": 1.0,
+    "lat_per_decision": 0.04984659250389843,
+    "lat_lo": 0.04875002911697821,
+    "lat_hi": 0.05073975734475525,
+    "d_lat_vs_ref": {
+      "diff": -2.2820530884501804,
+      "lo": -2.38528761516108,
+      "hi": -2.1458888620401955,
+      "p": 0.0,
+      "n": 20
+    },
+    "rel_lat_change": -0.978624040771984,
+    "model_s_per_decision": 2.381657129953389,
+    "d_compute_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "hit_per_step": NaN,
+    "reuse_of_launched": NaN,
+    "late_of_launched": NaN,
+    "unused_of_launched": NaN,
+    "wasted_model_s_per_ep": NaN,
+    "predict_overhead_s_per_ep": NaN
+  },
+  {
+    "method": "seq_K3",
+    "n": 20,
+    "success": 1.0,
+    "lat_per_decision": 2.3318996809540784,
+    "lat_lo": 2.196421374114896,
+    "lat_hi": 2.4346991777177127,
+    "d_lat_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "rel_lat_change": 0.0,
+    "model_s_per_decision": 2.381657129953389,
+    "d_compute_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "hit_per_step": NaN,
+    "reuse_of_launched": NaN,
+    "late_of_launched": NaN,
+    "unused_of_launched": NaN,
+    "wasted_model_s_per_ep": NaN,
+    "predict_overhead_s_per_ep": NaN
+  }
+]

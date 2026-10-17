@@ -146,7 +146,8 @@ Notes:
 - On this task a **1-step lookahead with ≥2 candidates is enough**. Collisions are immediate, observable consequences.
 - Longer horizons add CPU without adding success.
 - The shaped progress term mainly shortens episodes.
-- Ablation 6 with the LLM itself as rollout policy is in `report/data/ablate_rollout_llm/` (if completed). Ablation 7 (parallel vs sequential branches) is in `report/data/ablate_parallel/`.
+- **Ablation 6 (rollout policy = the LLM itself, 10 seeds, H=3, 1 sample):** 0.60 success vs 1.00 for the heuristic rollout policy under the same settings. It used 239 LLM calls and 629 model-s per episode, vs 25 and 74. Speculation is only as good as its rollout policy, and LLM rollouts are where selective triggering *would* save real compute.
+- **Ablation 7 (parallel vs sequential branches, K=3 × 4 samples, 20 seeds):** on decisions whose LLM call was served from the cache, so that decision time ≈ rollout time, the median falls from 0.109 s (sequential, only 13 such decisions) to 0.049 s (4 processes). Total sandbox CPU rises 10% (6.87 → 7.57 CPU-s): latency drops, work doesn't. A clean full-decision latency comparison is confounded, because the parallel arm ran after the sequential arm had filled the response cache.
 
 ## 5. Inference speedups: speculative LLM execution (cache disabled)
 `report/data/latency_single_h200/`, `report/data/latency_dyn8/`
