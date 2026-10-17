@@ -14,6 +14,8 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, BeforeValidator, Field
 
+from .intake.spec import IntakeSpec
+
 
 def new_id(prefix: str) -> str:
     return f"{prefix}_{secrets.token_hex(6)}"
@@ -108,6 +110,9 @@ class Project(BaseModel):
     spec: TaskSpec
     plan: CollectionPlan
     autopilot: AutopilotPolicy = Field(default_factory=AutopilotPolicy)
+    # Spec v2: what the calling agent described (intake) and the sim scene built from it.
+    intake: IntakeSpec | None = None
+    scene: dict[str, Any] | None = None  # SceneInfo.to_dict() plus the feasibility report
     created_at: datetime = Field(default_factory=now)
 
 

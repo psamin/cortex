@@ -1,0 +1,77 @@
+"""The intake flow an MCP agent runs: start -> answer questions -> build sim -> look at it."""
+
+import base64
+
+import pytest
+from fastapi.testclient import TestClient
+
+from cortex.sim.so101 import configure_gl
+
+configure_gl()
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    for k in ("INSFORGE_BASE_URL", "INSFORGE_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    from cortex.config import settings
+
+    settings.cache_clear()
+    from cortex.api.app import app
+
+    with TestClient(app) as c:
+        yield c
+    settings.cache_clear()
+
+
+def tool(c, name, **args):
+    r = c.post(f"/api/tools/{name}", json=args, headers={"X-Cortex-Actor": "mcp"})
+    assert r.status_code == 200, r.text
+    return r.json()
+
+
+def test_agent_intake_to_simulation(client):
+    st = tool(client, "start_intake", prompt="Pick up the small water bottle and put it on the coaster")
+    pid = st["project_id"]
+    assert [o["name"] for o in st["spec"]["objects"]] == ["small_water_bottle"] and not st["complete"]
+
+    # An agent that just accepts every suggested patch must end with a complete intake.
+    for _ in range(8):
+        open_q = [q for q in st["questions"] if q["required"]]
+        if not open_q:
+            break
+        st = tool(client, "update_intake", project_id=pid, patch=open_q[0]["patch"])
+    assert st["complete"], [q["path"] for q in st["questions"] if q["required"]]
+
+    # Describe the surroundings, then build.
+    st = tool(client, "update_intake", project_id=pid, patch={"environment": {
+        "lighting": "bright", "description": "white desk",
+        "obstacles": [{"name": "lamp_base", "shape": "cylinder", "size": [0.08, 0.03], "center": [0.12, 0.2]}]}})
+    assert "environment.lighting" in st["changed"]
+    r = client.post("/api/tools/capture_frame", json={"project_id": pid}, headers={"X-Cortex-Actor": "mcp"})
+    assert r.status_code == 409  # not built yet
+
+    out = tool(client, "build_simulation", project_id=pid)
+    f = out["feasibility"]
+    assert f["objects"][0]["grasp_mode"] == "side" and f["objects"][0]["grasp"]["ok"]
+    assert base64.b64decode(out["image_jpeg_base64"])[:2] == b"\xff\xd8"
+
+    fr = tool(client, "capture_frame", project_id=pid, camera="front")
+    assert fr["source"] == "sim" and fr["key"].endswith(".jpg")
+    r = client.get(f"/api/projects/{pid}/simulation/frame?camera=top")
+    assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
+
+    # Any later change invalidates the scene.
+    st = tool(client, "update_intake", project_id=pid, patch={"environment": {"lighting": "dim"}})
+    assert any("rebuilt" in n for n in st["notes"])
+    assert tool(client, "get_intake_status", project_id=pid)["scene_built"] is False
+
+
+def test_intake_errors_are_400_with_reason(client):
+    pid = tool(client, "start_intake", prompt="cube")["project_id"]
+    r = client.post("/api/tools/update_intake", json={"project_id": pid, "patch": {"task": {"pik": "cube"}}},
+                    headers={"X-Cortex-Actor": "mcp"})
+    assert r.status_code == 400 and "pik" in r.text
+    r = client.post("/api/tools/build_simulation", json={"project_id": pid}, headers={"X-Cortex-Actor": "mcp"})
+    assert r.status_code == 400 and "incomplete" in r.text
