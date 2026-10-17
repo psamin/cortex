@@ -96,7 +96,7 @@ def main():
         r = next((r for r in by.get(pol, []) if "t_think" in r["steps"][0]), None) if pol else None
         if r is None:
             continue
-        fig, ax = plt.subplots(figsize=(9, 2.6))
+        fig, ax = plt.subplots(figsize=(10, 3.2))
         for s in r["steps"]:
             ax.barh(1, s["t_tool"] - s["t_think"], left=s["t_think"], color="#4C72B0")
             col = "#55A868" if s["fate"].startswith("reused") else "#DD8452"
@@ -106,8 +106,14 @@ def main():
             col = {"reused": "#55A868", "reused_late": "#8172B2", "unused": "#C44E52"}.get(e["fate"], "gray")
             ax.barh(0, e["finish"] - e["start"], left=e["start"], color=col, alpha=0.8)
         ax.set_yticks([0, 1], ["speculative workers", "critical path"])
-        ax.set_xlabel("seconds since task start (blue = LLM think, orange = tool on critical path, "
-                      "green = reused speculative result, red = wasted speculation)")
+        from matplotlib.patches import Patch
+        ax.set_xlabel("seconds since task start")
+        ax.legend(handles=[Patch(color="#4C72B0", label="LLM think (critical)"),
+                           Patch(color="#DD8452", label="tool executed on critical path"),
+                           Patch(color="#55A868", label="reused speculative result"),
+                           Patch(color="#8172B2", label="speculative, reused late"),
+                           Patch(color="#C44E52", label="wasted speculation")],
+                  fontsize=6, loc="upper center", bbox_to_anchor=(0.5, -0.35), ncol=5, frameon=False)
         ax.set_title(f"{r['task']} — policy {pol}")
         fig.tight_layout()
         fig.savefig(os.path.join(a.out, f"timeline_{pol}.png"), dpi=130)

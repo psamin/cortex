@@ -1,0 +1,62 @@
+[
+  {
+    "method": "B8_ssd_plus_prefetch_fixed",
+    "n": 20,
+    "success": 1.0,
+    "lat_per_decision": 2.1300263545229745,
+    "lat_lo": 2.0745420900289493,
+    "lat_hi": 2.1780335997905853,
+    "d_lat_vs_ref": {
+      "diff": -0.13050266457779638,
+      "lo": -0.1872065143519671,
+      "hi": -0.08094572735309642,
+      "p": 0.0,
+      "n": 20
+    },
+    "rel_lat_change": -0.05773102821290471,
+    "model_s_per_decision": 6.406432067918779,
+    "d_compute_vs_ref": {
+      "diff": 1.6655808395844094,
+      "lo": 1.5512301258857704,
+      "hi": 1.7573371078907698,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.6808145870600482,
+    "reuse_of_launched": 0.7352803276899386,
+    "late_of_launched": 0.11568849300542665,
+    "unused_of_launched": 0.2647196723100613,
+    "wasted_model_s_per_ep": 7.594189218250001,
+    "predict_overhead_s_per_ep": 0.004370555910281837
+  },
+  {
+    "method": "B1_ssd_sel_0.4",
+    "n": 20,
+    "success": 1.0,
+    "lat_per_decision": 2.2605290191007703,
+    "lat_lo": 2.2346906035829086,
+    "lat_hi": 2.2896145587330077,
+    "d_lat_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "rel_lat_change": 0.0,
+    "model_s_per_decision": 4.740851228334369,
+    "d_compute_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "hit_per_step": NaN,
+    "reuse_of_launched": NaN,
+    "late_of_launched": NaN,
+    "unused_of_launched": NaN,
+    "wasted_model_s_per_ep": NaN,
+    "predict_overhead_s_per_ep": NaN
+  }
+]

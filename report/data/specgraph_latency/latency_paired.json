@@ -1,0 +1,362 @@
+[
+  {
+    "method": "B5_personalized_top1",
+    "n": 20,
+    "success": 0.3,
+    "lat_per_decision": 0.6812045117612773,
+    "lat_lo": 0.6542696806501357,
+    "lat_hi": 0.7068557132671873,
+    "d_lat_vs_ref": {
+      "diff": -0.054245497238422535,
+      "lo": -0.10659318596479908,
+      "hi": -0.010393397185000585,
+      "p": 0.0277,
+      "n": 20
+    },
+    "rel_lat_change": -0.0737582385949018,
+    "model_s_per_decision": 1.5206178636685719,
+    "d_compute_vs_ref": {
+      "diff": 0.7865572369653381,
+      "lo": 0.7167564959675685,
+      "hi": 0.8559037829945164,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.6037868204979189,
+    "reuse_of_launched": 0.6144365991522285,
+    "late_of_launched": 0.4160979425844246,
+    "unused_of_launched": 0.3855634008477716,
+    "wasted_model_s_per_ep": 10.6201213145,
+    "predict_overhead_s_per_ep": 0.005754652316682041
+  },
+  {
+    "method": "B6a_personalized_utility_adaptive",
+    "n": 20,
+    "success": 0.55,
+    "lat_per_decision": 0.6929660977866008,
+    "lat_lo": 0.6622366517229502,
+    "lat_hi": 0.7231448448013256,
+    "d_lat_vs_ref": {
+      "diff": -0.04248391121309901,
+      "lo": -0.093000485552464,
+      "hi": 0.0015406547383299428,
+      "p": 0.0776,
+      "n": 20
+    },
+    "rel_lat_change": -0.05776587217788225,
+    "model_s_per_decision": 1.540965032280916,
+    "d_compute_vs_ref": {
+      "diff": 0.806904405577682,
+      "lo": 0.7363855560973637,
+      "hi": 0.8799127347474158,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.5797563415305725,
+    "reuse_of_launched": 0.596056379567966,
+    "late_of_launched": 0.4278627798564124,
+    "unused_of_launched": 0.40394362043203386,
+    "wasted_model_s_per_ep": 15.39055148145,
+    "predict_overhead_s_per_ep": 0.00843183568213135
+  },
+  {
+    "method": "B6_personalized_utility",
+    "n": 20,
+    "success": 0.4,
+    "lat_per_decision": 0.7014557992358267,
+    "lat_lo": 0.6679167006722541,
+    "lat_hi": 0.7479695759802312,
+    "d_lat_vs_ref": {
+      "diff": -0.033994209763873184,
+      "lo": -0.09281512104138229,
+      "hi": 0.023930924804538473,
+      "p": 0.2495,
+      "n": 20
+    },
+    "rel_lat_change": -0.046222325580102155,
+    "model_s_per_decision": 1.5553636361530754,
+    "d_compute_vs_ref": {
+      "diff": 0.8213030094498416,
+      "lo": 0.7353519400484306,
+      "hi": 0.9120987717521095,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.5891821089629261,
+    "reuse_of_launched": 0.6034696053710367,
+    "late_of_launched": 0.41830990844572497,
+    "unused_of_launched": 0.3965303946289632,
+    "wasted_model_s_per_ep": 9.65285309135,
+    "predict_overhead_s_per_ep": 0.00560322655364871
+  },
+  {
+    "method": "B2_predict_no_exec",
+    "n": 20,
+    "success": 0.5,
+    "lat_per_decision": 0.7096534559555883,
+    "lat_lo": 0.704369223311751,
+    "lat_hi": 0.7151428237374253,
+    "d_lat_vs_ref": {
+      "diff": -0.025796553044111457,
+      "lo": -0.0774703795018073,
+      "hi": 0.0104346755645553,
+      "p": 0.273,
+      "n": 20
+    },
+    "rel_lat_change": -0.035075875625044675,
+    "model_s_per_decision": 0.7081320309533627,
+    "d_compute_vs_ref": {
+      "diff": -0.02592859574987135,
+      "lo": -0.0775037458882403,
+      "hi": 0.010282309396236504,
+      "p": 0.2694,
+      "n": 20
+    },
+    "hit_per_step": 0.0,
+    "reuse_of_launched": 0.0,
+    "late_of_launched": 0.0,
+    "unused_of_launched": 0.0,
+    "wasted_model_s_per_ep": 0.0,
+    "predict_overhead_s_per_ep": 0.007276379992254079
+  },
+  {
+    "method": "B4_global_top1",
+    "n": 20,
+    "success": 0.35,
+    "lat_per_decision": 0.7245003889306811,
+    "lat_lo": 0.6885477750612365,
+    "lat_hi": 0.7649171218325721,
+    "d_lat_vs_ref": {
+      "diff": -0.010949620069018746,
+      "lo": -0.07947167692965039,
+      "hi": 0.05008394059415355,
+      "p": 0.7467,
+      "n": 20
+    },
+    "rel_lat_change": -0.014888326786359745,
+    "model_s_per_decision": 1.6110628267059983,
+    "d_compute_vs_ref": {
+      "diff": 0.8770022000027644,
+      "lo": 0.7839960592146086,
+      "hi": 0.9610612224487067,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.5378402311853122,
+    "reuse_of_launched": 0.5478945286213233,
+    "late_of_launched": 0.36157213824308587,
+    "unused_of_launched": 0.4521054713786767,
+    "wasted_model_s_per_ep": 11.350021788799998,
+    "predict_overhead_s_per_ep": 0.00516134463250637
+  },
+  {
+    "method": "B3_frequency_top1",
+    "n": 20,
+    "success": 0.35,
+    "lat_per_decision": 0.7306200654549991,
+    "lat_lo": 0.6911192607639962,
+    "lat_hi": 0.7726183514977367,
+    "d_lat_vs_ref": {
+      "diff": -0.004829943544700632,
+      "lo": -0.06218339836985314,
+      "hi": 0.05087060887214105,
+      "p": 0.8681,
+      "n": 20
+    },
+    "rel_lat_change": -0.006567330866267763,
+    "model_s_per_decision": 1.3374900078277414,
+    "d_compute_vs_ref": {
+      "diff": 0.6034293811245074,
+      "lo": 0.5219190298054812,
+      "hi": 0.6827511840543576,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.35269378695465653,
+    "reuse_of_launched": 0.47977769559986577,
+    "late_of_launched": 0.32603153598186824,
+    "unused_of_launched": 0.47022230440013413,
+    "wasted_model_s_per_ep": 9.0581822313,
+    "predict_overhead_s_per_ep": 0.004460808145813644
+  },
+  {
+    "method": "B0_no_spec",
+    "n": 20,
+    "success": 0.45,
+    "lat_per_decision": 0.7354500089996998,
+    "lat_lo": 0.7008378489390727,
+    "lat_hi": 0.7875254768990525,
+    "d_lat_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "rel_lat_change": 0.0,
+    "model_s_per_decision": 0.734060626703234,
+    "d_compute_vs_ref": {
+      "diff": 0.0,
+      "lo": 0.0,
+      "hi": 0.0,
+      "p": 1.0,
+      "n": 20
+    },
+    "hit_per_step": NaN,
+    "reuse_of_launched": NaN,
+    "late_of_launched": NaN,
+    "unused_of_launched": NaN,
+    "wasted_model_s_per_ep": NaN,
+    "predict_overhead_s_per_ep": NaN
+  },
+  {
+    "method": "Heur_heuristic_top1",
+    "n": 20,
+    "success": 0.35,
+    "lat_per_decision": 0.7848653029781069,
+    "lat_lo": 0.743762076451127,
+    "lat_hi": 0.8310730247599228,
+    "d_lat_vs_ref": {
+      "diff": 0.04941529397840711,
+      "lo": -0.029527838758237352,
+      "hi": 0.11770685534340718,
+      "p": 0.1826,
+      "n": 20
+    },
+    "rel_lat_change": 0.0671905545906755,
+    "model_s_per_decision": 1.7254993006599733,
+    "d_compute_vs_ref": {
+      "diff": 0.9914386739567391,
+      "lo": 0.876724872721822,
+      "hi": 1.091447411563975,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.4566135160194511,
+    "reuse_of_launched": 0.46228144035835117,
+    "late_of_launched": 0.2950385725328578,
+    "unused_of_launched": 0.5377185596416489,
+    "wasted_model_s_per_ep": 15.422979080249998,
+    "predict_overhead_s_per_ep": 0.005433765193447471
+  },
+  {
+    "method": "Rand_random_sched",
+    "n": 20,
+    "success": 0.55,
+    "lat_per_decision": 0.8316744325832225,
+    "lat_lo": 0.7991416424616561,
+    "lat_hi": 0.8694343743837983,
+    "d_lat_vs_ref": {
+      "diff": 0.09622442358352272,
+      "lo": 0.03395739223180171,
+      "hi": 0.15152221901441532,
+      "p": 0.0033,
+      "n": 20
+    },
+    "rel_lat_change": 0.13083747692708506,
+    "model_s_per_decision": 1.791175710117867,
+    "d_compute_vs_ref": {
+      "diff": 1.0571150834146332,
+      "lo": 0.9846314388554971,
+      "hi": 1.1304129547126904,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.3366928984527691,
+    "reuse_of_launched": 0.36238800161886087,
+    "late_of_launched": 0.22568023220967115,
+    "unused_of_launched": 0.6376119983811392,
+    "wasted_model_s_per_ep": 20.771668834799996,
+    "predict_overhead_s_per_ep": 0.007033440377563238
+  },
+  {
+    "method": "TopK3_all_actions",
+    "n": 20,
+    "success": 0.35,
+    "lat_per_decision": 1.0798649405352347,
+    "lat_lo": 1.0383406634471788,
+    "lat_hi": 1.1186962215315661,
+    "d_lat_vs_ref": {
+      "diff": 0.3444149315355352,
+      "lo": 0.27582980599024576,
+      "hi": 0.404612629155882,
+      "p": 0.0,
+      "n": 20
+    },
+    "rel_lat_change": 0.4683050204921213,
+    "model_s_per_decision": 4.439548643078792,
+    "d_compute_vs_ref": {
+      "diff": 3.7054880163755577,
+      "lo": 3.549649077621859,
+      "hi": 3.8433302946903836,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.9232473333263128,
+    "reuse_of_launched": 0.3445515281983873,
+    "late_of_launched": 0.32227960171702963,
+    "unused_of_launched": 0.6554484718016127,
+    "wasted_model_s_per_ep": 76.66369890285,
+    "predict_overhead_s_per_ep": 0.006566196354106069
+  },
+  {
+    "method": "B1_ssd_sel_0.4",
+    "n": 20,
+    "success": 1.0,
+    "lat_per_decision": 2.2580325470087645,
+    "lat_lo": 2.236139124768073,
+    "lat_hi": 2.2833508215153366,
+    "d_lat_vs_ref": {
+      "diff": 1.5225825380090643,
+      "lo": 1.467153976450189,
+      "hi": 1.5641853228681237,
+      "p": 0.0,
+      "n": 20
+    },
+    "rel_lat_change": 2.0702733284074046,
+    "model_s_per_decision": 4.608495178223455,
+    "d_compute_vs_ref": {
+      "diff": 3.8744345515202205,
+      "lo": 3.8259892901576786,
+      "hi": 3.919672026183971,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": NaN,
+    "reuse_of_launched": NaN,
+    "late_of_launched": NaN,
+    "unused_of_launched": NaN,
+    "wasted_model_s_per_ep": NaN,
+    "predict_overhead_s_per_ep": NaN
+  },
+  {
+    "method": "B8_ssd_plus_prefetch",
+    "n": 20,
+    "success": 1.0,
+    "lat_per_decision": 2.3083376459680203,
+    "lat_lo": 2.244704701025903,
+    "lat_hi": 2.376189928093004,
+    "d_lat_vs_ref": {
+      "diff": 1.572887636968321,
+      "lo": 1.4910641406580751,
+      "hi": 1.6548848248267984,
+      "p": 0.0,
+      "n": 20
+    },
+    "rel_lat_change": 2.138673761263035,
+    "model_s_per_decision": 6.360488432884596,
+    "d_compute_vs_ref": {
+      "diff": 5.626427806181362,
+      "lo": 5.499842379246205,
+      "hi": 5.736683690792816,
+      "p": 0.0,
+      "n": 20
+    },
+    "hit_per_step": 0.4577051419425562,
+    "reuse_of_launched": 0.4942052453480472,
+    "late_of_launched": 0.03811817568396515,
+    "unused_of_launched": 0.5057947546519528,
+    "wasted_model_s_per_ep": 12.849689815249999,
+    "predict_overhead_s_per_ep": 0.004271950968541205
+  }
+]

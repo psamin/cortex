@@ -2,10 +2,10 @@
 
 **Scope.** All numbers come from runs on GT Futurama GPUs (H200 and L4) with qwen3:4b / qwen3:8b served by Ollama 0.12.6 (`think: false`). Run directories, manifests, and the scripts that produced every table are listed in [Reproduce](#reproduce). Methods and definitions are in [METHODS.md](METHODS.md). Experiment 2 (graph-based predictive execution) is reported separately in [experiments/speculative_graph/REPORT.md](../experiments/speculative_graph/REPORT.md).
 
-**Status of the held-out test:** see §2. Everything in §1 and §3–§6 comes from **validation seeds 1000–1049**. Those runs informed choices: the selection rule was applied to them. They are not final numbers.
+**Held-out test (§2)** uses seeds 10000–10099. Method definitions were frozen in commit `d4b646d` before any test episode ran. The run was split across three GPU jobs for time, with identical definitions, and episodes were deduplicated by (method, seed). §1 and §3–§6 come from validation seeds 1000–1049, which informed the choices.
 
 ## TL;DR
-1. **Decision speculation works, and *where* you trigger it matters a lot.** On Dynamic-Obstacles-8x8 (val):
+1. **Decision speculation works, and *where* you trigger it matters a lot.** Held-out test (100 seeds): risk-triggered speculation reaches 1.00 success at a 32% trigger rate, vs 0.37 for random triggering at a matched rate (paired +0.63, p<0.001), vs 0.17 for 4b greedy and 0.38 for 8b greedy. Validation numbers:
 
    | Method | Trigger rate | Success |
    |---|---|---|
@@ -17,7 +17,7 @@
    | Oracle-regret trigger | 5% | 1.00 |
 
 2. **The uncertainty signals in the original design don't identify consequential decisions.** Against oracle regret labels on 5,724 states (base rate 5.2%), PR-AUC is entropy 0.04, disagreement 0.05, random 0.05, and **observable risk 0.42**. The top 20% of states by risk hold 97% of all regret. The "confidently wrong" states (33 of them) are all caught by risk.
-3. **"Selective" did not save compute in MiniGrid.** Sandbox rollouts with a heuristic policy cost about 0.2 CPU-s per episode, which is negligible. The LLM call happens on every step regardless. The disagreement signal needs 3 extra LLM calls per step, so the full detector used **5.6× the model-seconds of always-on** (542 vs 96 model-s per episode). The risk-only trigger adds no calls, but its episodes ran longer (42 vs 18.5 steps), so it used 1.8× the model-seconds. Selective speculation pays off only when the speculation itself is expensive, for example LLM rollouts (§4).
+3. **"Selective" did not save compute in MiniGrid** (on test, risk-only cost +166 model-s / ep vs always-on, p<0.001). Sandbox rollouts with a heuristic policy cost about 0.2 CPU-s per episode, which is negligible. The LLM call happens on every step regardless. The disagreement signal needs 3 extra LLM calls per step, so the full detector used **5.6× the model-seconds of always-on** (542 vs 96 model-s per episode). The risk-only trigger adds no calls, but its episodes ran longer (42 vs 18.5 steps), so it used 1.8× the model-seconds. Selective speculation pays off only when the speculation itself is expensive, for example LLM rollouts (§4).
 4. **LLM-only test-time compute was weak here.**
 
    | Method | Success |
@@ -77,8 +77,36 @@ Notes:
 
 > Disclosure: the frozen test config lists C_sel_0.4 / 0.6 / risk-only rather than C_sel_0.8. The rule was written over "thresholds", and was then applied over all selective detector variants run on val. Applied only to the full-detector thresholds, it would select C_sel_0.8, which isn't in the test set. Both readings are reported.
 
-## 2. Held-out test: Dynamic-Obstacles-8x8 (seeds 10000–10099)
-PENDING (filled from `report/data/test_dyn8/summary.md`).
+## 2. Held-out test: Dynamic-Obstacles-8x8 (seeds 10000–10099, n=100 per method)
+`report/data/test_dyn8/summary.md` and `report/data/test_dyn8_vs_8b/summary.md`. No runner errors.
+
+| Method | Success [95% CI] | Collision | Steps | Trigger rate | LLM calls / ep | Model-s / ep | Sim CPU-s / ep |
+|---|---|---|---|---|---|---|---|
+| A greedy 4b | 0.17 [0.10, 0.25] | 0.83 | 21.7 | 0 | 21.7 | 118.7 | 0 |
+| L greedy 8b | 0.38 [0.29, 0.48] | 0.62 | 29.1 | 0 | 29.1 | 124.7 | 0 |
+| B always-on rollouts | **1.00** [1.00, 1.00] | 0 | 17.6 | 1.00 | 17.6 | **102.9** | 0.18 |
+| **C risk only, 0.4 (val-selected primary)** | **1.00** [1.00, 1.00] | 0 | 41.6 | **0.32** | 41.6 | 268.8 | 0.15 |
+| C all signals, 0.4 | 1.00 | 0 | 18.3 | 0.90 | 73.3 | 969.6 | 0.17 |
+| C all signals, 0.6 | 0.97 [0.93, 1.00] | 0.03 | 22.9 | 0.66 | 91.4 | 1089.2 | 0.16 |
+| D oracle trigger (not deployable) | 1.00 | 0 | 52.0 | 0.04 | 52.0 | 352.1 | 0.02 |
+| E random 0.25 (matched control) | 0.37 [0.28, 0.46] | 0.63 | 21.1 | 0.23 | 21.1 | 141.9 | 0.06 |
+| E random 0.5 | 0.58 [0.48, 0.67] | 0.42 | 20.3 | 0.49 | 20.3 | 123.4 | 0.11 |
+| G best-of-K, no rollouts | 0.55 [0.45, 0.65] | 0.45 | 39.9 | 1.00 | 39.9 | 213.3 | 0 |
+| J 4b draft → 8b verify on trigger | 0.42 [0.33, 0.52] | 0.58 | 32.8 | 0.92 | 161.3 | 1607.5 | 0 |
+| K2 lossless speculative drafting, L=4 | 0.34 [0.25, 0.43] | 0.66 | 27.8 | 0.64 | 73.7 | 773.3 | 0 |
+| K plan drafting, self-reported (n=15, stopped early) | 0.40 [0.13, 0.67] | 0.60 | 91.8 | 1.00 | 183.6 | 520.2 | 0 |
+| N UCT-MCTS on trigger | 1.00 | 0 | 24.2 | 0.89 | 96.6 | 1080.1 | 3.26 |
+| S SwiftSage fast/slow trigger → 8b | 0.20 [0.12, 0.28] | 0.80 | 21.3 | 0.08 | 24.1 | 142.7 | 0 |
+| I planner, SimBFS (privileged) / ObsBFS (observation-only) | 1.00 / 1.00 | 0 | 18.7 / 55.3 | — | 0 | 0 | — |
+
+**Paired comparisons (Δ success [95% CI], bootstrap p):**
+- **Selected selective vs matched random trigger:** C_risk 0.4 − E_random 0.25 = **+0.63 [+0.53, +0.72], p<0.001**. The detector, not just the amount of speculation, is what matters.
+- **Selected selective vs always-on:** Δ success = 0.00, but Δ model-s / ep = **+165.8 [+140.6, +192.6]**. The success-vs-compute hypothesis is **rejected** for this domain: selective speculation matches always-on success, but costs more, because unprotected steps make episodes longer and every step pays for an LLM call.
+- **Always-on vs 8b greedy:** +0.62 [+0.52, +0.71], p<0.001, at −21.6 model-s / ep. A small model plus simulation beats a bigger model without search, and costs less (Ablation 5).
+- **Draft→verify vs 8b greedy:** +0.04 [−0.08, +0.16], p=0.57. The validation gain (0.56 vs 0.40) **did not replicate** on test.
+- **Lossless drafting vs 8b greedy:** −0.04 [−0.16, +0.08], p=0.57. It's equivalent in success, as expected for a lossless method, at +649 model-s / ep.
+- **SwiftSage trigger vs 8b greedy:** −0.18 [−0.30, −0.06], p=0.006. Its stuck/repeat rule fires on only 8% of steps, and it misses imminent collisions.
+- **Best-of-K without rollouts vs 8b:** +0.17 [+0.04, +0.31], p=0.019. Observable-risk filtering helps, but far less than simulated rollouts (1.00).
 
 ## 3. Which signals find consequential decisions? (Ablation 4, offline)
 `report/data/detector_delta0.2/`
@@ -142,7 +170,12 @@ PENDING (filled from `report/data/test_dyn8/summary.md`).
   1. **No draft/target gap.** qwen3:4b and 8b take 0.69 vs 0.68 s per decision on an H200, because about 260 prompt tokens plus about 60 generated tokens are dominated by fixed overhead. The heuristic guesser is free, but only 41% accurate.
   2. **Parallel calls are not free.** On the L4, throughput rises only from 1.2 to 3.0 calls/s going from 1 to 16 concurrent requests, so a second in-flight call slows the first.
 - Every lossless variant is "lossless" only up to server nondeterminism. Temperature-0 outputs varied with batch composition: in the bench, `forward` was chosen 31/32 vs 26/32 at different concurrency levels. Success rates therefore differ slightly between LS and L even though both execute the 8b policy.
-- **Slow-actor regime (qwen3:32b actor):** PENDING, `report/data/latency_slow_actor_h200/`.
+- **Slow-actor regime (qwen3:32b actor, guess/actor latency ratio ≈ 0.4; H200, n=12):** still no speedup. 32b greedy takes 1.682 s per decision. Lossless with the ObsBFS guesser took 1.732 s (+3%, n.s., hit 0.48), lossless drafting L=2 1.805 s (+7%, p=0.018), and lossless with the 4b guesser 2.200 s (+31%). On one local GPU, a concurrent speculative call slows the real call about as much as a hit saves. The published speedups assume API-served models with effectively unlimited parallel capacity.
+- **What *did* reduce latency** (experiment 2):
+  - A predictor learned from the actor's own history (60% top-1) with top-1 prefetch: −7.4% decision latency at +107% compute.
+  - Prefetching the SSD agent's next fast-policy call during its ~2.2 s rollout phase: −5.8% at +35%, with success unchanged.
+  - Pre-executing test runs for a coding agent: −15 to −25% task wall-clock.
+  - So speculation helps when the pre-executed work does not compete with the critical path for the same resource, or when the critical path is long enough to hide it.
 
 ## 6. Secondary benchmark: DoorKey-8x8 (val, 15 seeds, 60-step cap)
 | Method | Success | Steps | Model-s / ep |
