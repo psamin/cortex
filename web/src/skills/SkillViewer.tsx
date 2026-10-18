@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowUpRight, Check, CircleDashed, Cpu, Film, Play, Radio, Shuffle, Square, VideoOff } from "lucide-react";
 import { api, resolveMediaUrl, type ApiError } from "../api/client";
@@ -183,9 +183,12 @@ const BackToSkills = () => (
 /** One skill: replays by default; "Live" is the only thing that connects to the GPU. Everything but the video sits in
  *  one header row, so the video takes the rest of the screen. */
 function Stage({ s }: { s: PhysicalSkill }) {
-  const [mode, setMode] = useState<"replay" | "live">("replay");
+  // ?seed= is an agent's View deployment link (cortex.deploy_physical_skill, #310): open live, on that run's layout
+  const [params] = useSearchParams();
+  const linked = Number(params.get("seed")) || null;
+  const [mode, setMode] = useState<"replay" | "live">(linked ? "live" : "replay");
   const [view, setView] = useState<View>("both");
-  const [seed, setSeed] = useState<number | null>(null);
+  const [seed, setSeed] = useState<number | null>(linked);
   const gpu = useGpu();
   const b = scoreBadge(s.score);
   const playing = mode === "live" && runAction(s, gpu.data).kind === "play";
