@@ -302,7 +302,7 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
     case "changes":
       return <ChangesRow it={it} pid={pid} />;
     case "notice":
-      return <NoticeRow it={it} />;
+      return <NoticeRow it={it} pid={pid} />;
     case "import":
       return <ImportRow it={it} pid={pid} />;
     case "meta":
@@ -655,15 +655,22 @@ function ModeSwitch({ pid }: { pid: string }) {
 }
 
 /** Cortex acted for you under your standing approval, a hard gate needs you, or which agent answers and why. */
-function NoticeRow({ it }: { it: Extract<ChatItem, { kind: "notice" }> }) {
+function NoticeRow({ it, pid }: { it: Extract<ChatItem, { kind: "notice" }>; pid: string }) {
   const needs = it.tone === "needs_you";
   const Icon = needs ? Hand : it.tone === "engine" ? Info : Bot;
+  // a new task got its own project: the way there stays in this chat
+  const other = it.refIds.find((r) => prefixOf(r) === "prj" && r !== pid);
   return (
     <div className={cn("enter flex items-start gap-2 text-xs leading-relaxed", needs ? "rounded border border-caution/40 bg-caution/5 px-3 py-2 text-ink-2" : "text-ink-3")}>
       <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", needs ? "text-caution" : "text-ink-3")} strokeWidth={1.5} />
       <p className="min-w-0">
         <span className={cn("mr-1.5 font-mono text-[10px] uppercase tracking-[0.14em]", needs ? "text-caution" : "text-ink-3")}>{needs ? "Needs you" : it.tone === "engine" ? "Agent" : "Autonomous"}</span>
         {it.text}
+        {other && (
+          <Link to={`/p/${other}`} className="ml-1.5 whitespace-nowrap text-ink-2 underline underline-offset-2 hover:text-ink">
+            Open project →
+          </Link>
+        )}
       </p>
     </div>
   );

@@ -768,11 +768,30 @@ class IntakeArgs:
         seed: int = Field(0, description="scene randomization seed")
 
 
+async def keep_demos_with_their_task(ctx: Ctx, p: Project, objects: set[str]) -> None:
+    """A project's demos were recorded with its current objects. Changing the objects under them would put another
+    task's demos in this task's datasets and viewer (prj_e5e9c205d5f3 trained 27 cube demos for a water bottle),
+    so a different task gets its own project."""
+    current = set(p.scene["objects"]) if p.scene else {"cube"}  # no scene: the built-in cube tabletop
+    if objects == current:
+        return
+    n = len(await ctx.store.list("episodes", project_id=p.id))
+    if n:
+        def words(xs: set[str]) -> str:
+            return ", ".join(sorted(x.replace("_", " ") for x in xs)) or "no objects"
+
+        raise ValueError(f"This project already has {n} demo{'s' if n != 1 else ''} of “{p.spec.goal}” "
+                         f"({words(current)}). A task with {words(objects)} gets its own project so their demos "
+                         "never mix: call start_intake without project_id (in the studio: start a new task).")
+
+
 async def t_start_intake(ctx, a, actor):
+    from ..intake import start
     from . import intake_service
 
     if a.project_id:
         p = await get_project(ctx, a.project_id)
+        await keep_demos_with_their_task(ctx, p, {o.name for o in start(a.prompt, a.mode.value).objects})
         st = await intake_service.seed_intake(ctx, p, a.prompt, a.mode.value, actor)
     else:
         p, st = await intake_service.start_intake(ctx, a.prompt, a.mode.value, actor)
@@ -808,7 +827,10 @@ async def t_intake_status(ctx, a, actor):
 async def t_build_sim(ctx, a, actor):
     from . import intake_service
 
-    out = await intake_service.build_simulation(ctx, await get_project(ctx, a.project_id), actor)
+    p = await get_project(ctx, a.project_id)
+    if p.intake is not None:
+        await keep_demos_with_their_task(ctx, p, {o.name for o in p.intake.objects})
+    out = await intake_service.build_simulation(ctx, p, actor)
     f = out["feasibility"]
     return {"summary": f"Scene {out['scene']['digest']} built; {f['summary']}", "ref_ids": [a.project_id],
             "image_b64": out["preview"].pop("image_b64", None), **out}
