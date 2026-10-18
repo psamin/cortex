@@ -3,6 +3,20 @@
 Status: **proposed**. This document is the target; [ROADMAP.md](ROADMAP.md) tracks what is built.
 Where this spec and the code disagree, the code describes today and this spec describes where it is going.
 
+## 0. Why: build something agents want
+
+Agents can write and ship software, but they can't teach a robot. Robot learning still needs a person at
+every step: teleoperating demonstrations, labelling data, launching runs, judging rollouts and deciding what
+to collect next. That human loop is what makes robot policies slow and expensive, and it's why most
+robots in manufacturing, logistics, labs, food and agriculture can't be retrained when the task or the layout
+changes.
+
+Cortex is built for the agent, not the operator. Every step of the loop is an MCP tool with a measured
+result. The agent describes the robot, builds the simulation, collects its own demonstrations, trains,
+evaluates and improves the policy, and takes it to the physical arm. Humans are out of the training loop
+but not out of control: they approve spend and anything that moves hardware (section 5), and they watch
+the agent's session live in the studio.
+
 ## 1. One sentence
 
 Any agent connects to Cortex over MCP, describes the arm and the objects in front of it, names a task,
@@ -59,7 +73,7 @@ still accepts `mode: "real"` so agents can describe hardware, but in the MVP, re
 
 | User | Role |
 |---|---|
-| **Calling agent** (Claude Code, any MCP client) | The primary user. Runs intake, starts stages, reads results, and asks a human when Cortex requires approval. |
+| **Calling agent** (Claude Code, any MCP client) | **The primary user and the customer.** Runs every training step itself: intake, simulation, demonstrations, training, evaluation, improvement. Asks a human only when Cortex requires approval. |
 | **Operator** (a human at the arm) | Arms the hardware and holds the deadman (section 5). Confirms real-world runs, spot-checks success verdicts, and resets by hand when recovery fails. Cortex never moves a real arm without one. |
 | **Studio viewer** (a human in the browser) | Watches progress, approves training and real-robot stages, and reviews diagnoses. |
 
