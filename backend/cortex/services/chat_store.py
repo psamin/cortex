@@ -67,13 +67,29 @@ def _write(ctx: Ctx, key: str, text: str) -> None:
     _upload_soon(ctx, key)
 
 
+def _parse(ctx: Ctx, key: str, raw: str, lines: bool):
+    """JSON (or JSON lines) from a cached chat file; None if it isn't readable (e.g. a storage redirect page cached
+    by an older backend, #340): that local copy is dropped so the next read fetches the stored one again."""
+    try:
+        return [json.loads(ln) for ln in raw.splitlines() if ln.strip()] if lines else json.loads(raw)
+    except ValueError:
+        log.warning("unreadable chat file %s; dropping the local copy", key)
+        ctx.local(key).unlink(missing_ok=True)
+        return None
+
+
 async def threads(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
-    raw = await _fetch(ctx, _key(pid, "index.json"))
+    key = _key(pid, "index.json")
+    raw = await _fetch(ctx, key)
     if raw is None:
         return await _adopt_legacy(ctx, pid)
     if not raw.strip():  # an interrupted write leaves an empty index: no threads yet
         return []
-    return json.loads(raw)
+    items = _parse(ctx, key, raw, lines=False)
+    if items is None:  # try the stored copy once
+        raw = await _fetch(ctx, key)
+        items = _parse(ctx, key, raw, lines=False) if raw and raw.strip() else None
+    return items if isinstance(items, list) else []
 
 
 def _save_index(ctx: Ctx, pid: str, items: list[dict[str, Any]]) -> None:
@@ -121,8 +137,13 @@ async def current(ctx: Ctx, pid: str, tid: str | None = None) -> dict[str, Any]:
 
 
 async def load(ctx: Ctx, pid: str, tid: str) -> list[dict[str, Any]]:
-    raw = await _fetch(ctx, _key(pid, f"{tid}.jsonl"))
-    return [json.loads(ln) for ln in (raw or "").splitlines() if ln.strip()]
+    key = _key(pid, f"{tid}.jsonl")
+    raw = await _fetch(ctx, key)
+    items = _parse(ctx, key, raw or "", lines=True)
+    if items is None:  # try the stored copy once
+        raw = await _fetch(ctx, key)
+        items = _parse(ctx, key, raw or "", lines=True)
+    return items or []
 
 
 async def append(ctx: Ctx, pid: str, tid: str, entry: dict[str, Any]) -> None:

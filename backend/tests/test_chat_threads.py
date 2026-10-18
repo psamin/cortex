@@ -53,3 +53,40 @@ def test_turn_changes_are_measured_from_the_project():
     after = {**before, "episodes": 12, "checkpoints": 1, "agent_collections": 2}
     assert [c["text"] for c in agent._diff(before, after)] == ["+2 demos", "+1 policy", "+1 collection"]
     assert agent._diff(before, before) == []
+
+
+def test_a_cached_redirect_page_never_breaks_the_chat(tmp_path):
+    """An older backend cached InsForge's redirect page as the chat files (#340): the chat loads, no 500."""
+    async def go():
+        ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+        t = await chat_store.current(ctx, "prj_3")
+        await agent._append_log(ctx, "prj_3", {"kind": "user", "text": "pick up the cube"}, t["id"])
+        page = "Found. Redirecting to https://cdn.insforge.dev/storage/x/cortex-assets/projects/prj_3/chats/f"
+        ctx.local(f"projects/prj_3/chats/{t['id']}.jsonl").write_text(page)
+        assert await chat_store.load(ctx, "prj_3", t["id"]) == []  # unreadable thread: empty, not an error
+        assert not ctx.local(f"projects/prj_3/chats/{t['id']}.jsonl").exists()  # dropped, so storage is read again
+        ctx.local("projects/prj_3/chats/index.json").write_text(page)
+        assert await chat_store.threads(ctx, "prj_3") == []
+        assert await agent.load_log(ctx, "prj_3") == []
+    run(go())
+
+
+def test_storage_downloads_follow_the_cdn_redirect_without_the_api_key():
+    import httpx
+
+    from cortex.store.insforge import InsForgeBlobStore
+
+    seen = []
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        seen.append((req.url.host, req.headers.get("authorization")))
+        if req.url.host == "app.example":
+            return httpx.Response(302, headers={"location": "https://cdn.example/obj?sig=1"},
+                                  text="Found. Redirecting to https://cdn.example/obj?sig=1")
+        return httpx.Response(200, content=b'[{"id": "th_1"}]')
+
+    async def go():
+        store = InsForgeBlobStore("https://app.example", "secret-key", "cortex-assets", httpx.MockTransport(handler))
+        return await store.get_bytes("projects/p/chats/index.json")
+    assert run(go()) == b'[{"id": "th_1"}]'
+    assert seen == [("app.example", "Bearer secret-key"), ("cdn.example", None)]
