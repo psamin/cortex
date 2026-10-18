@@ -152,8 +152,7 @@ async def test_connects_once_the_server_is_ready(monkeypatch):
     seen, opened = [], []
 
     async def fake_poll(ctx, job):
-        r = next(polls)
-        return r
+        return (0, *next(polls))
 
     async def fake_open(ctx, node, port):
         opened.append((node, port))
@@ -164,8 +163,16 @@ async def test_connects_once_the_server_is_ready(monkeypatch):
     monkeypatch.setattr(lp, "_poll", fake_poll)
     monkeypatch.setattr(lp, "open_tunnel", fake_open)
     monkeypatch.setattr(lp.asyncio, "sleep", no_sleep)
+    lp.STATE["job"] = "10580"
     await lp._connect_when_ready(_ctx("http://127.0.0.1:9", "futurama"), "10580")
     assert seen == ["queued", "prepare"] and opened == [("zapp", 30580)]
+
+
+def test_a_job_that_left_the_queue_has_ended():
+    """Futurama's Slurm drops a finished job from squeue within seconds; `squeue -j` then prints an error."""
+    assert lp.job_ended("slurm_load_jobs error: Invalid job id specified")
+    assert lp.job_ended("") and lp.job_ended("FAILED NonZeroExitCode") and lp.job_ended("CANCELLED None")
+    assert not lp.job_ended("PENDING (Resources)") and not lp.job_ended("RUNNING zapp")
 
 
 async def test_a_failed_request_cools_down_before_asking_the_cluster_again(monkeypatch):
