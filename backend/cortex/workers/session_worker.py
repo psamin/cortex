@@ -74,7 +74,8 @@ def main() -> None:
                 session.reset_environment(req["seed"], var)
                 trace, t0 = [], time.time()
                 live_writer(Path(req["live_dir"]))(camera.render(env.world.data))
-                reply(ok=True, seed=req["seed"])
+                # the task object and zones, so the agent's tool calls can name them (object_id, zone)
+                reply(ok=True, seed=req["seed"], task=session.task_context())
             elif op == "call":
                 assert session is not None, "reset first"
                 name, args = req["tool"], req.get("args") or {}
