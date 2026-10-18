@@ -355,6 +355,12 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
   );
 }
 
+/** "Futurama general · gpu:l40s:1 · up to 120 min" from config.slurm (chosen in Setup); null for older jobs. */
+const slurmLine = (t: TrainingJob) => {
+  const s = t.config.slurm as { partition?: string; gres?: string; time_min?: number } | undefined;
+  return s?.gres ? `Futurama ${s.partition ?? ""} · ${s.gres}${s.time_min ? ` · up to ${s.time_min} min` : ""}`.replace("  ", " ") : null;
+};
+
 const trainingWhat = (t: TrainingJob) => {
   const steps = typeof t.config.steps === "number" ? `${(t.config.steps as number).toLocaleString()} steps` : null;
   return [`dataset ${t.dataset_version_id}`, steps].filter(Boolean).join(" · ");
@@ -545,6 +551,7 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
         <span className="text-ink-2">~{num(tj.estimate.gpu_hours, 1)} GPU-hours</span>
         <span className={cn("font-medium", tj.estimate.paid ? "text-caution" : "text-pass")}>{tj.estimate.paid ? `${usd(tj.estimate.est_cost_usd)} estimated` : "No charge"}</span>
       </div>
+      {slurmLine(tj) && <p className="mt-1.5 text-xs text-ink-3">{slurmLine(tj)}</p>}
       {tj.backend === "manual" && <p className="mt-1.5 text-xs text-ink-3">No GPU backend is connected, so starting gives you a command bundle to run on a GPU machine.</p>}
       <div className="mt-3.5 flex items-center gap-2">
         <button

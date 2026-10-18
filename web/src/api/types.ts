@@ -786,3 +786,28 @@ export interface HardwareRun {
   result: Record<string, unknown> | null;
   import_job_id: string | null;
 }
+
+// ---------------------------------------------------------------- infrastructure choices (per project)
+export interface InfraOption {
+  id: string;
+  label: string;
+  available: boolean;
+  reason: string | null;
+}
+
+export interface InfraChoice {
+  planner: string;
+  training_backend: string;
+  training_gres: string;
+  training_walltime_min: number;
+}
+
+export interface Infra {
+  choice: InfraChoice;
+  planner: InfraOption[];
+  training_backend: InfraOption[];
+  gpus: InfraOption[];
+  evaluation: InfraOption[];
+  robot: InfraOption[];
+  walltime_min: { min: number; max: number; note: string };
+}
