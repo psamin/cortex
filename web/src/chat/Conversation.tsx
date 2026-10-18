@@ -1,21 +1,22 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, History, Info, Paperclip, Plus, Square, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Bot, Download, Hand, History, Info, Paperclip, Plus, Square } from "lucide-react";
 import { api } from "../api/client";
 import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
-import { InfoTip, Segmented } from "../components/ui";
-import { cn, evidenceValue } from "../lib/format";
-import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
+import { Segmented } from "../components/ui";
+import { cn } from "../lib/format";
+import { TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
 import { useChatHistoryPanel } from "./ChatHistoryPanel";
 import { useViewerFocus } from "./focus";
 import { ImportRow, ImportSheet, useImporter } from "./Imports";
-import { Markdown } from "./Markdown";
 import { IsoIcon } from "../sketch";
 import { toolIcon } from "./toolIcon";
-import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
+import { prefixOf, toolLabel, type ChatItem } from "./model";
+import { buildTurns, endsOnFix } from "./timeline";
+import { StatusIcon, TurnTimeline } from "./TurnTimeline";
 import { GlowEdge } from "../components/ui/spotlight-card";
 import { AgentLog } from "./AgentLog";
 
@@ -55,7 +56,10 @@ export function Conversation({ pid }: { pid: string }) {
   };
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
+  const turns = useMemo(() => buildTurns(chat.items), [chat.items]);
+  // the scene's picture goes on the latest scene line only
+  const thumbKey = useMemo(() => turns.flatMap((t) => t.milestones).filter((m) => m.stage === "scene").pop()?.key ?? null, [turns]);
+  const agentMode = useAgentMode(pid);
   const importer = useImporter(pid);
   const [sheet, setSheet] = useState<{ mode: "file" | "hub"; file: File | null } | null>(null);
   // drop a dataset archive anywhere on the chat column
@@ -90,8 +94,8 @@ export function Conversation({ pid }: { pid: string }) {
     }
   }, [chat.loading]);
 
-  const trainingApprovalInChat = blocks.some(
-    (b) => (b.type === "tools" && b.cards.some((r) => prefixOf(r) === "tj")) || (b.type === "item" && b.item.kind === "approval" && b.item.approvalKind !== "evaluation"),
+  const trainingApprovalInChat = turns.some((t) =>
+    t.milestones.some((m) => m.details.cardRefs.some((r) => prefixOf(r) === "tj") || m.details.approvals.some((a) => a.approvalKind !== "evaluation")),
   );
   const empty = !chat.loading && chat.items.length === 0;
   const projectState = useProjectState(pid);
@@ -139,7 +143,7 @@ export function Conversation({ pid }: { pid: string }) {
             { value: "log", label: "Agent log" },
           ]}
         />
-        {mode === "chat" && <ModeSwitch pid={pid} />}
+        {mode === "chat" && <ModeSwitch mode={agentMode.mode} onChange={agentMode.set} failed={agentMode.failed} />}
         <div className="ml-auto flex items-center gap-3">
           <HistoryToggle />
           <button
@@ -157,6 +161,7 @@ export function Conversation({ pid }: { pid: string }) {
         <AgentLog pid={pid} onIntervene={() => setMode("chat")} />
       ) : (
         <>
+      <p className="shrink-0 border-b border-line px-5 py-1.5 text-[12px] leading-snug text-ink-3">{modeLine(agentMode.mode, agentMode.cluster)}</p>
       <div className="relative min-h-0 flex-1">
         <div
           ref={scroller}
@@ -189,20 +194,12 @@ export function Conversation({ pid }: { pid: string }) {
                 </p>
               </div>
             )}
-            {blocks.map((b, i) => (
-              <Fragment key={b.key}>
-                {isAgentBlock(b) && !(i > 0 && isAgentBlock(blocks[i - 1])) && (
-                  <div className="kn-label kn-label-rule -mb-2">
-                    <span>
-                      <span className="text-ink">Agent</span>
-                    </span>
-                  </div>
-                )}
-                <BlockView b={b} pid={pid} />
-              </Fragment>
+            {turns.map((t) => (
+              <TurnTimeline key={t.key} turn={t} pid={pid} thumbKey={thumbKey} renderItem={(it) => <ItemView it={it} pid={pid} />} />
             ))}
             {chat.busy && <LiveStatus status={chat.status} startedAt={chat.turnStartedAt} />}
-            {!chat.busy && !chat.loading && chat.items.length > 0 && <NextSteps pid={pid} onPick={chat.send} />}
+            {/* a turn that ends on a failed line with a fix: that button is the next step */}
+            {!chat.busy && !chat.loading && chat.items.length > 0 && !endsOnFix(turns) && <NextSteps pid={pid} onPick={chat.send} />}
           </div>
         </div>
         {showJump && (
@@ -264,55 +261,17 @@ export function Conversation({ pid }: { pid: string }) {
   );
 }
 
-/** True for blocks the agent produced (its text and tool rows), so one header covers a whole turn. */
-function isAgentBlock(b: Block) {
-  return b.type === "tools" || (b.item.kind !== "user" && b.item.kind !== "meta");
-}
-
-function BlockView({ b, pid }: { b: Block; pid: string }) {
-  if (b.type === "tools")
-    return (
-      <div className="space-y-2.5">
-        {b.tools.length === 1 ? <ToolRow it={b.tools[0]} /> : <ToolGroup tools={b.tools} />}
-        {b.budgetError && <BudgetCard pid={pid} message={b.budgetError} />}
-        {b.cards.length > 0 && <ResultCards pid={pid} refs={b.cards} />}
-      </div>
-    );
-  const it = b.item;
+/** Rows that stay on the old path inside a turn: imports, errors, changes, and notices about nothing on a line. */
+function ItemView({ it, pid }: { it: ChatItem; pid: string }) {
   switch (it.kind) {
-    case "user":
-      return (
-        <div className="enter border-l border-ink pl-4">
-          <div className="kn-label mb-1.5">You</div>
-          <div className="whitespace-pre-wrap text-[16px] leading-relaxed text-ink">{it.text}</div>
-        </div>
-      );
-    case "assistant":
-      return (
-        <div className="enter">
-          <Markdown text={it.text} />
-        </div>
-      );
-    case "approval":
-      return <ApprovalItem pid={pid} kind={it.approvalKind} refId={it.refId} summary={it.summary} args={it.args} />;
     case "job_done":
       return <JobDoneRow it={it} pid={pid} />;
-    case "todos":
-      return <TodosCard it={it} />;
     case "changes":
       return <ChangesRow it={it} pid={pid} />;
     case "notice":
       return <NoticeRow it={it} />;
     case "import":
       return <ImportRow it={it} pid={pid} />;
-    case "meta":
-      return (
-        <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
-          <span className="h-px flex-1 bg-[var(--line)]" />
-          {it.isError ? "Ended with an error" : `Done${it.durationMs ? ` in ${Math.round(it.durationMs / 1000)}s` : ""}`}
-          <span className="h-px flex-1 bg-[var(--line)]" />
-        </div>
-      );
     case "error":
       return (
         <div className="flex items-start gap-2.5 rounded border border-fault/35 bg-plate px-4 py-2.5 text-sm text-fault">
@@ -320,60 +279,9 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
           <span className="min-w-0 flex-1">{it.text}</span>
         </div>
       );
+    default:
+      return null;
   }
-}
-
-function StatusIcon({ status }: { status: "running" | "ok" | "error" | "cancelled" }) {
-  if (status === "running") return <CircleDashed className="h-3.5 w-3.5 animate-spin text-servo" />;
-  if (status === "cancelled")
-    return (
-      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-ink-3 text-ink-3">
-        <Ban className="h-2 w-2" />
-      </span>
-    );
-  if (status === "error")
-    return (
-      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-fault text-fault">
-        <X className="h-2 w-2" />
-      </span>
-    );
-  return (
-    <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-pass text-pass">
-      <Check className="h-2 w-2" strokeWidth={3} />
-    </span>
-  );
-}
-
-/** Several tool calls in a row collapse into one expandable "n tool calls" row. */
-function ToolGroup({ tools }: { tools: ToolItem[] }) {
-  const [open, setOpen] = useState(false);
-  const running = tools.find((t) => t.status === "running");
-  const failed = tools.some((t) => t.status === "error");
-  const calls = tools.reduce((n, t) => n + t.count, 0);
-  const labels = [...new Set(tools.map((t) => toolLabel(t.tool, t.args)))];
-  return (
-    <div className="enter sk-depth relative rounded border border-line-strong bg-plate">
-      <GlowEdge />
-      <button type="button" onClick={() => setOpen((o) => !o)} className="group flex w-full items-center gap-2.5 px-3 py-2 text-left" aria-expanded={open}>
-        <IsoIcon name={toolIcon((running ?? tools[tools.length - 1]).tool)} size={20} accent={!!running} />
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          <StatusIcon status={running ? "running" : failed ? "error" : "ok"} />
-        </span>
-        <span className={cn("shrink-0 text-sm", running ? "text-ink" : "text-ink-2")}>
-          {running ? `${toolLabel(running.tool, running.args)}…` : `${calls} tool calls`}
-        </span>
-        {!open && <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{running ? `${calls} tool calls` : labels.join(" · ")}</span>}
-        <ChevronRight className={cn("ml-auto h-3.5 w-3.5 shrink-0 text-ink-4 transition-transform group-hover:text-ink-3", open && "rotate-90")} />
-      </button>
-      {open && (
-        <div className="space-y-1.5 border-t border-line px-3 py-2.5">
-          {tools.map((t) => (
-            <ToolRow key={t.id} it={t} nested />
-          ))}
-        </div>
-      )}
-    </div>
-  );
 }
 
 const REF_NOUN: Record<string, string> = { ds: "dataset", ev: "evaluation", ac: "collection", tj: "training job", an: "analysis", ep: "demo", ck: "checkpoint", rec: "recommendation" };
@@ -423,57 +331,6 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
       </span>
     </div>
   );
-}
-
-/** A tool call as a human status row: label, state, collapsed details (never raw JSON). */
-function ToolRow({ it, nested }: { it: ToolItem; nested?: boolean }) {
-  const [open, setOpen] = useState(false);
-  const args = Object.entries(it.args).filter(([k]) => k !== "project_id");
-  const hasDetails = !!it.summary || args.length > 0;
-  return (
-    <div className={cn("enter", !nested && "sk-depth relative rounded border border-line-strong bg-plate")}>
-      {!nested && <GlowEdge />}
-      <button type="button" onClick={() => hasDetails && setOpen((o) => !o)} className={cn("group flex w-full items-center gap-2.5 text-left", nested ? "py-0.5" : "px-3 py-2", hasDetails && "cursor-pointer")}>
-        <IsoIcon name={toolIcon(it.tool)} size={nested ? 16 : 20} accent={it.status === "running"} />
-        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          <StatusIcon status={it.status} />
-        </span>
-        <span className={cn("text-sm", it.status === "running" ? "text-ink" : "text-ink-2")}>
-          {toolLabel(it.tool, it.args)}
-          {it.status === "running" ? "…" : ""}
-        </span>
-        {it.count > 1 && <span className="num font-mono text-[11px] text-ink-3">×{it.count}</span>}
-        {!open && it.summary && it.status !== "running" && <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{it.summary}</span>}
-        {hasDetails && <ChevronRight className={cn("ml-auto h-3.5 w-3.5 shrink-0 text-ink-4 transition-transform group-hover:text-ink-3", open && "rotate-90")} />}
-      </button>
-      {open && (
-        <div className={cn("space-y-1.5 text-xs", nested ? "ml-[50px] mt-1 border-l border-line pl-3" : "border-t border-line px-3 py-2.5")}>
-          {it.summary && <p className="text-ink-2">{it.summary}</p>}
-          {args.length > 0 && (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
-              {args.map(([k, v]) => (
-                <div key={k} className="contents">
-                  <dt className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-3">{k.replace(/_/g, " ")}</dt>
-                  <dd className="truncate text-ink-2">{friendly(v)}</dd>
-                </div>
-              ))}
-            </dl>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** Values for humans: lists and objects become short readable text, never JSON. */
-function friendly(v: unknown): string {
-  if (v === null || v === undefined) return "—";
-  if (Array.isArray(v)) return v.length > 4 ? `${v.length} items` : v.map(friendly).join(", ");
-  if (typeof v === "object")
-    return Object.entries(v as Record<string, unknown>)
-      .map(([k, x]) => `${k.replace(/_/g, " ")} ${friendly(x)}`)
-      .join(" · ");
-  return evidenceValue(v);
 }
 
 /** One live line while a turn runs: what the agent is doing right now, and for how long, so it never looks frozen. */
@@ -618,38 +475,45 @@ function Composer({
   );
 }
 
-const MODE_HINT = {
-  autonomous:
-    "Autonomous: the agent keeps going on its own: sim demos, datasets, training inside your standing approval, evaluations, the next round. Still needs you for real robot motion and for spend over your caps (paid GPUs, more GPU-hours, a used-up planner budget).",
-  manual: "Manual: one step per message, and training waits for your approval.",
-} as const;
+type AgentMode = "autonomous" | "manual";
 
-/** Autonomous (default) or Manual, saved per project. */
-function ModeSwitch({ pid }: { pid: string }) {
+/** The sentence under the header: what this mode does on its own and what it always asks you first (C1). */
+function modeLine(mode: AgentMode, cluster: boolean): string {
+  if (mode === "manual") return "Manual: does one step per message, then waits for you. Training always waits for your OK.";
+  return cluster
+    ? "Autonomous: works through the steps on its own in the simulator, including training within your limits. It asks you first before going over your limits or moving a real robot."
+    : "Autonomous: works through the steps on its own in the simulator. It asks you first before training on the shared GPU cluster, going over your limits, or moving a real robot.";
+}
+
+/** Autonomous (default) or Manual, saved per project; `cluster`: autonomous mode may also start cluster training. */
+function useAgentMode(pid: string) {
   const state = useProjectState(pid);
   const qc = useQueryClient();
   const saved = state.data?.project.autopilot.autonomy ?? "autonomous";
   const m = useMutation({
-    mutationFn: (autonomy: "autonomous" | "manual") => api.setAutopilotPolicy(pid, { autonomy }),
+    mutationFn: (autonomy: AgentMode) => api.setAutopilotPolicy(pid, { autonomy }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["state", pid] });
       qc.invalidateQueries({ queryKey: ["projects"] });
     },
   });
-  const mode = m.isPending && m.variables ? m.variables : saved;
+  const mode: AgentMode = m.isPending && m.variables ? m.variables : saved;
+  return { mode, set: (v: AgentMode) => v !== mode && m.mutate(v), failed: !!m.error, cluster: state.data?.autonomy_cluster === true };
+}
+
+function ModeSwitch({ mode, onChange, failed }: { mode: AgentMode; onChange: (v: AgentMode) => void; failed: boolean }) {
   return (
-    <div className="flex items-center gap-1.5" title={m.error ? "Couldn't save the mode" : undefined}>
+    <div className="flex items-center gap-1.5" title={failed ? "Couldn't save the mode" : undefined}>
       <Segmented
         size="sm"
         value={mode}
-        onChange={(v) => v !== mode && m.mutate(v)}
+        onChange={onChange}
         ariaLabel="Agent mode"
         options={[
           { value: "autonomous", label: "Autonomous" },
           { value: "manual", label: "Manual" },
         ]}
       />
-      <InfoTip>{MODE_HINT[mode]}</InfoTip>
     </div>
   );
 }
@@ -676,49 +540,6 @@ function HistoryToggle() {
     <button type="button" onClick={() => panel.setOpen(!panel.open)} aria-expanded={panel.open} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink">
       <History className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">{panel.open ? "Hide chats" : "All chats"}</span>
     </button>
-  );
-}
-
-/** The agent's live checklist for a turn: "Plan" when it starts with 3+ steps; collapses when the turn ends. */
-function TodosCard({ it }: { it: Extract<ChatItem, { kind: "todos" }> }) {
-  const [open, setOpen] = useState(false);
-  const doneN = it.items.filter((t) => t.status === "completed").length;
-  const title = it.firstCount >= 3 ? `Plan · ${it.items.length} steps` : `${it.items.length} step${it.items.length === 1 ? "" : "s"}`;
-  if (it.done && !open)
-    return (
-      <button type="button" onClick={() => setOpen(true)} className="enter flex items-center gap-2 py-1 text-xs text-ink-3 hover:text-ink">
-        <StatusIcon status="ok" />
-        {doneN === it.items.length ? `✓ ${it.items.length} steps` : `${doneN} of ${it.items.length} steps done`}
-        <ChevronRight className="h-3.5 w-3.5" />
-      </button>
-    );
-  return (
-    <div className="enter rounded-xl bg-plate px-3.5 py-2.5 shadow-[0_0_0_1px_var(--line)]">
-      <button type="button" onClick={() => it.done && setOpen(false)} className="mb-1.5 flex w-full items-center justify-between text-xs font-medium text-ink-2">
-        {title}
-        <span className="num font-mono text-ink-4">
-          {doneN}/{it.items.length}
-        </span>
-      </button>
-      <ol className="space-y-1">
-        {it.items.map((t, i) => (
-          <li key={i} className="flex items-start gap-2 text-sm">
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
-              {t.status === "completed" ? (
-                <StatusIcon status="ok" />
-              ) : t.status === "in_progress" && !it.done ? (
-                <CircleDashed className="h-4 w-4 animate-spin text-servo" />
-              ) : (
-                <span className="h-3 w-3 rounded-full shadow-[inset_0_0_0_1.5px_rgb(var(--ink-4))]" />
-              )}
-            </span>
-            <span className={cn(t.status === "completed" ? "text-ink-3 line-through decoration-[var(--line-strong)]" : t.status === "in_progress" ? "text-ink" : "text-ink-4")}>
-              {t.status === "in_progress" && !it.done && t.active ? t.active : t.text}
-            </span>
-          </li>
-        ))}
-      </ol>
-    </div>
   );
 }
 
@@ -759,6 +580,21 @@ function ChangesRow({ it, pid }: { it: Extract<ChatItem, { kind: "changes" }>; p
   );
 }
 
+/** Plain chip labels for the project's next actions; the label is also the message sent. */
+const NEXT_LABEL: Record<string, string> = {
+  record_demonstrations: "Collect demos",
+  review_episodes: "Review the demos",
+  analyze_dataset: "Check demo quality",
+  recommend_demonstrations: "Suggest what to collect next",
+  create_dataset_version: "Build a training set",
+  propose_training_job: "Set up training",
+  approve_training_job: "Approve the training",
+  launch_training_job: "Start training",
+  get_job: "Check progress",
+  launch_simulation_evaluation: "Test the policy",
+  compare_experiments: "Compare the runs",
+};
+
 /** 2–3 one-click next steps from the project's next actions. */
 function NextSteps({ pid, onPick }: { pid: string; onPick: (text: string) => void }) {
   const state = useProjectState(pid);
@@ -767,12 +603,12 @@ function NextSteps({ pid, onPick }: { pid: string; onPick: (text: string) => voi
   return (
     <div className="enter flex flex-wrap gap-1.5">
       {actions.map((a) => {
-        const label = a.action.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+        const label = NEXT_LABEL[a.action] ?? a.action.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
         return (
           <button
             key={a.action}
             type="button"
-            onClick={() => onPick(`${label}. ${a.reason}`)}
+            onClick={() => onPick(label)}
             title={a.reason}
             className="inline-flex items-center gap-1.5 rounded-full bg-plate px-3 py-1.5 text-xs text-ink-2 shadow-[0_0_0_1px_var(--line)] hover:text-ink hover:shadow-[0_0_0_1px_var(--line-strong)]"
           >
