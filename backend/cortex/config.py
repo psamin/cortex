@@ -11,7 +11,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
 # CORTEX_DOTENV=0 ignores the repo's .env. The test suite sets it (tests/conftest.py) so a developer's real
-# InsForge / OpenRouter credentials never reach tests: monkeypatch.delenv can't override a dotenv value.
+# InsForge credentials never reach tests: monkeypatch.delenv can't override a dotenv value.
 DOTENV = () if os.environ.get("CORTEX_DOTENV") == "0" else (ROOT / ".env",)
 
 
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     public_url: str = "http://localhost:8000"
     cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
 
-    # InsForge (database, storage, model gateway)
+    # InsForge (database, storage, auth). Model work runs on the user's Claude Code, not a model gateway.
     insforge_base_url: str | None = None
     insforge_api_key: str | None = None  # server-side admin/API key, never sent to the browser
     insforge_bucket: str = "cortex-assets"
@@ -34,8 +34,6 @@ class Settings(BaseSettings):
     insforge_s3_secret_access_key: str | None = None
     insforge_s3_endpoint: str | None = None  # e.g. https://<ref>.<region>.insforge.app/storage/v1/s3
     insforge_s3_region: str | None = None
-    vlm_model: str = "anthropic/claude-sonnet-5.5"
-    agent_model: str = "anthropic/claude-sonnet-5.5"
 
     # Self-hosted open model (our own agent): any OpenAI-compatible endpoint, e.g. vLLM serving
     # Qwen3-VL on Futurama behind an SSH tunnel (scripts/vlm_futurama.sh). When PLANNER_BASE_URL is
@@ -50,9 +48,9 @@ class Settings(BaseSettings):
     # agent_engine: auto (Claude Code if the `claude` CLI and the MCP server are up) | claude_code | model | rules
     agent_engine: str = "auto"
     claude_code_model: str | None = None  # e.g. "sonnet" for faster turns; default = the user's Claude Code default
+    # The claude executable, when it is neither on PATH nor installed by the Claude desktop app.
+    claude_code_path: str | None = None
     hf_token: str | None = None  # fallback only: imports use the local `hf auth login` first
-    # Only needed on self-hosted InsForge; InsForge Cloud provisions it via its Model Gateway.
-    openrouter_api_key: str | None = None
 
     # Training on the Futurama Slurm cluster (submitted over SSH)
     futurama_ssh_host: str | None = None  # e.g. pi34@planetexpress-login.cc.gatech.edu

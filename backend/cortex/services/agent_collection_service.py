@@ -1,8 +1,8 @@
 """Autonomous demonstration collection.
 
 Collectors:
-  agent   a vision-language planner (our self-hosted Qwen3-VL, or GPT-6 Astra via OpenRouter)
-          plans through the validated tool API; IK executes in MuJoCo
+  agent   the user's Claude Code (headless, through the Cortex MCP robot tools), or the opt-in
+          self-hosted Qwen3-VL, plans through the validated tool API; IK executes in MuJoCo
   oracle  the existing scripted IK expert (privileged state) on the same scenes
 
 Every attempt is persisted (agent_attempts + trace/video/trajectory in storage).
@@ -58,14 +58,13 @@ LIVE: dict[str, dict[str, Any]] = {}
 # ------------------------------------------------------------------ planner routing
 
 def resolve_planner(ctx: Ctx) -> dict[str, Any] | None:
-    """The configured model route (self-hosted first, else OpenRouter). Never substitutes
-    another model or provider when the configured one is unavailable."""
+    """The opt-in self-hosted model route, if configured. Never substitutes another model or provider
+    when the configured one is unavailable."""
     r = ctx.model
     if r is None:
         return None
     return {"provider": r.provider, "model": r.planner_model, "label": r.label, "api_key": r.api_key,
-            "endpoint": r.chat_url, "point_format": r.point_format, "openrouter_extras": r.openrouter_extras,
-            "price_per_m": r.price_per_m}
+            "endpoint": r.chat_url, "point_format": r.point_format, "price_per_m": r.price_per_m}
 
 
 async def selfhosted_reachable(ctx: Ctx) -> str | None:
@@ -89,25 +88,6 @@ async def selfhosted_reachable(ctx: Ctx) -> str | None:
                 "scripts/vlm_futurama.sh up (needs the GT VPN)")
 
 
-async def openrouter_balance_problem(ctx: Ctx) -> str | None:
-    """None if the OpenRouter account behind the route has credit left, else why not."""
-    import httpx
-
-    r = ctx.model
-    if r is None or r.provider not in ("openrouter", "insforge"):
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=5) as c:
-            resp = await c.get("https://openrouter.ai/api/v1/credits", headers={"Authorization": f"Bearer {r.api_key}"})
-        if resp.status_code >= 400:
-            return None  # can't tell (some keys can't read credits); let the call itself report
-        d = resp.json().get("data", {})
-        left = float(d.get("total_credits", 0)) - float(d.get("total_usage", 0))
-        return None if left > 0.05 else f"the OpenRouter account has ${max(left, 0):.2f} of credit; add credits to use {r.planner_model}"
-    except Exception:
-        return None
-
-
 async def planner_status(ctx: Ctx) -> dict[str, Any]:
     from . import claude_code_agent as cc
 
@@ -117,10 +97,10 @@ async def planner_status(ctx: Ctx) -> dict[str, Any]:
                 "pricing_per_m_tokens": "your Claude Code subscription (not charged by Cortex)"}
     p = resolve_planner(ctx)
     if not p:
-        reason = (f"InsForge Model Gateway: {ctx.gateway_error}" if ctx.gateway_error else
-                  "No model endpoint: set PLANNER_BASE_URL (self-hosted) or an InsForge/OpenRouter key.")
+        reason = (f"{cc.available() or 'the Cortex MCP server (' + cc.MCP_URL + ') is not running'}, so Claude Code "
+                  "cannot plan; no self-hosted endpoint (PLANNER_BASE_URL) either.")
         return {"available": False, "model": None, "provider": None, "reason": reason}
-    down = await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)
+    down = await selfhosted_reachable(ctx)
     if down:
         return {"available": False, "model": p["model"], "provider": p["provider"], "route": p["label"],
                 "reason": down}
@@ -155,19 +135,42 @@ def plan_scenarios(project: Project, req: StartAgentCollectionRequest, base_seed
 
 # ------------------------------------------------------------------ budget
 
+_IN_FLIGHT = ("queued", "running")
+
+
 async def spent_usd(ctx: Ctx, project_id: str) -> float:
     rows = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project_id)
     return round(sum(float(a.usage.get("cost_usd", 0.0)) for a in rows), 4)
 
 
+async def reserved_usd(ctx: Ctx, project_id: str) -> float:
+    """Unspent cap of collections that have been saved but not finished.
+
+    Costs already recorded on those collections are in ``spent_usd``. Only the cap still
+    ahead of that spend is reserved, so two collections cannot each be allowed the full remainder.
+    """
+    attempts = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project_id)
+    cols = await ctx.repo.list("agent_collections", AgentCollection, project_id=project_id)
+    inflight = [c for c in cols if c.status in _IN_FLIGHT]
+    if not inflight:
+        return 0.0
+    ids = {c.id for c in inflight}
+    spent_there = sum(float(a.usage.get("cost_usd", 0.0)) for a in attempts if a.collection_id in ids)
+    caps = sum(float((c.totals or {}).get("budget_cap_usd") or 0.0) for c in inflight)
+    return round(max(0.0, caps - spent_there), 4)
+
+
 async def check_budget(ctx: Ctx, project: Project, req: StartAgentCollectionRequest) -> float:
     spent = await spent_usd(ctx, project.id)
-    remaining = round(project.autopilot.model_budget_usd - spent, 4)
+    held = await reserved_usd(ctx, project.id)
+    remaining = round(project.autopilot.model_budget_usd - spent - held, 4)
     cap = req.max_total_usd if req.max_total_usd is not None else min(remaining, req.num_demos * req.max_usd_per_episode)
     if cap <= 0 or cap > remaining + 1e-9:
-        raise PlannerBudgetExceeded(f"Planner budget: ${spent:.2f} of the project's ${project.autopilot.model_budget_usd:.2f} "
-                              f"standing approval is spent; this collection asks for up to ${cap:.2f}. "
-                              f"A human must raise model_budget_usd in the studio.")
+        reserved = f" ${held:.2f} is still reserved by a collection in progress." if held else ""
+        raise PlannerBudgetExceeded(
+            f"Planner budget: ${spent:.2f} of the project's ${project.autopilot.model_budget_usd:.2f} "
+            f"standing approval is spent; this collection asks for up to ${cap:.2f}.{reserved} "
+            f"A human must raise model_budget_usd in the studio.")
     return cap
 
 
@@ -191,36 +194,45 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
         return await _start_claude_code_collection(ctx, project, req, actor)
     planner = resolve_planner(ctx) if req.collector == "agent" else None
     if req.collector == "agent" and planner is None:
-        raise PlannerUnavailable("No agent planner is configured (self-hosted endpoint or InsForge/OpenRouter key). "
-                                 "Cortex does not substitute another model; use collector='oracle' for "
-                                 "scripted-oracle demos.")
-    if req.collector == "agent" and (down := await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)):
+        from .claude_code_agent import MCP_URL
+
+        raise PlannerUnavailable("No agent planner is available: Claude Code is not reachable (the `claude` CLI and the "
+                                 f"Cortex MCP server at {MCP_URL}) and no self-hosted endpoint is set. Cortex does not "
+                                 "substitute another model; use collector='oracle' for scripted-oracle demos.")
+    if req.collector == "agent" and (down := await selfhosted_reachable(ctx)):
         raise PlannerUnavailable(down)
     paid = bool(planner and planner["price_per_m"])
-    cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
     prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
     base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)
     scenarios = plan_scenarios(project, req, base_seed)
-    col = AgentCollection(project_id=project.id, collector=req.collector, request=req, mode=mode,
-                          provider=planner["label"] if planner else None,
-                          model=planner["model"] if planner else "scripted_ik_oracle",
-                          scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
-                          reason=req.reason, totals=_empty_totals(cap))
-    attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
-                             seed=base_seed + i, scenario=s, status="failed", mode=mode,
-                             provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
-    cycle = None
-    if cycles:
-        from .intake_service import scene_payload
-        from .recording_service import reset_policy_for
+    from .intake_service import project_lock
 
-        if scene_payload(ctx, project) is None:
-            raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
-        cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
-                 "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
-        col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
-        attempts = []  # one attempt per segment, created as the worker reports them
-    await ctx.repo.save("agent_collections", col)
+    # Check and save under the project lock so a second start sees this collection's cap.
+    async with project_lock(project.id):
+        fresh = await ctx.repo.get("projects", project.id, Project)
+        if fresh is not None:
+            project = fresh
+        cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
+        col = AgentCollection(project_id=project.id, collector=req.collector, request=req, mode=mode,
+                              provider=planner["label"] if planner else None,
+                              model=planner["model"] if planner else "scripted_ik_oracle",
+                              scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
+                              reason=req.reason, totals=_empty_totals(cap))
+        attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
+                                 seed=base_seed + i, scenario=s, status="failed", mode=mode,
+                                 provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
+        cycle = None
+        if cycles:
+            from .intake_service import scene_payload
+            from .recording_service import reset_policy_for
+
+            if scene_payload(ctx, project) is None:
+                raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
+            cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
+                     "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
+            col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
+            attempts = []  # one attempt per segment, created as the worker reports them
+        await ctx.repo.save("agent_collections", col)
     await ctx.audit(actor, "start_agent_collection", project.id,
                     {**req.model_dump(mode="json"), "budget_cap_usd": cap, "provider": col.provider,
                      "model": col.model, "mode": mode, "cycles": cycles}, "ok",
@@ -272,7 +284,7 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                    "live_dir": str(live_dir), "scene": scene,
                    "max_total_usd": cap if paid else 1e9,
                    "planner": {"provider": p["provider"], "model": p["model"], "endpoint": p["endpoint"],
-                               "point_format": p["point_format"], "openrouter_extras": p["openrouter_extras"],
+                               "point_format": p["point_format"],
                                "price_per_m": p["price_per_m"],
                                "max_calls": req.max_calls_per_episode, "max_usd": req.max_usd_per_episode,
                                "reasoning_effort": "low"},

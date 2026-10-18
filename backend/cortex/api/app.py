@@ -10,6 +10,7 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -177,14 +178,22 @@ async def health():
         lr = version("lerobot")
     except Exception:
         lr = None
+    from ..services import claude_code_agent as cc
     from ..sim.so101 import ENVHUB_URI
+
+    # Model work runs on the user's Claude Code when it is here; else the opt-in self-hosted route.
+    if cc.available() is None and s.agent_engine in ("auto", "claude_code"):
+        model_used = s.claude_code_model or "claude-code"
+        vlm = agent = {"provider": "Claude Code (your agent)", "model": model_used, "fallback": False}
+    else:
+        vlm = {"provider": c.vlm_source, "model": c.model.vlm_model if c.model else None, "fallback": not c.model}
+        agent = {"provider": c.model.label if c.model else "rule-based planner",
+                 "model": c.model.agent_model if c.model else None, "fallback": not c.model}
     return {
         "db": {"provider": c.store.name, "fallback": not s.insforge_enabled},
         "storage": {"provider": c.blobs.name, "fallback": not s.insforge_enabled},
-        "vlm": {"provider": c.vlm_source, "model": c.model.vlm_model if c.model else None,
-                "fallback": not c.model},
-        "agent": {"provider": c.model.label if c.model else "rule-based planner",
-                  "model": c.model.agent_model if c.model else None, "fallback": not c.model},
+        "vlm": vlm,
+        "agent": agent,
         "executor": {"provider": "parallel local worker processes", "fallback": False},
         "training": {"provider": f"futurama slurm ({s.futurama_ssh_host})" if s.futurama_ssh_host
                      else "manual command bundle", "fallback": not s.futurama_ssh_host},
@@ -566,7 +575,19 @@ async def register_checkpoint(pid: str, req: CheckpointReq, request: Request) ->
 
 @app.get("/api/projects/{pid}/checkpoints")
 async def checkpoints(pid: str) -> list[Checkpoint]:
-    return await ctx().repo.list("checkpoints", Checkpoint, project_id=pid)
+    c = ctx()
+    rows = await c.repo.list("checkpoints", Checkpoint, project_id=pid)
+    # #region agent log
+    from ..context import agent_debug
+    unfiltered = await c.store.list("checkpoints")
+    agent_debug("D", "app.py:checkpoints", "list checkpoints", {
+        "project_id": pid, "store": c.store.name, "matched": len(rows),
+        "unfiltered": len(unfiltered),
+        "matched_paths": [{"id": ck.id, "path": ck.path, "exists": Path(ck.path).joinpath("config.json").exists()} for ck in rows[:8]],
+        "other_projects": sorted({r.get("project_id") for r in unfiltered if r.get("project_id") != pid})[:8],
+    })
+    # #endregion
+    return rows
 
 
 @app.post("/api/projects/{pid}/evaluations")
@@ -931,8 +952,9 @@ async def planner_budget(pid: str):
     from ..services import agent_collection_service as acs
     p = await orch.get_project(ctx(), pid)
     spent = await acs.spent_usd(ctx(), pid)
+    held = await acs.reserved_usd(ctx(), pid)
     return {"budget_usd": p.autopilot.model_budget_usd, "spent_usd": spent,
-            "remaining_usd": round(p.autopilot.model_budget_usd - spent, 4)}
+            "remaining_usd": round(p.autopilot.model_budget_usd - spent - held, 4)}
 
 
 @app.get("/api/projects/{pid}/agent-attempts")
@@ -979,19 +1001,26 @@ async def infra_get(pid: str):
 async def infra_put(pid: str, request: Request):
     from ..models import InfraChoice
     from ..services import infra_service
-    p = await orch.get_project(ctx(), pid)
-    choice = InfraChoice.model_validate({**p.infra.model_dump(), **(await request.json())})
-    await infra_service.set_choice(ctx(), p, choice, actor(request))
-    return await infra_service.options(ctx(), p)
+    from ..services.intake_service import project_lock
+
+    body = await request.json()
+    async with project_lock(pid):
+        p = await orch.get_project(ctx(), pid)
+        choice = InfraChoice.model_validate({**p.infra.model_dump(), **body})
+        await infra_service.set_choice(ctx(), p, choice, actor(request))
+        return await infra_service.options(ctx(), p)
 
 
 @app.put("/api/projects/{pid}/autopilot/policy")
 async def ap_policy(pid: str, policy: dict, request: Request):
-    p = await orch.get_project(ctx(), pid)
-    p.autopilot = p.autopilot.model_validate({**p.autopilot.model_dump(), **policy})
-    await ctx().repo.save("projects", p, status="active")
-    await ctx().audit(actor(request), "set_autopilot_policy", pid, policy, "ok", "policy updated")
-    return p.autopilot
+    from ..services.intake_service import project_lock
+
+    async with project_lock(pid):
+        p = await orch.get_project(ctx(), pid)
+        p.autopilot = p.autopilot.model_validate({**p.autopilot.model_dump(), **policy})
+        await ctx().repo.save("projects", p, status="active")
+        await ctx().audit(actor(request), "set_autopilot_policy", pid, policy, "ok", "policy updated")
+        return p.autopilot
 
 
 # ------------------------------------------------------------------ agent

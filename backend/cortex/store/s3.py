@@ -19,7 +19,10 @@ from xml.sax.saxutils import escape
 
 import httpx
 
-PART_BYTES = 16 * 1024 * 1024  # S3 parts must be >= 5 MiB except the last
+# A 16 MiB UploadPart is rejected by the InsForge gateway ("requestStreamBufferSize", aws-chunked
+# chunks under 8192 bytes) and a ~30 MB PutObject drops the connection; a 10 MB PutObject succeeds.
+# 5 MiB is the S3 minimum part size and stays inside that working single-PUT size (#193).
+PART_BYTES = 5 * 1024 * 1024
 EMPTY_SHA256 = hashlib.sha256(b"").hexdigest()
 
 

@@ -13,8 +13,11 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
+import re
 import shutil
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any
 
 from ..context import Ctx
@@ -52,10 +55,40 @@ class Unavailable(RuntimeError):
     """Claude Code failed before doing anything, so another engine can answer this turn instead."""
 
 
+def _desktop_installs() -> list[Path]:
+    """Claude Code binaries the Claude desktop app keeps (<app data>/Claude/claude-code/<version>/...),
+    newest version first."""
+    home = Path.home()
+    roots = [Path(os.environ["APPDATA"]) / "Claude" if os.environ.get("APPDATA") else None,
+             home / "Library" / "Application Support" / "Claude", home / ".config" / "Claude"]
+    found: list[tuple[tuple[int, ...], Path]] = []
+    for root in filter(None, roots):
+        base = root / "claude-code"
+        if not base.is_dir():
+            continue
+        for d in base.iterdir():
+            if not (d.is_dir() and re.fullmatch(r"\d+(\.\d+)*", d.name)):
+                continue
+            exe = next((p for name in ("claude.exe", "claude") for p in sorted(d.rglob(name)) if p.is_file()), None)
+            if exe:
+                found.append((tuple(int(x) for x in d.name.split(".")), exe))
+    return [p for _, p in sorted(found, reverse=True)]
+
+
+def executable() -> str | None:
+    """The Claude Code CLI to run: CLAUDE_CODE_PATH, else `claude` on PATH, else the newest copy the Claude
+    desktop app installed (a backend started outside the user's shell often has no `claude` on PATH)."""
+    from ..config import settings
+
+    if (pinned := settings().claude_code_path) and Path(pinned).is_file():
+        return pinned
+    return shutil.which("claude") or next((str(p) for p in _desktop_installs()), None)
+
+
 def available() -> str | None:
     """None if Claude Code can run here, else why not (in words for the studio)."""
-    if not shutil.which("claude"):
-        return "Claude Code not found"
+    if not executable():
+        return "Claude Code not found (install it, or set CLAUDE_CODE_PATH to the claude executable)"
     return None
 
 
@@ -153,7 +186,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     workdir.mkdir(parents=True, exist_ok=True)
     mcp_cfg = workdir / "mcp.json"
     mcp_cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
-    cmd = [shutil.which("claude") or "claude", "-p", message, "--output-format", "stream-json", "--verbose",
+    cmd = [executable() or "claude", "-p", message, "--output-format", "stream-json", "--verbose",
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
            "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
            "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal,

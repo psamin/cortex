@@ -10,9 +10,10 @@ when the provider is not configured. `GET /api/health` reports the active provid
 | Datasets | LeRobotDataset v3 via `lerobot==0.6.1` | **verified** (written, reloaded by LeRobot) | none needed |
 | Metadata DB | InsForge Postgres (REST records API, migrations API) | **verified** on InsForge Cloud 2.3.4 (us-west), 2026-10-17: migrations 001–003 applied, full e2e smoke 18/18 | SQLite (**verified**) |
 | Asset storage | InsForge storage, private bucket, presigned download URLs | **verified**: private `cortex-assets` bucket, videos/npz/LeRobot files uploaded, signed `cdn.insforge.dev` URLs play without auth | local disk (**verified**) |
-| VLM diagnostics | InsForge Model Gateway → OpenRouter → `anthropic/claude-sonnet-5.5` | **blocked by plan**: the project's org is on a free plan; `/api/ai/*` returns 403 "AI is only available on paid plans" | VLM step skipped and disclosed; telemetry and quality analysis still run; or the MCP client's own model (see MCP below) |
-| Studio agent | same gateway, OpenAI-compatible tool calling | implemented, unverified | deterministic intent planner (**verified**) |
-| Manipulation planner | **Default: our own model.** `Qwen/Qwen3-VL-8B-Instruct` (Apache-2.0), served by vLLM 0.31 on a Futurama L40S ([serve_vlm.sbatch](../infra/futurama/serve_vlm.sbatch), [vlm_futurama.sh](../scripts/vlm_futurama.sh)); no per-token cost. Alternative: GPT-6 Astra via OpenRouter (InsForge gateway or our own key) | planner loop **verified against a local stub**; no real Astra call yet: blocked until the InsForge org is on a paid plan | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
+| Scene from a photo or description | the user's Claude Code, headless `claude -p` with only the Read tool ([scene_setup.py](../backend/cortex/services/scene_setup.py)) | implemented; **verified against a stubbed Claude Code** (validation, clamping to reach, assumed values) | the default scene, or the agent's own `update_intake` patches |
+| VLM diagnostics | the user's Claude Code (Read tool only), or the opt-in self-hosted endpoint | implemented | VLM step skipped and disclosed; telemetry and quality analysis still run; or the MCP client's own model (see MCP below) |
+| Studio agent | the user's Claude Code against the Cortex MCP server | implemented | self-hosted endpoint, then the deterministic intent planner (**verified**) |
+| Manipulation planner | **Default: the user's Claude Code** through the Cortex MCP robot tools ([claude_code_collector.py](../backend/cortex/services/claude_code_collector.py)). **Opt-in: our own model.** `Qwen/Qwen3-VL-8B-Instruct` (Apache-2.0), served by vLLM 0.31 on a Futurama L40S ([serve_vlm.sbatch](../infra/futurama/serve_vlm.sbatch), [vlm_futurama.sh](../scripts/vlm_futurama.sh)); no per-token cost | planner loop **verified against a local stub** | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
 | Training | ACT via `lerobot-train` on GT Futurama Slurm over SSH | implemented, unverified (VPN was off) | manual command bundle + checkpoint registration |
 | MCP | mcp-use v2 server, Manufact hosting | see [mcp/README.md](../mcp/README.md) | local MCP server |
 | Evaluation workers | parallel local processes | **verified** | n/a |
@@ -27,9 +28,8 @@ when the provider is not configured. `GET /api/health` reports the active provid
   with `PUT /api/storage/buckets/{b}/objects/{key}`, and the browser gets presigned URLs from
   `download-strategy`. Self-hosted InsForge on local-disk storage cannot presign; Cortex then serves
   its local working copy instead.
-- **Model Gateway:** the OpenRouter key comes from `GET /api/ai/openrouter/api-key` (InsForge Cloud),
-  or from `OPENROUTER_API_KEY` when self-hosting. InsForge's own chat proxy is deprecated upstream,
-  so Cortex calls OpenRouter directly with the key the gateway provisions.
+- **Model Gateway: not used.** InsForge's AI gateway provisions OpenRouter, which Cortex no longer calls.
+  Model work runs on the user's Claude Code (or the opt-in self-hosted endpoint); InsForge holds the data.
 - **Auth:** the backend uses the admin (`ik_`) key server-side only. The browser never receives it.
 - **Row-level security:** tables created by raw-SQL migrations start with RLS off on InsForge. On
   2026-10-17 we verified that the public anon key could read `episodes`. Migration
@@ -107,25 +107,12 @@ when the provider is not configured. `GET /api/health` reports the active provid
   pixels in each trace step.
 - **Serving:** vLLM's OpenAI-compatible server with `--enable-auto-tool-choice --tool-call-parser hermes` and
   up to 8 images per prompt. It runs on a Futurama compute node and is reached through an SSH tunnel.
-- **Routing:** when `PLANNER_BASE_URL` is set, this route takes precedence over OpenRouter for planning, VLM
-  diagnostics and the assistant. Cortex probes `/v1/models` first and refuses with a clear reason if the
+- **Routing:** opt-in. When `PLANNER_BASE_URL` is set, it serves planning, VLM diagnostics and the assistant
+  for projects whose planner choice is 'model', or 'auto' when Claude Code is not available. Cortex probes `/v1/models` first and refuses with a clear reason if the
   endpoint is down.
 - **Unverified:** whether the `hermes` tool parser handles Qwen3-VL's tool-call format in vLLM 0.31, and the
   model's pointing accuracy on our scenes. The planner loop is verified against a local stub that answers in
   0–1000 coordinates.
-
-## GPT-6 Astra (alternative)
-
-- **Model availability:** checked on 2026-10-17. The OpenRouter catalog lists `openai/gpt-6-astra` with image,
-  tools and structured outputs, at $10 / $50 per 1M input / output tokens. OpenAI's model page lists Chat
-  Completions and Responses with image input and function calling.
-- **No pointing format is documented**, so Cortex defines one: pixel coordinates on a labelled grid in a
-  480×480 overhead image.
-- **Recorded per attempt:** the provider route, the requested model, the model the API reports, and the
-  endpoint actually called. Tests use a local stub endpoint, and those attempts record the stub's URL.
-- **Not measured yet:** Astra's real pointing accuracy, demo success rate, calls and cost per demo. The
-  tool layer was verified with simulated pointing noise of ±12 px (9/9 successes across all regions and
-  lighting) and with an image-only stub planner.
 
 ## Not in this build
 
@@ -135,4 +122,5 @@ when the provider is not configured. `GET /api/health` reports the active provid
 - **RL:** there is no RL experiment. The env has a reward, but nothing here claims RL fine-tunes a
   policy.
 - **Blaxel:** removed. Its sandboxes are CPU-only, and local worker processes cover evaluation.
-- **Human teleoperation in sim:** not built. Sim demos come from GPT-6 Astra (agent) or the scripted oracle.
+- **Human teleoperation in sim:** not built. Sim demos come from the agent planner (Claude Code or the
+  self-hosted model) or the scripted oracle.

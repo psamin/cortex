@@ -15,10 +15,11 @@ import asyncio
 import hmac
 import logging
 import re
+import shutil
 from collections.abc import Awaitable
 from pathlib import Path
 
-from ..context import Ctx
+from ..context import Ctx, agent_debug
 from ..errors import NotFound
 from ..models import (
     GPU_CHOICES,
@@ -270,8 +271,15 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     export = (f"ALL,STEPS={c['steps']},BATCH={c['batch_size']},SAVE={c['save_freq']},"
               f"REPO_ID={c['dataset.repo_id']}")
     base = c.get("policy.path")
-    if base and Path(base).is_dir():  # a project checkpoint: ship it next to the dataset
-        rc, out = await _sh("rsync", "-az", "--delete", f"{base}/", f"{host}:{remote}/base/")
+    local_base: Path | None = None
+    if base and Path(base).is_dir():  # already on this machine, including checkpoints saved before storage keys
+        local_base = Path(base)
+    elif c.get("base_checkpoint_id"):
+        base_ck = await ctx.repo.get("checkpoints", c["base_checkpoint_id"], Checkpoint)
+        if base_ck:
+            local_base = await local_checkpoint(ctx, base_ck)
+    if local_base and local_base.is_dir():  # a project checkpoint: ship it next to the dataset
+        rc, out = await _sh("rsync", "-az", "--delete", f"{local_base}/", f"{host}:{remote}/base/")
         if rc != 0:
             raise RuntimeError(f"rsync base checkpoint failed ({rc}): {out[-400:]}")
         export += ",POLICY_PATH=base"
@@ -376,6 +384,56 @@ async def poll_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     return tj.id
 
 
+def _stage_checkpoint(ctx: Ctx, project_id: str, ck_id: str, src: Path) -> Path:
+    """A checkpoint trained outside the data dir is copied in, so it can be uploaded and fetched elsewhere."""
+    if src.resolve().is_relative_to(ctx.data_dir.resolve()):
+        return src
+    dest = ctx.local(f"projects/{project_id}/checkpoints/{ck_id}")
+    if dest.exists():
+        shutil.rmtree(dest)
+    for f in src.rglob("*"):
+        if f.is_file():
+            target = dest / f.relative_to(src)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(f, target)
+    return dest
+
+
+async def local_checkpoint(ctx: Ctx, ck: Checkpoint) -> Path:
+    """The pretrained_model directory on this machine, downloaded from storage when the saved path is elsewhere."""
+    raw = Path(ck.path)
+    if raw.is_absolute() and (raw / "config.json").exists() and (raw / "model.safetensors").exists():
+        return raw
+    key = ck.path.replace("\\", "/")
+    if raw.is_absolute():
+        marker = f"projects/{ck.project_id}/"
+        posix = raw.as_posix()
+        i = posix.find(marker)
+        if i < 0:
+            raise FileNotFoundError(
+                f"checkpoint {ck.id} is only at {ck.path}, which is not on this machine and was not stored")
+        key = posix[i:]
+    local = ctx.local(key)
+    if (local / "config.json").exists() and (local / "model.safetensors").exists():
+        return local
+    names = ck.files or ["config.json", "model.safetensors"]
+    missing: list[str] = []
+    for name in names:
+        try:
+            await ctx.ensure_local(f"{key}/{name}")
+        except Exception as e:
+            missing.append(f"{name}: {type(e).__name__}")
+    if not (local / "config.json").exists() or not (local / "model.safetensors").exists():
+        raise FileNotFoundError(
+            f"checkpoint {ck.id} is not on this machine and could not be loaded from storage"
+            + (f" ({'; '.join(missing)})" if missing else ""))
+    # #region agent log
+    agent_debug("C", "training_service.py:local_checkpoint", "downloaded checkpoint", {
+        "id": ck.id, "key": key, "n_files": len(names), "runId": "post-fix"})
+    # #endregion
+    return local
+
+
 async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | None, path: str,
                               step: int | None = None, actor: str = "gui") -> Checkpoint:
     p = Path(path) if Path(path).is_absolute() else ctx.local(path)
@@ -384,9 +442,20 @@ async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | 
     import json
 
     ptype = json.loads((p / "config.json").read_text()).get("type", "unknown")
-    ck = Checkpoint(project_id=project_id, training_job_id=training_job_id, policy_type=ptype,
-                    step=step or 0, path=str(p))
+    ck = Checkpoint(project_id=project_id, training_job_id=training_job_id, policy_type=ptype, step=step or 0, path="")
+    p = _stage_checkpoint(ctx, project_id, ck.id, p)
+    rel = p.resolve().relative_to(ctx.data_dir.resolve()).as_posix()
+    ck.path = rel
+    ck.files = [f.relative_to(p).as_posix() for f in sorted(p.rglob("*")) if f.is_file()]
+    inside = True
     await ctx.repo.save("checkpoints", ck, status="ready")
+    # #region agent log
+    agent_debug("B", "training_service.py:register_checkpoint", "row saved", {
+        "id": ck.id, "project_id": project_id, "store": ctx.store.name, "blobs": ctx.blobs.name,
+        "path": str(p), "inside_data_dir": inside, "policy_type": ptype,
+        "weight_mb": round((p / "model.safetensors").stat().st_size / 2**20, 1),
+    })
+    # #endregion
     if training_job_id:
         tj = await ctx.repo.get("training_jobs", training_job_id, TrainingJob)
         if tj:
@@ -395,6 +464,11 @@ async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | 
             await _save(ctx, tj, f"checkpoint {ck.id} registered")
     ctx.changed(project_id, "checkpoints", ck.id)
     stored = await _publish_checkpoint(ctx, p)
+    # #region agent log
+    agent_debug("B", "training_service.py:register_checkpoint", "publish finished", {
+        "id": ck.id, "stored": stored, "s3": bool(getattr(ctx.blobs, "s3", None)),
+    })
+    # #endregion
     await ctx.audit(actor, "register_checkpoint", project_id, {"path": str(p)}, "ok", f"{ck.id} ({ptype}); {stored}")
     return ck
 
@@ -438,6 +512,11 @@ async def _publish_checkpoint(ctx: Ctx, p: Path) -> str:
     """Copy a checkpoint inside the data dir to durable storage (the S3 gateway takes the ~200 MB weights).
     The local copy stays registered either way; a failed upload is reported, not fatal."""
     if not p.resolve().is_relative_to(ctx.data_dir.resolve()):
+        # #region agent log
+        agent_debug("B", "training_service.py:_publish_checkpoint", "upload skipped", {
+            "reason": "outside data dir", "path": str(p), "data_dir": str(ctx.data_dir),
+        })
+        # #endregion
         return "kept at its own path (outside the data dir)"
     try:
         files = sorted(f for f in p.rglob("*") if f.is_file())
@@ -446,6 +525,13 @@ async def _publish_checkpoint(ctx: Ctx, p: Path) -> str:
         return f"{len(files)} files stored ({ctx.blobs.name})"
     except Exception as e:
         log.warning("checkpoint %s kept locally only: %s", p, e)
+        # #region agent log
+        agent_debug("B", "training_service.py:_publish_checkpoint", "upload failed", {
+            "error": f"{type(e).__name__}: {e}"[:300], "blobs": ctx.blobs.name,
+            "s3": bool(getattr(ctx.blobs, "s3", None)),
+            "s3_problem": getattr(ctx.blobs, "s3_problem", None),
+        })
+        # #endregion
         return f"kept locally only, upload failed: {e}"[:300]
 
 

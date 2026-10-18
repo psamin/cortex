@@ -7,11 +7,15 @@ Goal: teach the robot this task in simulation: "${task}".
 
 Work through the loop below. After every tool call, read its summary and ref_ids; use ids from results, never invent them.
 ${projectId ? `\n0. A project already exists: ${projectId}. Call cortex.get_project_state and cortex.get_next_actions, then resume at the first step that is not done.\n` : ""}
-1. cortex.create_policy_project {task_prompt, num_demos: 12} -> project_id, collection_id, job_id. Cortex's agent planner
-   generates demonstrations autonomously (it plans from camera images; a validated IK controller executes in MuJoCo).
-   If collection_not_started says the planner is unavailable, tell the human and use cortex.start_agent_collection
-   {project_id, collector: "oracle"} instead (the scripted IK oracle), clearly labelled as such.
-2. Poll cortex.get_collection_progress {collection_id} every ~20 s until it finishes. Report successes vs failed attempts,
+1. Set up the scene. Ask the human: a photo of their setup, a detailed description, or the default scene?
+   - photo / description: cortex.start_intake {prompt, image_path | description} (Cortex's Claude Code rebuilds the
+     scene). Show them scene_setup and the open questions, apply their answers with cortex.update_intake, then
+     cortex.build_simulation, compare cortex.capture_frame with their setup, and cortex.start_agent_collection {project_id}.
+   - default: cortex.create_policy_project {task_prompt, num_demos: 12} -> project_id, collection_id, job_id.
+   Cortex's agent planner generates demonstrations autonomously (it plans from camera images; a validated IK controller
+   executes in MuJoCo). If collection_not_started says the planner is unavailable, tell the human and use
+   cortex.start_agent_collection {project_id, collector: "oracle"} instead (the scripted IK oracle), clearly labelled as such.
+2. If the call returned a job_id/collection_id instead of the finished result, poll cortex.get_collection_progress {collection_id} every ~20 s until it finishes. Report successes vs failed attempts,
    model calls and USD spent. Failed attempts are diagnostics, never training data.
 3. cortex.get_demonstration_results {project_id} for provenance and per-collector metrics (only claim what is measured).
 4. cortex.train_from_agent_demonstrations {project_id} -> job_id; poll cortex.get_job; result_ref = training job tj_....
@@ -35,8 +39,8 @@ export function registerPrompts(server: MCPServer) {
       name: "cortex.teach_task",
       title: "Teach a robot a task with Cortex",
       description:
-        "Step-by-step plan for the full Cortex loop: create project, record demos, analyze, recommend, build a dataset version, " +
-        "propose training, get human approval, evaluate in simulation, compare, and pick next actions.",
+        "Step-by-step plan for the full Cortex loop: set up the scene (photo, description or default), collect demos, build a " +
+        "dataset version, propose training, get human approval, evaluate in simulation, compare, and pick next actions.",
       schema: z.object({
         task: z.string().describe("What the robot should learn, e.g. 'pick up the cube and place it in the bowl'"),
         project_id: z.string().optional().describe("Resume an existing project (prj_...) instead of creating one"),

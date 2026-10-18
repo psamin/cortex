@@ -23,17 +23,21 @@ flowchart LR
   SW --> ENV[MuJoCo · lerobot/so101-tabletop-mujoco@12e504e8]
   SVC -->|records, migrations| PG[(InsForge Postgres<br/>or SQLite fallback)]
   SVC -->|videos, npz, datasets| OBJ[(InsForge storage<br/>or local disk)]
-  SVC -->|VLM + agent| GW[InsForge Model Gateway<br/>OpenRouter → Claude]
+  SVC -->|scene from photo, agent demos, VLM, chat| CC[your Claude Code<br/>headless claude -p]
   SVC -->|ssh + sbatch| SL[Futurama Slurm<br/>lerobot-train ACT]
 ```
 
-## Agent demonstrations (GPT-6 Astra → validated IK → MuJoCo)
+## Agent demonstrations (agent planner → validated IK → MuJoCo)
+
+The default planner is the user's Claude Code, run headless per attempt with only the Cortex MCP
+`robot_*` tools ([claude_code_collector.py](backend/cortex/services/claude_code_collector.py)). The
+opt-in self-hosted VLM runs the same validated tool loop in a worker subprocess:
 
 ```mermaid
 sequenceDiagram
   participant S as agent_collection_service
   participant W as agent_worker (subprocess)
-  participant A as GPT-6 Astra (InsForge Model Gateway → OpenRouter)
+  participant A as self-hosted VLM (OpenAI-compatible, e.g. Qwen3-VL on vLLM)
   participant M as ManipulationSession (MuJoCo + IK)
   S->>W: scenarios (seed, cube region, lighting, offsets), budgets; API key via env only
   loop per attempt (≤16 model calls, ≤$1.50)
@@ -88,7 +92,8 @@ Claude Code session act on the project live.
 | [experiment_comparison](backend/cortex/services/experiment_comparison.py) | Branch-by-branch deltas with two-proportion p-values |
 | [autopilot](backend/cortex/services/autopilot.py) | Explicit, resumable state machine: TASK_REQUESTED → SCENARIO_PLANNED → AGENT_COLLECTING → EPISODES_VALIDATED → DATASET_VERSIONED → TRAINING_REQUESTED → POLICY_TRAINED → POLICY_EVALUATED → FAILURES_ANALYZED → NEXT_EXPERIMENT_SELECTED → … The weakest measured branch becomes the next targeted Astra collection |
 | [hardware/](backend/cortex/hardware/) | Local, supervised-only SO-101 driver, setup, calibration and arm worker behind a safety controller (limits, velocity, workspace with the table as a floor, watchdog thread, e-stop, deadman). The studio's Robot page reaches it through `/api/hardware/*`, which only answers to localhost and needs `CORTEX_ENABLE_HARDWARE=1`. Not exposed as MCP tools |
-| [agent](backend/cortex/services/agent.py) | Studio chat: OpenRouter tool calling over the registry, or a deterministic intent planner |
+| [agent](backend/cortex/services/agent.py) | Studio chat: the user's Claude Code against the MCP server, the self-hosted model's tool calling over the registry, or a deterministic intent planner |
+| [scene_setup](backend/cortex/services/scene_setup.py) | Where an intake scene comes from: a photo or description read by Claude Code (validated, clamped to reach, left `assumed`), or the default tabletop |
 | [store/](backend/cortex/store/) | `Store`/`BlobStore` interfaces; InsForge REST adapters and SQLite/disk fallbacks |
 | [sim/](backend/cortex/sim/) | EnvHub env wrapper (conditions, success, reward), scripted IK expert, policy loaders |
 | [workers/](backend/cortex/workers/) | Subprocess entry points: `sim_worker` (record/evaluate), `dataset_builder` |

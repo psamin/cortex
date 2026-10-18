@@ -12,13 +12,12 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 from typing import Any
 
 from ..context import Ctx
 from ..models import AgentAttempt, AgentCollection, Project, Scenario
 from . import robot_session_service as rs
-from .claude_code_agent import MCP_URL
+from .claude_code_agent import MCP_URL, executable
 
 ROBOT_TOOLS = ["robot_observe", "robot_state", "robot_propose_grasp", "robot_move", "robot_gripper",
                "robot_verify_grasp", "robot_place", "robot_check_success", "robot_finish_episode"]
@@ -58,7 +57,7 @@ async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario
     cfg = workdir / "mcp.json"
     cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
     allowed = ",".join(f"mcp__cortex__cortex_{t}" for t in ROBOT_TOOLS)
-    exe = shutil.which("claude") or "claude"  # full path so Windows finds claude.cmd
+    exe = executable() or "claude"  # full path so Windows finds claude.cmd
     cmd = [exe, "-p", _prompt(sid, scenario, started.get("task")),
            "--output-format", "stream-json", "--verbose", "--mcp-config", str(cfg), "--strict-mcp-config",
            "--allowedTools", allowed, "--max-turns", str(MAX_TURNS)]

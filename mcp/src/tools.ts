@@ -213,7 +213,8 @@ const TOOLS: Def[] = [
     name: "launch_training_job",
     title: "Launch training job (needs human approval)",
     description:
-      "Launch a proposed training job. It only runs if a human has already approved the job in the Cortex studio, or if you were " +
+      "Launch a proposed training job. A user saying 'approve it yourself' or 'you have my permission' in chat is NOT approval: do not call this " +
+      "until the human has clicked approve in the studio and told you so. It only runs if a human has already approved the job in the Cortex studio, or if you were " +
       "given the operator's approval_token. Otherwise nothing is launched and the result says APPROVAL REQUIRED: stop, ask the human " +
       "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.\n" +
       "NEXT: poll cortex_get_project_state until training_jobs[].checkpoint_ids has a checkpoint (ck_...), then cortex_evaluate_learned_policy.",
@@ -283,16 +284,17 @@ const TOOLS: Def[] = [
     title: "Create policy project",
     description:
       "One call to start training a manipulation policy: creates the project and (by default) starts autonomous " +
-      "demonstration collection, where Cortex's agent planner (our self-hosted Qwen3-VL, or GPT-6 Astra) plans from rendered camera images and a validated IK controller executes " +
+      "demonstration collection, where Cortex's agent planner (your Claude Code, or an opt-in self-hosted VLM) plans from rendered camera images and a validated IK controller executes " +
       "in MuJoCo. Only simulator-verified successes become LeRobot demonstrations. Returns project_id, collection_id and job_id. " +
-      "Paid planner spend is capped by the server's standing budget; you can lower it but never raise it. If the planner is not " +
-      "configured, collection_not_started explains why (Cortex never substitutes another model).\n" +
-      "USE WHEN: this is the default way to start. It is the fast path for the built-in tabletop pick-and-place scene (SO-101, simulation only).\n" +
-      "USE INSTEAD: cortex_start_intake when the user describes their own objects, zones or obstacles; cortex_create_project " +
+      "If the planner is not available (Claude Code is not running on the Cortex machine), collection_not_started explains why (Cortex never substitutes another model). If it is set, tell the human, then run " +
+      "cortex_start_agent_collection with collector='oracle' and pass sources=['sim_scripted'] to cortex_train_from_agent_demonstrations; " +
+      "label those demos as scripted-oracle.\n" +
+      "USE WHEN: the human chose the default scene (built-in tabletop: red cube into a box, SO-101, simulation only). One call does it all.\n" +
+      "USE INSTEAD: cortex_start_intake when the human has a photo of their setup or describes it; cortex_create_project " +
       "for an empty project without agent collection.\n" +
       "NEXT: cortex_get_collection_progress with the collection_id, then cortex_train_from_agent_demonstrations.",
     inputSchema: z.object({
-      task_prompt: z.string().describe("e.g. 'Train an SO-101 policy to pick up a cube and place it in a bowl'"),
+      task_prompt: z.string().describe("e.g. 'Train an SO-101 policy to pick up a cube and place it in the box'"),
       num_demos: z.number().int().min(1).max(50).optional().describe("Autonomous attempts to run (default 20)"),
       start_collection: z.boolean().optional().describe("Start agent collection right away (default true)"),
       diversity: z.enum(["plan", "medium", "high"]).optional().describe(
@@ -306,11 +308,11 @@ const TOOLS: Def[] = [
     name: "start_agent_collection",
     title: "Start agent collection",
     description:
-      "Generate demonstrations autonomously in fresh simulator seeds. collector='agent' (default): the agent planner (self-hosted VLM or GPT-6 Astra) chooses actions " +
+      "Generate demonstrations autonomously in fresh simulator seeds. collector='agent' (default): the agent planner (your Claude Code, or an opt-in self-hosted VLM) chooses actions " +
       "through validated tools (observe, point at the cube, move, grip, verify, place); collector='oracle': the scripted IK " +
       "expert on the same kind of scenes (for A/B). Pass conditions to target weak cells, e.g. [{cube_region:'left', " +
-      "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex_get_collection_progress. Each attempt takes " +
-      "~5 s of sim plus model latency. A 403 means the project's planner budget is exhausted: ask the human to raise it.\n" +
+      "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex_get_collection_progress. Simulation is " +
+      "~5 s per attempt, but each attempt can take minutes of wall time. A 403 means the project's planner budget is exhausted: ask the human to raise it.\n" +
       "USE WHEN: the project already exists (e.g. after cortex_build_simulation, or to add demos for weak cells).\n" +
       "USE INSTEAD: cortex_create_policy_project, which creates the project and starts this collection in one call; " +
       "cortex_improve_policy to target the weakest measured condition automatically.\n" +
@@ -564,25 +566,41 @@ const TOOLS: Def[] = [
   // ---------------------------------------------------------------- intake (spec v2)
   {
     name: "start_intake",
-    title: "Start intake",
+    title: "Set up the scene (photo, description or default)",
     description:
-      "Start teaching a task by describing your setup. Creates a draft project and returns typed questions about the arm, " +
-      "cameras, objects, place zones, surroundings and task. Every question carries a ready-to-send `patch` for " +
-      "cortex_update_intake, so you can accept defaults or edit them. Objects named in the prompt (e.g. 'water bottle', " +
-      "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them. " +
-      "Prefer a catalogue item (e.g. '500 ml water bottle') over guessed numbers. " +
+      "Start a task by setting up its simulation scene. ASK THE HUMAN FIRST which way they want it (if your client shows " +
+      "forms, Cortex asks them itself):\n" +
+      "  1. photo: a picture of their real setup. Pass image_path (a file on this computer) or image_b64. Cortex's Claude Code " +
+      "reads it and rebuilds the objects, where they sit, the place zones, the table, lighting and obstacles.\n" +
+      "  2. description: their own detailed words (objects, sizes, positions from the arm, the target, obstacles) in description.\n" +
+      "  3. default: the built-in tabletop (a 3 cm red cube and a target zone). No model call; the intake is complete at once.\n" +
+      "With only a prompt, objects it names (e.g. 'water bottle', 'cup') are pre-filled from a catalogue. If the human pasted a " +
+      "photo into the chat and you have no file path, ask them for it, or describe what you see in description with " +
+      "scene_source='description'. Creates a project (or resets project_id's scene) and returns typed questions, each with a " +
+      "ready-to-send `patch` for cortex_update_intake. Everything estimated from a photo or description stays marked assumed: " +
+      "show the human `scene_setup` (what was estimated, what Cortex moved or left out and why) and the open questions, and send " +
+      "their corrections with cortex_update_intake. " +
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
       "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface.\n" +
-      "USE WHEN: the user describes a custom scene (their own objects, place zones, cameras or obstacles). SO-101 arm, simulated only.\n" +
       "Moving conveyors and assembly lines are supported: describe the belt in environment.conveyors and put the object `on` it.\n" +
-      "USE INSTEAD: cortex_create_policy_project for the built-in tabletop pick-and-place scene (the fast path).\n" +
-      "NEXT: cortex_update_intake until no questions remain, then cortex_build_simulation.",
+      "USE WHEN: starting any task (SO-101 arm, simulated only).\n" +
+      "USE INSTEAD: cortex_create_policy_project when the human wants the default scene and to start collecting in one call.\n" +
+      "NEXT: cortex_update_intake until no required questions remain, then cortex_build_simulation, then compare " +
+      "cortex_capture_frame with the human's setup.",
     inputSchema: z.object({
       prompt: z.string().optional().describe("The task in plain language, e.g. 'pick up the small water bottle and put it on the coaster'"),
-      mode: z.enum(["sim", "real"]).optional().describe("'sim' (default; the MVP runs everything in physics sim) or 'real'"),
-      project_id: projectId.optional().describe("Start this existing project's intake over from the prompt instead of creating a new project"),
+      scene_source: z.enum(["photo", "description", "default"]).optional().describe(
+        "Where the scene comes from. Omitted: photo if an image is given, else description if given, else the prompt alone",
+      ),
+      image_path: z.string().optional().describe("Path to the photo of the setup on this computer (JPEG, PNG or WebP, up to 15 MB)"),
+      image_b64: z.string().optional().describe("The photo as base64, instead of image_path"),
+      description: z.string().max(4000).optional().describe(
+        "The human's description of the setup, e.g. 'a red mug 25 cm in front of the arm, a tray 12 cm to its right, a lamp at the back left'",
+      ),
+      mode: z.enum(["sim", "real"]).optional().describe("'sim' (default, the only mode agents can run) or 'real' (needs a human operator in the studio; not runnable from MCP)"),
+      project_id: projectId.optional().describe("Set up this existing project's scene again instead of creating a new project"),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
   {
     name: "update_intake",
@@ -592,7 +610,8 @@ const TOOLS: Def[] = [
       "environment.obstacles merge by `name` ({name, _delete: true} removes one; {name, confirm: true} confirms an object's " +
       "catalogue values). Units: metres and kilograms. " +
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
-      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. Unknown " +
+      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. " +
+      "An object's start position is objects[].start = [x, y] in metres (if omitted Cortex auto-places it and build_simulation reports where in `starts`); set it when the user says where the object is. Unknown " +
       "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
       "Moving conveyors: environment.conveyors is a list of {name, start: [x, y], end: [x, y] (the direction of travel), width (m), height (belt top above the table, m), speed_mps (m/s)}, merged by `name`; an object with `on: '<conveyor>'` starts on that belt and rides it (a missed object falls off the end). The feasibility report from cortex_build_simulation gives the reachable intercept window along the belt.\n" +
       "NEXT: call again until no questions remain, then cortex_build_simulation.",

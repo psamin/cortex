@@ -109,9 +109,16 @@ async def resolve_policy(ctx: Ctx, req: LaunchEvaluationRequest) -> tuple[dict[s
     ck = await ctx.repo.get("checkpoints", req.policy.checkpoint_id or "", Checkpoint)
     if ck is None:
         raise NotFound(f"checkpoint {req.policy.checkpoint_id} not found")
-    from .training_service import checkpoint_dir
-
-    path = checkpoint_dir(ctx, ck)
+    from .training_service import local_checkpoint
+    path = await local_checkpoint(ctx, ck)
+    # #region agent log
+    from ..context import agent_debug
+    agent_debug("C", "simulation_runner.py:resolve_policy", "resolve checkpoint path", {
+        "id": ck.id, "stored_path": ck.path, "resolved": str(path),
+        "exists": (path / "config.json").exists(), "store": ctx.store.name,
+        "inside_data_dir": path.resolve().is_relative_to(ctx.data_dir.resolve()) if path.exists() else None,
+    })
+    # #endregion
     if not (path / "config.json").exists():
         raise FileNotFoundError(f"checkpoint files missing at {path}")
     return {"kind": "checkpoint", "checkpoint_path": str(path)}, f"{ck.policy_type} checkpoint {ck.id} (step {ck.step})"

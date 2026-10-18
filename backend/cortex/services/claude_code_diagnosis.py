@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +43,7 @@ def diagnoser(ctx: Ctx, project: Project) -> tuple[str | None, str]:
         return None, f"Claude Code was chosen but {cc.available() or 'the agent engine is pinned to the model'}"
     if ctx.model:
         return "model", ctx.vlm_source
-    return None, "no model endpoint configured and the `claude` CLI is not available"
+    return None, "Claude Code is not available and no self-hosted model endpoint is configured"
 
 
 async def diagnose_all(ctx: Ctx, project: Project, targets: list[tuple[str, list[np.ndarray], dict[str, Any]]],
@@ -76,22 +75,27 @@ async def diagnose(ref_id: str, frames: list[np.ndarray], task: str, telemetry: 
 
 
 def command(prompt: str, model: str | None = None) -> list[str]:
-    exe = shutil.which("claude") or "claude"  # full path so Windows finds claude.cmd
+    from .claude_code_agent import executable
+
+    exe = executable() or "claude"  # full path so Windows finds claude.cmd
     cmd = [exe, "-p", prompt, "--output-format", "json", "--strict-mcp-config", "--allowedTools", "Read",
            "--max-turns", "4"]
     return cmd + (["--model", model] if model else [])
 
 
-async def run_claude(prompt: str, workdir: Path, model: str | None = None) -> str:
-    """The reply text of one headless `claude -p` run (its final `result`)."""
+async def run_claude(prompt: str, workdir: Path, model: str | None = None, timeout_s: float | None = None) -> str:
+    """The reply text of one headless `claude -p` run (its final `result`), within timeout_s (default TIMEOUT_S)."""
+    timeout_s = timeout_s or TIMEOUT_S
+    # stdin closed: `claude -p` reads a piped stdin to its end, and the backend's may never end
     proc = await asyncio.create_subprocess_exec(*command(prompt, model), cwd=str(workdir),
+                                                stdin=asyncio.subprocess.DEVNULL,
                                                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     try:
-        out, err = await asyncio.wait_for(proc.communicate(), TIMEOUT_S)
+        out, err = await asyncio.wait_for(proc.communicate(), timeout_s)
     except TimeoutError:
         proc.kill()
         await proc.wait()
-        raise TimeoutError(f"Claude Code did not answer within {TIMEOUT_S} s") from None
+        raise TimeoutError(f"Claude Code did not answer within {timeout_s:g} s") from None
     if proc.returncode:
         raise RuntimeError(f"Claude Code exited {proc.returncode}: {err.decode(errors='replace').strip()[-200:]}")
     data = json.loads(out)

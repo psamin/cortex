@@ -137,6 +137,19 @@ async def test_large_file_goes_through_s3_multipart(tmp_path):
     assert ("cortex-assets", key) not in rest.objects
 
 
+async def test_parts_stay_under_the_gateway_limit(tmp_path):
+    """A 16 MiB UploadPart is rejected and a ~30 MB PutObject drops. Parts are 5 MiB (#193)."""
+    from cortex.store.s3 import PART_BYTES, S3Gateway
+
+    assert PART_BYTES == 5 * 1024 * 1024
+    s3 = FakeS3()
+    gw = S3Gateway(f"{BASE}/storage/v1/s3", "us-east-2", AK, SK, transport=httpx.MockTransport(s3))
+    p = blob(tmp_path, "ckpt.bin", 12 * 1024 * 1024)  # previously one PutObject, between the 10 MB OK and 30 MB drop
+    await gw.put_file("cortex-assets", "ckpt.bin", p, "application/octet-stream")
+    assert s3.calls.count("PUT partNumber&uploadId") == 3  # 5 + 5 + 2 MiB, never a 12 or 16 MiB body
+    assert s3.objects[("cortex-assets", "ckpt.bin")] == p.read_bytes()
+
+
 async def test_failed_part_aborts_the_upload(tmp_path):
     s3 = FakeS3(fail_part=3)
     blobs, _ = await store(tmp_path, s3)

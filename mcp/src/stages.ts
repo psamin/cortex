@@ -13,6 +13,9 @@ type Tier = "golden" | "custom" | "advanced";
 type Meta = { stage: Stage; tier: Tier; step?: number };
 
 const META: Record<string, Meta> = {
+  // step 1 is the scene: start_intake (photo, description or default) or, for the default scene in one call,
+  // create_policy_project
+  start_intake: { stage: "setup", tier: "golden", step: 1 },
   create_policy_project: { stage: "setup", tier: "golden", step: 1 },
   get_collection_progress: { stage: "collect", tier: "golden", step: 2 },
   train_from_agent_demonstrations: { stage: "train", tier: "golden", step: 3 },
@@ -22,8 +25,7 @@ const META: Record<string, Meta> = {
   get_project_state: { stage: "anytime", tier: "golden", step: 6 },
   get_next_actions: { stage: "anytime", tier: "golden" },
   get_job: { stage: "anytime", tier: "golden" },
-  // custom scene (intake) path
-  start_intake: { stage: "setup", tier: "custom" },
+  // the rest of the scene (intake) path
   update_intake: { stage: "setup", tier: "custom" },
   get_intake_status: { stage: "setup", tier: "custom" },
   build_simulation: { stage: "setup", tier: "custom" },

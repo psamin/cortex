@@ -385,7 +385,8 @@ class Checkpoint(BaseModel):
     training_job_id: str | None
     policy_type: str
     step: int
-    path: str  # local dir or storage key holding pretrained_model/
+    path: str  # storage key of the pretrained_model/ directory, relative to the data dir
+    files: list[str] = []  # file names inside path, so another machine can download them
     metrics: dict[str, float] = {}
     created_at: datetime = Field(default_factory=now)
 

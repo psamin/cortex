@@ -37,14 +37,26 @@ def test_options_say_why_something_is_unavailable(tmp_path, monkeypatch):
 
 def test_a_configured_model_route_reports_its_own_problem(tmp_path, monkeypatch):
     ctx, p = setup(tmp_path)
-    monkeypatch.setattr(infra_service.acs, "resolve_planner", lambda ctx: {"label": "OpenRouter (anthropic/x)"})
+    monkeypatch.setattr(infra_service.acs, "resolve_planner", lambda ctx: {"label": "self-hosted Qwen (x)"})
 
-    async def broke(ctx):
-        return "OpenRouter balance is $0.00"
-    monkeypatch.setattr(infra_service.acs, "openrouter_balance_problem", broke)
+    async def down(ctx):
+        return "self-hosted endpoint x is not reachable"
+    monkeypatch.setattr(infra_service.acs, "selfhosted_reachable", down)
     model = next(o for o in asyncio.run(infra_service.options(ctx, p))["planner"] if o["id"] == "model")
-    assert model == {"id": "model", "label": "OpenRouter (anthropic/x)", "available": False,
-                     "reason": "OpenRouter balance is $0.00"}
+    assert model == {"id": "model", "label": "self-hosted Qwen (x)", "available": False,
+                     "reason": "self-hosted endpoint x is not reachable"}
+
+
+def test_no_paid_model_gateway_is_ever_routed(tmp_path):
+    """InsForge credentials or a leftover OPENROUTER_API_KEY never create a model route: model work runs
+    on the user's Claude Code, or the opt-in self-hosted endpoint."""
+    from cortex.context import resolve_model_route
+
+    s = Settings(data_dir=tmp_path, _env_file=None, insforge_base_url="https://x.insforge.app", insforge_api_key="k",
+                 openrouter_api_key="sk-or-x")
+    assert resolve_model_route(s) is None
+    r = resolve_model_route(Settings(data_dir=tmp_path, _env_file=None, planner_base_url="http://127.0.0.1:8001/v1"))
+    assert r is not None and r.provider == "selfhosted" and r.price_per_m is None
 
 
 def test_training_uses_the_chosen_gpu_and_walltime(tmp_path, monkeypatch):

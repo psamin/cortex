@@ -79,8 +79,11 @@ claude mcp add --transport http cortex http://localhost:3000/mcp
 Then tell your agent: *"Train my SO-101 to pick up the water bottle and put it on the mat."* Watch it
 in the studio at http://127.0.0.1:5173.
 
+How the scene is set up: your agent asks you for **a photo of your setup** (Cortex's Claude Code rebuilds it in
+MuJoCo), **a description** in your own words, or **the default scene** (a red cube and a target).
+
 How the demonstrations are made:
-- The default demonstrator is an **agent planner**: our self-hosted **Qwen3-VL**, or GPT-6 Astra via OpenRouter. It looks at the rendered scene and picks actions through validated tools, and a local IK controller executes them.
+- The default demonstrator is an **agent planner**: your own **Claude Code** (headless, through the Cortex MCP robot tools), or an opt-in self-hosted **Qwen3-VL**. It looks at the rendered scene and picks actions through validated tools, and a local IK controller executes them. Cortex uses no OpenRouter or other paid model gateway; InsForge holds the data.
 - Your own agent can also drive the arm directly with the `robot_*` tools.
 - The scripted IK oracle stays available as a labelled baseline.
 
@@ -115,10 +118,10 @@ Read next: [AGENTS.md](AGENTS.md) if you are an agent, [ARCHITECTURE.md](ARCHITE
 
 ## What is real
 
-- **Agent demos.** GPT-6 Astra demonstrations are real MuJoCo executions of validated IK trajectories,
-  recorded step by step. Astra never emits motor commands, and success is the simulator's verdict, not
-  the model's. Failed attempts are kept as diagnostics and never enter a dataset. If no Astra route is
-  configured, Cortex says so and does not substitute another model.
+- **Agent demos.** Agent-planned demonstrations are real MuJoCo executions of validated IK trajectories,
+  recorded step by step. The planner never emits motor commands, and success is the simulator's verdict,
+  not the model's. Failed attempts are kept as diagnostics and never enter a dataset. If no planner is
+  available, Cortex says so and does not substitute another model.
 - **Physics.** Demonstrations and evaluations are MuJoCo rollouts in the official EnvHub environment
   `lerobot/so101-tabletop-mujoco`, pinned to commit `12e504e8`. They are never replayed or mocked.
 - **Scripted oracle.** Oracle demos come from a scripted IK expert that reads simulator state. Every

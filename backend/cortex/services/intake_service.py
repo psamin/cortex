@@ -15,6 +15,7 @@ import io
 import json
 import threading
 from collections import OrderedDict
+from collections.abc import Awaitable, Callable
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -22,6 +23,7 @@ from ..context import Ctx
 from ..intake import IntakeSpec, apply_patch, start, status
 from ..models import CreateProjectRequest, Mode, Project
 from ..sim.scene import SceneInfo, build_scene
+from .scene_setup import SceneSource, initial_spec
 
 CAMERAS = ("top", "front", "wrist_cam")
 _render_lock = threading.Lock()
@@ -75,30 +77,50 @@ class SceneNotBuilt(FileNotFoundError):
     """capture_frame and later stages need build_simulation first."""
 
 
-async def start_intake(ctx: Ctx, prompt: str, mode: str, actor: str) -> tuple[Project, dict[str, Any]]:
+async def start_intake(ctx: Ctx, prompt: str, mode: str, actor: str,
+                       src: SceneSource | None = None) -> tuple[Project, dict[str, Any]]:
     from .agent_orchestrator import create_project  # import here: the orchestrator imports this module
 
-    spec = start(prompt, mode)
-    p = await create_project(ctx, CreateProjectRequest(task_prompt=prompt or "Pick and place.", mode=Mode(mode)),
-                             actor)
+    src = src or SceneSource()
+    spec, report, photo = await initial_spec(ctx, prompt, mode, src)  # before the project: a bad photo creates nothing
+    p = await create_project(ctx, CreateProjectRequest(task_prompt=spec.prompt or prompt or "Pick and place.",
+                                                       mode=Mode(mode)), actor)
     p.intake = spec
     await ctx.repo.save("projects", p, status="active")
-    await ctx.audit(actor, "start_intake", p.id, {"prompt": prompt, "mode": mode}, "ok",
-                    f"{len(spec.objects)} objects seeded from the prompt")
-    return p, status(spec).model_dump(mode="json")
+    report = await _keep_photo(ctx, p, photo, report)
+    await ctx.audit(actor, "start_intake", p.id, {"prompt": prompt, "mode": mode, "scene_source": src.kind}, "ok",
+                    f"{len(spec.objects)} objects; scene from {src.kind}")
+    return p, {**status(spec).model_dump(mode="json"), "scene_setup": report}
 
 
-async def seed_intake(ctx: Ctx, p: Project, prompt: str, mode: str, actor: str) -> dict[str, Any]:
-    """Start the intake over from a prompt on an existing project (the studio's), instead of creating one."""
+async def seed_intake(ctx: Ctx, p: Project, prompt: str, mode: str, actor: str, src: SceneSource | None = None,
+                      guard: Callable[[IntakeSpec], Awaitable[None]] | None = None) -> dict[str, Any]:
+    """Start the intake over on an existing project (the studio's), instead of creating one. `guard` may refuse
+    the new scene before anything is saved."""
+    src = src or SceneSource()
+    spec, report, photo = await initial_spec(ctx, prompt, mode, src)
+    if guard:
+        await guard(spec)
     async with project_lock(p.id):
         p = await _reload(ctx, p)
-        p.intake = start(prompt, mode)
+        p.intake = spec
         await ctx.repo.save("projects", p, status="active")
-    await ctx.audit(actor, "start_intake", p.id, {"prompt": prompt, "mode": mode}, "ok",
-                    f"{len(p.intake.objects)} objects seeded from the prompt on this project")
+    report = await _keep_photo(ctx, p, photo, report)
+    await ctx.audit(actor, "start_intake", p.id, {"prompt": prompt, "mode": mode, "scene_source": src.kind}, "ok",
+                    f"{len(p.intake.objects)} objects on this project; scene from {src.kind}")
     out = status(p.intake).model_dump(mode="json")
     out["scene_built"], out["scene_stale"] = p.scene is not None, scene_stale(p)
+    out["scene_setup"] = report
     return out
+
+
+async def _keep_photo(ctx: Ctx, p: Project, photo: bytes | None, report: dict[str, Any]) -> dict[str, Any]:
+    """Store the user's photo with the project, so the studio and the agent can compare it with the render."""
+    if not photo:
+        return report
+    key = f"projects/{p.id}/intake/photo.jpg"
+    await ctx.blobs.put_bytes(key, photo, "image/jpeg")
+    return {**report, "photo": {"key": key, "url": await ctx.media_url(key)}}
 
 
 async def update_intake(ctx: Ctx, p: Project, patch: dict[str, Any], actor: str) -> dict[str, Any]:
@@ -135,9 +157,14 @@ async def build_simulation(ctx: Ctx, p: Project, actor: str) -> dict[str, Any]:
         info = await asyncio.to_thread(build_scene, spec, out_dir)
         report = await _on_gl(_feasibility, spec, info)
         # Patches wait on the lock, so the intake saved here is the one the scene was built from.
-        p.scene = {**info.to_dict(ctx.data_dir), "feasibility": report, "intake_digest": intake_digest(spec)}
-        p.spec.goal = instruction_for(p)  # the studio, the agents and datasets name the scene's task, not the cube's
-        await ctx.repo.save("projects", p, status="active")
+        # Copy only the scene (and the task it names) onto a row re-read now: a policy or infra write
+        # that did not take this lock during the build must not be replaced by the project loaded at the start.
+        scene = {**info.to_dict(ctx.data_dir), "feasibility": report, "intake_digest": intake_digest(spec)}
+        fresh = await _reload(ctx, p)
+        fresh.scene = scene
+        fresh.spec.goal = instruction_for(fresh)  # the studio, the agents and datasets name the scene's task, not the cube's
+        await ctx.repo.save("projects", fresh, status="active")
+        p = fresh
     preview = await capture_frame(ctx, p, "top")
     await ctx.audit(actor, "build_simulation", p.id, {}, "ok", f"scene {info.digest}: {report['summary']}")
     return {"scene": p.scene, "feasibility": report, "preview": preview}

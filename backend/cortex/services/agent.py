@@ -1,8 +1,8 @@
 """The studio's agent panel.
 
-With a Model Gateway key: an LLM (OpenRouter, OpenAI-compatible tool calling)
-plans over the same tool registry the MCP server exposes. Without one: a small
-deterministic intent planner covers the core flow. Either way the agent never
+Normally the user's own Claude Code (services/claude_code_agent.py); with the opt-in self-hosted
+endpoint, that model (OpenAI-compatible tool calling) plans over the same tool registry the MCP
+server exposes. Without either: a small deterministic intent planner covers the core flow. Either way the agent never
 approves gated work itself: a human clicks an `approval_required` card, or, in
 autonomous mode, the project's standing approval covers it (services/autonomy.py).
 """

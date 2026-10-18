@@ -7,6 +7,20 @@ Built with [mcp-use](https://docs.mcp-use.com) v2 (TypeScript), it is a thin lay
 - `structuredContent`: the backend's JSON (`summary`, `ref_ids`, plus the data).
 - `content`: a short text line, the `summary` and the `ref_ids`.
 
+## Step 1: set up the scene
+
+Every task starts by rebuilding the human's workspace in MuJoCo. `cortex.start_intake` (shown to humans as "Set up the scene") offers three ways in, and the agent asks the human which one (clients with forms show it as the first form):
+
+| Choice | Pass | What happens |
+|---|---|---|
+| **Photo** of their setup | `image_path` (read by this server, on the human's machine) or `image_b64` | Cortex's Claude Code reads the photo and estimates the objects (catalogue items where they match), where they start, the place zones, table, lighting and obstacles. The photo is kept with the project. |
+| **Description** in their words | `description` | The same estimate from text. |
+| **Default** scene | `scene_source: "default"` | The built-in tabletop: a 3 cm red cube and a target zone. No model call; the intake is complete. (`cortex.create_policy_project` is the same scene plus collection in one call.) |
+
+An estimate is not a measurement. It goes through the same validation as any `update_intake` patch, positions are pulled inside the arm's reach, and estimated objects stay `assumed`, so the human gets confirm questions. The result's `scene_setup` lists what was estimated, what Cortex moved or left out (`adjusted`, with reasons) and Claude Code's own notes. Then: `update_intake` with the human's corrections, `build_simulation`, and compare `capture_frame` with the photo.
+
+**Models.** All of Cortex's model work (scene from a photo or description, agent-planned demos, failure diagnosis, the studio chat) runs on the Claude Code installed on the Cortex machine, headless and sandboxed (scene reading and diagnosis get only the Read tool and no MCP servers). Cortex finds `claude` on PATH, else where the Claude desktop app installs it; set `CLAUDE_CODE_PATH` otherwise. There is no OpenRouter or other paid model gateway. A self-hosted OpenAI-compatible endpoint (`PLANNER_BASE_URL`) remains an opt-in alternative. InsForge holds the data, storage and auth.
+
 Media is never streamed. Episodes and evaluations come back as ids and storage keys, for example `video_key: projects/<pid>/evaluations/<ev>/<br>/seed1000.mp4`. The local backend serves those keys at `http://127.0.0.1:8000/files/<key>`.
 
 | Tool | Backend tool | Notes |
@@ -25,7 +39,7 @@ Media is never streamed. Episodes and evaluations come back as ids and storage k
 | `cortex.compare_experiments` | `compare_experiments` | read-only |
 | `cortex.get_next_actions` | `get_next_actions` | read-only |
 | `cortex.get_job` | `get_job` | read-only; poll background jobs |
-| `cortex.start_intake` | `start_intake` | spec v2: creates a draft project; returns typed questions, each with a ready-to-send `patch` |
+| `cortex.start_intake` | `start_intake` | step 1, "Set up the scene": from a photo, a description or the default scene; creates a draft project and returns `scene_setup` plus typed questions, each with a ready-to-send `patch` |
 | `cortex.update_intake` | `update_intake` | merges a partial spec; lists merge by `name`; unknown keys are rejected |
 | `cortex.get_intake_status` | `get_intake_status` | read-only |
 | `cortex.build_simulation` | `build_simulation` | builds the MuJoCo scene, checks feasibility; returns a preview image |
@@ -48,7 +62,7 @@ The `cortex.view_*` tools have `visibility: "app"`: the views call them to refre
 
 Try them in the Inspector (`npm run dev`, then http://localhost:3000/mcp/inspector): run `cortex.show_collection` with a project id and switch the response to **Component (MCP Apps)**. In dev mode each view compiles on first use, which takes a few seconds.
 
-There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an agent through the whole loop: create the project, record demonstrations, analyze, recommend, build a dataset version, propose training, ask the human for approval, evaluate in simulation, compare, and get the next actions.
+There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an agent through the whole loop: set up the scene (photo, description or default), collect demonstrations, analyze, recommend, build a dataset version, propose training, ask the human for approval, evaluate in simulation, compare, and get the next actions.
 
 **Approval.** `cortex.launch_training_job` only runs a job that a human has approved in the studio. If the job is not approved, the backend answers `403 {approval_required: true}`. The server turns that into a normal, non-error result that says `HUMAN APPROVAL REQUIRED`. The result includes `next_step` and `studio_url` (from `CORTEX_STUDIO_URL`), so the agent asks the human to approve instead of retrying. Other errors (404, 422, unreachable backend, remote access refused) come back as `isError: true`, with the backend's `detail`.
 
@@ -107,6 +121,8 @@ After a write tool or a followed job, the server calls `notifyResourceUpdated` f
 
 `cortex.start_intake` and `cortex.update_intake` take a new optional `ask_human` (default true).
 
+**Where the scene comes from.** When `start_intake` is called without `scene_source`, `image_path`, `image_b64` or `description`, a form-capable client first gets a small form: *From a photo of my setup* (with a file path field), *From my description* (free text), or *Use the default scene*. Nothing is created until the human answers. Other clients get the prompt-only scene plus a `next_step` telling the agent to offer the three choices.
+
 **Clients on 2026-07-28 that declare `elicitation`.** The tool does not return the questions. It returns an `input_required` result holding one form-mode elicitation, and each question becomes a form field:
 
 | Question | Form field |
@@ -131,7 +147,7 @@ The client shows the form to the human and retries the call with the answers. Th
 
 mcp-use lists every registered tool, but a `mcp:tools/list` middleware can rewrite the list. This one does three things:
 
-- **Orders tools along the golden path.** The order is `create_policy_project`, `get_collection_progress`, `train_from_agent_demonstrations`, `launch_training_job`, `get_project_state`, `evaluate_learned_policy` and `improve_policy`. Then come `get_next_actions` and `get_job`, the intake path, the manual path, and finally `robot_*`.
+- **Orders tools along the golden path.** The order is `start_intake` and `create_policy_project` (both step 1: the scene), `get_collection_progress`, `train_from_agent_demonstrations`, `launch_training_job`, `get_project_state`, `evaluate_learned_policy` and `improve_policy`. Then come `get_next_actions` and `get_job`, the intake path, the manual path, and finally `robot_*`.
 - **Adds `_meta` to each tool:** `cortex/stage` (`setup`, `collect`, `train`, `evaluate`, `improve`, `anytime` or `manual`), `cortex/tier` (`golden`, `custom` or `advanced`) and `cortex/golden_path_step`.
 - **Filters by URL query.**
   - `/mcp?toolset=core` lists 16 tools: the golden path and the intake path, with no manual or `robot_*` tools. `CORTEX_MCP_TOOLSET=core` makes this the default.

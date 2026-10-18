@@ -114,11 +114,8 @@ async def start_policy(ctx: Ctx, project: Project, req: PolicyRunRequest) -> dic
     ck = await ctx.repo.get("checkpoints", req.checkpoint_id, Checkpoint)
     if ck is None or ck.project_id != project.id:
         raise NotFound(f"checkpoint {req.checkpoint_id}")
-    from .training_service import checkpoint_dir
-
-    path = checkpoint_dir(ctx, ck)
-    if not (path / "config.json").exists():
-        raise FileNotFoundError(f"checkpoint files for {ck.id} are not on this machine ({path})")
+    from .training_service import local_checkpoint
+    path = await local_checkpoint(ctx, ck)
     run = await _launch(ctx, project, "policy", {"mode": "policy", "episodes": req.episodes,
                                                  "episode_s": req.episode_s},
                         {"record": False, "checkpoint_path": str(path)}, await _transfer_warnings(ctx, ck))

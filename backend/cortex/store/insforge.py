@@ -1,11 +1,11 @@
 """InsForge adapters over its REST API (httpx, server-side admin key).
 
-Endpoints, from InsForge docs/sdks/rest/{database,storage,ai}.mdx:
+Endpoints, from InsForge docs/sdks/rest/{database,storage}.mdx:
   records    GET/POST /api/database/records/{table}   (PostgREST filters, array bodies)
   migrations POST /api/database/migrations {version, name, sql}
   storage    POST /api/storage/buckets, PUT/GET /api/storage/buckets/{b}/objects/{key},
              GET  /api/storage/buckets/{b}/download-strategy/objects/{key}?expiresIn=
-  AI key     GET  /api/ai/openrouter/api-key  (InsForge's Model Gateway provisions OpenRouter)
+InsForge's AI Model Gateway is not used: Cortex's model work runs on the user's Claude Code.
 """
 
 from __future__ import annotations
@@ -187,32 +187,6 @@ class InsForgeBlobStore:
         if info.get("method") == "presigned":
             return info["url"]
         return ""  # caller falls back to the backend proxy route
-
-
-async def gateway_key(base_url: str, api_key: str,
-                      transport: httpx.AsyncBaseTransport | None = None) -> tuple[str | None, str | None]:
-    """(OpenRouter key, None) or (None, InsForge's reason). Free InsForge plans answer
-    403 AI_UPSTREAM_UNAVAILABLE ("AI is only available on paid plans")."""
-    try:
-        r = await _Client(base_url, api_key, transport).req("GET", "/api/ai/openrouter/api-key")
-        return r.json().get("apiKey"), None
-    except InsForgeError as e:
-        log.warning("InsForge Model Gateway key unavailable: %s", e)
-        body = str(e).split(": ", 1)[-1]
-        try:
-            import json
-
-            return None, json.loads(body).get("message") or body
-        except ValueError:
-            return None, body[:200]
-    except httpx.HTTPError as e:
-        log.warning("InsForge Model Gateway unreachable: %s", e)
-        return None, f"InsForge unreachable: {type(e).__name__}"
-
-
-async def fetch_openrouter_key(base_url: str, api_key: str,
-                               transport: httpx.AsyncBaseTransport | None = None) -> str | None:
-    return (await gateway_key(base_url, api_key, transport))[0]
 
 
 def migration_name(f: Path) -> str:

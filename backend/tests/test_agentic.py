@@ -95,7 +95,7 @@ def fake_model(sess: ManipulationSession, env: PickPlaceEnv, bad_first_move: boo
 
     def handler(request: httpx.Request) -> httpx.Response:
         body = json.loads(request.content)
-        assert body["model"] == "openai/gpt-6-astra" and body["tools"]
+        assert body["model"] == "test/model" and body["tools"]
         if not script:
             script.append(("observe_scene", lambda: {"camera": "overhead"}))
             if bad_first_move:
@@ -128,7 +128,8 @@ def fake_model(sess: ManipulationSession, env: PickPlaceEnv, bad_first_move: boo
 
 def test_planner_loop_records_a_real_successful_trajectory(env):
     s = session(env, seed=5, region="left")
-    planner = AstraPlanner(PlannerConfig(provider="insforge", api_key="test"),
+    planner = AstraPlanner(PlannerConfig(provider="selfhosted", api_key="test", model="test/model",
+                                         endpoint="http://planner.test/v1/chat/completions"),
                            transport=httpx.MockTransport(fake_model(s, env)))
     events = []
     run = planner.run_episode(s, "pick the cube and place it in the bowl", events.append)
@@ -148,7 +149,8 @@ def test_planner_loop_records_a_real_successful_trajectory(env):
 
 def test_planner_recovers_from_a_rejected_command(env):
     s = session(env, seed=6, region="right")
-    planner = AstraPlanner(PlannerConfig(provider="insforge", api_key="test"),
+    planner = AstraPlanner(PlannerConfig(provider="selfhosted", api_key="test", model="test/model",
+                                         endpoint="http://planner.test/v1/chat/completions"),
                            transport=httpx.MockTransport(fake_model(s, env, bad_first_move=True)))
     run = planner.run_episode(s, "task", lambda e: None)
     assert run["trace"][1]["ok"] is False and run["trace"][1]["result"]["error"]["code"] == "outside_workspace"
@@ -157,7 +159,8 @@ def test_planner_recovers_from_a_rejected_command(env):
 
 def test_call_budget_stops_the_episode(env):
     s = session(env, seed=7)
-    planner = AstraPlanner(PlannerConfig(provider="insforge", api_key="test", max_calls=3),
+    planner = AstraPlanner(PlannerConfig(provider="selfhosted", api_key="test", model="test/model",
+                                         endpoint="http://planner.test/v1/chat/completions", max_calls=3),
                            transport=httpx.MockTransport(fake_model(s, env)))
     run = planner.run_episode(s, "task", lambda e: None)
     assert not run["finished"] and "budget" in run["stop_reason"] and run["usage"]["calls"] == 3

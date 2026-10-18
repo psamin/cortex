@@ -1,8 +1,14 @@
 import { randomBytes } from "node:crypto";
+import { readFile, stat } from "node:fs/promises";
+import { basename, extname } from "node:path";
 import { createRequestStateCodec, inputRequired, inputResponse, type CallToolResult, type InputRequiredResult, type RequestContext } from "mcp-use";
 import { callTool, identityOf } from "./backend.js";
 import { z } from "zod";
 
+// A new scene starts with the human's choice of where it comes from: a photo of their setup (read by Cortex's
+// Claude Code), their own description, or the default tabletop. Asked as a form when the client can show one;
+// otherwise the tool description tells the agent to ask. A photo path is read here, next to the human.
+//
 // Intake questions go to the human, not the model. start_intake / update_intake return typed questions
 // ({path, type, options, patch, ...}); when the client can show a form (2026-07-28 `input_required` with the
 // elicitation capability) the tool answers with an elicitation form built from those questions, turns the
@@ -14,7 +20,8 @@ type Json = Record<string, unknown>;
 type Question = { path: string; type: string; prompt: string; why: string; options?: string[]; default?: unknown; required?: boolean; patch?: Json | null; option_patches?: Record<string, Json> };
 /** How to turn one form field back into a patch; kept in the signed requestState between rounds. */
 type Field = { key: string; path: string; kind: "enum" | "multi" | "confirm" | "accept" | "string" | "number" | "describe"; patch?: Json | null; option_patches?: Record<string, Json> };
-type State = { project_id: string; round: number; fields: Field[] };
+/** Between rounds. `start_args`: the scene-source form is open and no project exists yet. */
+type State = { project_id: string; round: number; fields: Field[]; start_args?: Json };
 
 const MAX_ROUNDS = 4;
 // One process serves every round on a single host; set CORTEX_MCP_STATE_KEY (>= 32 chars) when several
@@ -148,16 +155,113 @@ function withQuestionsText(r: CallToolResult, data: Json, extra: string[] = []):
   };
 }
 
+// ---------------------------------------------------------------- where the scene comes from (start_intake)
+
+const PHOTO_EXT = new Set([".jpg", ".jpeg", ".png", ".webp"]);
+const MAX_PHOTO_BYTES = 15 * 1024 * 1024;
+const SOURCES = ["photo", "description", "default"] as const;
+
+const hasSource = (a: Json) => Boolean(a.scene_source || a.image_path || a.image_b64 || a.description);
+
+/** This server runs next to the human, so a photo path is read here and sent to the backend as base64. */
+async function withPhoto(args: Json): Promise<Json | string> {
+  const { image_path, ...rest } = args;
+  const path = typeof image_path === "string" ? image_path.trim().replace(/^["']|["']$/g, "") : "";
+  if (!path) return rest;
+  if (!PHOTO_EXT.has(extname(path).toLowerCase())) return `image_path must be a JPEG, PNG or WebP photo (got ${basename(path)}).`;
+  try {
+    const st = await stat(path);
+    if (!st.isFile()) return `image_path ${path} is not a file.`;
+    if (st.size > MAX_PHOTO_BYTES) return `The photo at ${path} is larger than 15 MB; send a smaller one.`;
+    return { ...rest, image_b64: (await readFile(path)).toString("base64") };
+  } catch {
+    return `Cortex could not read a photo at ${path}. Check the path with the human.`;
+  }
+}
+
+/** The first form for a new scene: photo, description or the default. */
+const SOURCE_FORM = {
+  type: "object",
+  properties: {
+    scene_source: {
+      type: "string",
+      title: "How should Cortex build the scene?",
+      description: "photo: from a picture of your setup (give its file path below). description: from your own words below. " +
+        "default: the built-in tabletop, a red cube and a target zone.",
+      enum: [...SOURCES],
+      enumNames: ["From a photo of my setup", "From my description", "Use the default scene"],
+      default: "photo",
+    },
+    image_path: {
+      type: "string",
+      title: "Photo of your setup (file path)",
+      description: "e.g. C:\\Users\\me\\Pictures\\desk.jpg. A shot from above and in front of the arm, with the whole table in view, works best.",
+    },
+    description: {
+      type: "string",
+      title: "Or describe your setup",
+      description: "The objects and their sizes, where they sit relative to the arm, the target, and anything in the way.",
+    },
+  },
+  required: ["scene_source"],
+};
+
+const SOURCE_HINT =
+  "This scene came from the task prompt alone. For a sim that matches the human's real setup, offer them the three ways in: " +
+  "a photo (cortex_start_intake with project_id and image_path), a detailed description (description), or the default scene " +
+  "(scene_source='default').";
+
+/** Turn the scene form's answer into start_intake args, or say what is still missing. */
+function sourceArgs(base: Json, content: Json): Json | string {
+  const src = String(content.scene_source ?? "");
+  const path = typeof content.image_path === "string" ? content.image_path.trim() : "";
+  const text = typeof content.description === "string" ? content.description.trim() : "";
+  if (src === "photo" && !path) return "The human chose a photo but gave no file path. Ask them for the path, then call cortex_start_intake with image_path.";
+  if (src === "description" && !text) return "The human chose to describe the scene but wrote nothing. Ask them to describe it, then call cortex_start_intake with description.";
+  return { ...base, scene_source: src, ...(src === "photo" ? { image_path: path } : {}), ...(text && src !== "default" ? { description: text } : {}) };
+}
+
+const textResult = (text: string, isError = false): CallToolResult => ({ isError, content: [{ type: "text", text }] });
+
 /**
- * start_intake / update_intake with human input. On re-entry (`requestState` verified by the codec) it applies
- * the human's answers to the project from round one and never starts a second intake.
+ * start_intake / update_intake with human input. A new scene first asks where it comes from (photo, description,
+ * default) when the client can show forms and the call did not say. On re-entry (`requestState` verified by the
+ * codec) it applies the human's answers to the project from round one and never starts a second intake.
  */
 export async function runIntake(tool: "start_intake" | "update_intake", input: Json, ctx: RequestContext): Promise<CallToolResult | InputRequiredResult> {
-  const { ask_human, ...args } = input;
+  const { ask_human, ...given } = input;
+  let args: Json = given;
   const state = ctx.requestState<State>();
   let result: CallToolResult;
   let round = 1;
   const notes: string[] = [];
+  if (tool === "start_intake" && !state && ask_human !== false && !hasSource(args) && canAsk(ctx)) {
+    return inputRequired({
+      inputRequests: {
+        scene: inputRequired.elicit({
+          message: "Cortex will rebuild your robot's workspace in simulation. Start from a photo, your description, or the default scene?",
+          requestedSchema: SOURCE_FORM as never,
+        }),
+      },
+      requestState: await codec.mint({ project_id: "", round: 0, fields: [], start_args: args }),
+    });
+  }
+  if (state?.start_args) {
+    const answer = inputResponse(ctx.inputResponses, "scene");
+    if (answer.kind !== "elicit" || answer.action !== "accept" || !answer.content) {
+      const why = answer.kind === "elicit" ? `The human chose '${answer.action}' on the scene form.` : "No form answer came back.";
+      return textResult(`${why} Nothing was created. Ask them in chat: a photo of their setup, a description, or the default scene.`);
+    }
+    const next = sourceArgs(state.start_args, answer.content as Json);
+    if (typeof next === "string") return textResult(next);
+    args = next;
+  }
+  if (tool === "start_intake") {
+    const withImage = await withPhoto(args);
+    if (typeof withImage === "string") return textResult(withImage + " Nothing was created.", true);
+    if (!hasSource(args)) notes.push(SOURCE_HINT);
+    args = withImage;
+  }
   if (state && typeof state === "object" && state.project_id) {
     round = state.round + 1;
     const answer = inputResponse(ctx.inputResponses, "intake");

@@ -14,7 +14,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from ..context import Ctx
 from ..errors import NotFound
@@ -753,6 +753,17 @@ class IntakeArgs:
         mode: Mode = Field(Mode.sim, description="'sim' (the MVP runs everything in physics sim) or 'real'")
         project_id: str | None = Field(None, description="Start this existing project's intake over from the "
                                                          "prompt instead of creating a new project")
+        scene_source: Literal["photo", "description", "default"] | None = Field(
+            None, description="Where the scene comes from. 'photo': Cortex's Claude Code reads the photo of the "
+                              "user's setup (image_b64) and rebuilds it. 'description': it reads the user's "
+                              "detailed description. 'default': the built-in cube-and-target tabletop, no model "
+                              "call. Omitted: photo if image_b64 is given, else description if given, else the "
+                              "prompt alone.")
+        image_b64: str | None = Field(None, description="The photo of the setup, base64 (JPEG, PNG or WebP, up "
+                                                        "to 15 MB)")
+        description: str | None = Field(None, max_length=4000, description="The user's description of the setup: "
+                                                                          "objects, sizes, where they sit relative "
+                                                                          "to the arm, the target, obstacles")
 
     class Update(BaseModel):
         project_id: str
@@ -791,18 +802,26 @@ async def keep_demos_with_their_task(ctx: Ctx, p: Project, objects: set[str]) ->
 
 
 async def t_start_intake(ctx, a, actor):
-    from ..intake import start
     from . import intake_service
+    from .scene_setup import SceneSource
 
+    try:
+        src = SceneSource(kind=a.scene_source, image_b64=a.image_b64, description=a.description)
+    except ValidationError as e:
+        raise ValueError("; ".join(x["msg"].removeprefix("Value error, ") for x in e.errors())) from None
     if a.project_id:
         p = await get_project(ctx, a.project_id)
-        await keep_demos_with_their_task(ctx, p, {o.name for o in start(a.prompt, a.mode.value).objects})
-        st = await intake_service.seed_intake(ctx, p, a.prompt, a.mode.value, actor)
+
+        async def guard(spec):  # checked on the scene actually set up (a photo's objects are known only now)
+            await keep_demos_with_their_task(ctx, p, {o.name for o in spec.objects})
+
+        st = await intake_service.seed_intake(ctx, p, a.prompt, a.mode.value, actor, src, guard)
     else:
-        p, st = await intake_service.start_intake(ctx, a.prompt, a.mode.value, actor)
+        p, st = await intake_service.start_intake(ctx, a.prompt, a.mode.value, actor, src)
     n = sum(1 for q in st["questions"] if q["required"])
-    return {"summary": f"Project {p.id}: intake started, {n} questions open", "ref_ids": [p.id], "project_id": p.id,
-            **st}
+    nxt = "complete; call build_simulation" if n == 0 else f"{n} questions open"
+    return {"summary": f"Project {p.id}: scene from {src.kind} ({st['scene_setup']['summary']}). Intake {nxt}",
+            "ref_ids": [p.id], "project_id": p.id, **st}
 
 
 async def t_update_intake(ctx, a, actor):

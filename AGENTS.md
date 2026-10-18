@@ -32,8 +32,10 @@ at `POST http://localhost:8000/api/tools/<name>`. Claude Code shows the tools as
 
 ## The path (call the tools in this order)
 
-1. **Describe the robot and its world.** Call `start_intake` with the user's task in their words. You
-   get back typed questions, each with a ready-to-send patch. Answer them with `update_intake`:
+1. **Set up the scene.** Ask your human how: **a photo** of their setup (`start_intake` with `image_path`;
+   Cortex's Claude Code rebuilds the scene from it), **a description** in their words (`description`), or
+   **the default scene** (`create_policy_project` does steps 1–3 in one call). You get back `scene_setup`
+   (what was estimated) and typed questions, each with a ready-to-send patch. Answer them with `update_intake`:
    objects, zones, table, lighting, obstacles, cameras.
    - Units are metres.
    - Cylinder `size` is **[diameter, height]**, not radius.

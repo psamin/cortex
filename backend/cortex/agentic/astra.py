@@ -5,12 +5,11 @@ grip, verify, place, go home); ManipulationSession validates and executes them i
 with IK. The model never emits motor commands. Each episode is bounded by a
 model-call budget, a dollar budget and the session's step limit.
 
-The backend picks one route per run and records it on every attempt:
-  selfhosted  our own open model (e.g. Qwen3-VL on Futurama via vLLM), OpenAI-compatible,
-              points in relative 0-1000 coordinates, no per-token cost
-  insforge    OpenRouter via the InsForge Model Gateway key, GPT-6 Astra, pixel points
-  openrouter  OpenRouter with OPENROUTER_API_KEY, GPT-6 Astra
-No other model is substituted when the configured one is unavailable.
+It talks to any OpenAI-compatible chat-completions endpoint. Cortex's route for it is the opt-in
+self-hosted model (e.g. Qwen3-VL on Futurama via vLLM, points in relative 0-1000 coordinates, no
+per-token cost); the default agent planner is the user's Claude Code (services/claude_code_collector.py).
+The endpoint and model are always given explicitly and recorded on every attempt; no other model is
+substituted when the configured one is unavailable.
 """
 
 from __future__ import annotations
@@ -28,10 +27,6 @@ from ..sim.manipulation import (
     PLAN_PX, ManipulationSession, annotate_overhead, from_model_point, to_data_url, tool_schemas,
 )
 
-PRICES_PER_M = {"gpt-6-astra": {"input": 10.0, "cached": 1.0, "output": 50.0}}  # developers.openai.com, Oct 2026
-OPENROUTER = "https://openrouter.ai/api/v1/chat/completions"
-ENDPOINTS = {"insforge": OPENROUTER, "openrouter": OPENROUTER}
-MODEL_IDS = {"insforge": "openai/gpt-6-astra", "openrouter": "openai/gpt-6-astra"}
 
 SYSTEM = """You control a simulated SO-101 robot arm through tools. Task: {task}
 You never send motor commands; you choose actions and targets, and a local IK controller executes them safely.
@@ -113,7 +108,7 @@ def phase_for(tool: str, args: dict[str, Any], holding: bool) -> str:
 
 @dataclass
 class PlannerConfig:
-    provider: str  # selfhosted | insforge | openrouter
+    provider: str  # selfhosted
     api_key: str
     model: str = ""
     mode: str = "camera"
@@ -124,16 +119,11 @@ class PlannerConfig:
     max_images: int = 4  # images kept in each request; vLLM serves Qwen3-VL with --limit-mm-per-prompt image=8
     endpoint: str = ""  # chat/completions URL; recorded on every attempt
     point_format: str = "pixels"  # how the model reports image points: pixels | norm1000
-    openrouter_extras: bool = True  # OpenRouter-only request fields (reasoning, usage.include)
-    price_per_m: dict[str, float] | None = field(default_factory=lambda: dict(PRICES_PER_M["gpt-6-astra"]))
+    price_per_m: dict[str, float] | None = None  # None = no per-token charge (self-hosted)
 
     def __post_init__(self) -> None:
-        if self.provider == "selfhosted":
-            if not (self.endpoint and self.model):
-                raise ValueError("self-hosted planner needs an endpoint and a model")
-            return
-        self.model = self.model or MODEL_IDS[self.provider]
-        self.endpoint = self.endpoint or ENDPOINTS[self.provider]
+        if not (self.endpoint and self.model):
+            raise ValueError(f"the {self.provider} planner needs an endpoint and a model")
 
 
 @dataclass
@@ -191,13 +181,8 @@ class AstraPlanner:
         body: dict[str, Any] = {"model": self.cfg.model, "messages": window_images(messages, self.cfg.max_images),
                                 "tools": tool_schemas(self.cfg.point_format, self.ctx), "tool_choice": "auto",
                                 "parallel_tool_calls": False}
-        if self.cfg.openrouter_extras:
-            body["max_completion_tokens"] = 600  # tool calls are ~100-300 tokens; OpenRouter reserves credit for the max
-            body["reasoning"] = {"effort": self.cfg.reasoning_effort}  # OpenRouter's unified reasoning param
-            body["usage"] = {"include": True}  # provider-reported cost
-        else:  # plain OpenAI-compatible server (vLLM)
-            body["max_tokens"] = 600
-            body["temperature"] = 0.0
+        body["max_tokens"] = 600  # tool calls are ~100-300 tokens
+        body["temperature"] = 0.0
         t0 = time.time()
         r = self.http.post(self.cfg.endpoint, json=body,
                            headers={"Authorization": f"Bearer {self.cfg.api_key}"})
@@ -212,7 +197,7 @@ class AstraPlanner:
         usage.output_tokens += pout
         if "cost" in u:
             usage.cost_usd += float(u["cost"])
-            usage.cost_source = "provider-reported (OpenRouter usage.cost)"
+            usage.cost_source = "provider-reported (usage.cost)"
         elif self.cfg.price_per_m is None:
             usage.cost_source = "self-hosted: no per-token charge (GPU time on our own cluster)"
         else:

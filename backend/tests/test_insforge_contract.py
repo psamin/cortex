@@ -12,7 +12,7 @@ import pytest
 
 from cortex.models import AgentAttempt, AgentCollection, Scenario, StartAgentCollectionRequest
 from cortex.store.base import Repo
-from cortex.store.insforge import InsForgeBlobStore, InsForgeStore, fetch_openrouter_key
+from cortex.store.insforge import InsForgeBlobStore, InsForgeStore
 
 KEY = "ik_test"
 
@@ -75,8 +75,6 @@ class FakeInsForge:
                 self.objects[k] = req.content.split(b"\r\n\r\n", 1)[1].rsplit(b"\r\n--", 1)[0]
                 return httpx.Response(201, json={"key": k[1]})
             return httpx.Response(200, content=self.objects[k])
-        if path == "/api/ai/openrouter/api-key":
-            return httpx.Response(200, json={"apiKey": "sk-or-test", "maskedKey": "sk-or-***"})
         return httpx.Response(404, json={"error": f"no route {req.method} {path}"})
 
 
@@ -101,8 +99,8 @@ async def test_migrations_records_and_agent_artifacts(fake):
     from cortex.services.project_service import create_project
     p = create_project(CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
     await repo.save("projects", p, status="active")
-    col = AgentCollection(project_id=p.id, collector="astra", provider="InsForge Model Gateway → OpenRouter",
-                          model="openai/gpt-6-astra", request=StartAgentCollectionRequest(num_demos=2))
+    col = AgentCollection(project_id=p.id, collector="astra", provider="Claude Code (your agent) via MCP",
+                          model="claude-code", request=StartAgentCollectionRequest(num_demos=2))
     await repo.save("agent_collections", col)
     for i, st in enumerate(("success", "failed")):
         await repo.save("agent_attempts", AgentAttempt(
@@ -111,13 +109,13 @@ async def test_migrations_records_and_agent_artifacts(fake):
     got = await repo.list("agent_attempts", AgentAttempt, project_id=p.id)
     # rows saved in the same clock tick tie on created_at and are ordered by id, so compare by index
     assert {a.index: a.status for a in got} == {0: "success", 1: "failed"}
-    assert {a.model for a in got} == {"openai/gpt-6-astra"}
+    assert {a.model for a in got} == {"claude-code"}
     assert len(await repo.list("agent_attempts", AgentAttempt, project_id=p.id, status="failed")) == 1
     assert (await repo.get("projects", p.id, type(p))).name == p.name
     assert fake.tables["projects"][p.id]["project_id"] == p.id  # uniform (id, project_id, status, data) rows
 
 
-async def test_storage_roundtrip_presign_and_gateway_key(fake):
+async def test_storage_roundtrip_and_presign(fake):
     t = httpx.MockTransport(fake)
     blobs = InsForgeBlobStore("https://app.insforge.test", KEY, "cortex-assets", transport=t)
     await blobs.init()
@@ -126,7 +124,6 @@ async def test_storage_roundtrip_presign_and_gateway_key(fake):
     await blobs.put_bytes(key, b'{"trace": []}', "application/json")
     assert await blobs.get_bytes(key) == b'{"trace": []}'
     assert (await blobs.url(key)).startswith("https://s3.example/")
-    assert await fetch_openrouter_key("https://app.insforge.test", KEY, transport=t) == "sk-or-test"
 
 
 async def test_rejected_migration_fails_loudly(fake):
