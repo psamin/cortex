@@ -677,6 +677,8 @@ export interface RemoteRollout {
   label: string;
   success: boolean | null;
   failure_mode?: string | null;
+  /** cameras recorded for this rollout (id drives the video URL; label/detail are for people) */
+  cameras?: { id: string; label: string; detail?: string }[] | string[];
   /** "left/normal" (Condition.key) on the live backend; an object is also accepted */
   condition?: Condition | string | null;
   seed?: number | null;
