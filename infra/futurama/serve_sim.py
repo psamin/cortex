@@ -48,7 +48,7 @@ def best_checkpoints(sim_dir: Path) -> dict[str, dict[str, Any]]:
             continue
         cand = {"task": task, "variant": variant, "step": int(step), "checkpoint": str(ck),
                 "success_rate": r["success_rate"], "eval_episodes": r["episodes"], "eval_seeds": r["seeds"],
-                "layouts": r.get("layouts")}
+                "layouts": r.get("layouts"), "layout_seeds": r.get("layout_seeds")}
         if task in unscored or (cand["success_rate"], cand["step"]) > (best[task]["success_rate"], best[task]["step"]):
             best[task] = cand
             unscored.discard(task)
@@ -62,7 +62,9 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
     out = {}
     for task, info in best_checkpoints(sim_dir).items():
         meta = sim_dir / task / "dataset" / "meta" / "cortex_sim.json"  # practice layouts it was trained on, if any
-        info["layouts"] = info.get("layouts") or (json.loads(meta.read_text()).get("layouts") if meta.exists() else None)
+        m = json.loads(meta.read_text()) if meta.exists() else {}
+        info["layouts"] = info.get("layouts") or m.get("layouts")
+        info["layout_seeds"] = info.get("layout_seeds") or m.get("layout_seeds")
         env, _ = make(task, 240, 320)
         policy = LeRobotPolicy(info["checkpoint"], device="cuda", task=env.instruction,
                                cameras=CAMERAS.get(info["variant"]))
@@ -109,7 +111,9 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
     # thread, so every run builds its own sim here (about a second) instead of reusing the startup one.
     env, _ = make(p["task"], 240, 320)
     policy = p["policy"]
-    if p.get("layouts"):
+    if p.get("layout_seeds"):
+        seed = p["layout_seeds"][seed % len(p["layout_seeds"])]  # a practice layout it was trained on
+    elif p.get("layouts"):
         seed = seed % p["layouts"]  # a practice layout it was trained on (demo reliability over generalization)
     else:
         seed = visible_seed(p["task"], env, seed)
