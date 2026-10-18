@@ -244,6 +244,8 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
             elif st == "POLICY_EVALUATED":
                 ev = await simulation_runner.get_evaluation(ctx, c["evaluation_id"])
                 rates = {b.spec.name: (b.result.success_rate, b) for b in ev["branches"] if b.result}  # type: ignore[index]
+                if not rates:
+                    raise Stop(_no_results(ev))
                 cmp = await experiment_comparison.compare(ctx, project.id)
                 await _step(ctx, run, "evaluate", "Measured: " + ", ".join(
                     f"{k} {b.result.successes}/{b.result.n}" for k, (_, b) in rates.items()) + f". {cmp.summary}",
@@ -276,7 +278,10 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
                 ev = await simulation_runner.get_evaluation(ctx, c["evaluation_id"])
                 rec = await recommendation_service.recommend(ctx, project, actor=ACTOR)
                 c["augment_next"] = any(r.action == "augment" for r in rec)
-                worst_b = min((b for b in ev["branches"] if b.result), key=lambda b: b.result.success_rate)  # type: ignore[index]
+                measured = [b for b in ev["branches"] if b.result]  # type: ignore[index]
+                if not measured:  # e.g. resumed into this state after the branches failed
+                    raise Stop(_no_results(ev))
+                worst_b = min(measured, key=lambda b: b.result.success_rate)  # type: ignore[union-attr]
                 region = recommendation_service.region_of(worst_b.spec.condition.cube_region, worst_b.spec.cube_offset)
                 cell = Condition(cube_region=region, lighting=worst_b.spec.condition.lighting)  # type: ignore[arg-type]
                 r = worst_b.result
@@ -309,6 +314,14 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
         await _step(ctx, run, run.phase, f"Error: {run.error}", status="failed")
     finally:
         _running.pop(project_id, None)
+
+
+def _no_results(ev: dict | None) -> str:
+    """Why an evaluation can't steer the next round: no branch produced a measured result."""
+    if not ev:
+        return "evaluation not found; nothing measured to choose the next experiment from"
+    errors = "; ".join(f"{b.spec.name}: {b.error or b.status}" for b in ev["branches"]) or "no branches"
+    return f"evaluation {ev['run'].id} produced no results ({errors})"
 
 
 def _collector_label(ctx: Ctx, run: AutopilotRun) -> str:
