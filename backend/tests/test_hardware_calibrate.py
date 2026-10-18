@@ -59,12 +59,28 @@ def test_calibration_prompts_are_relayed_and_answered(monkeypatch):
     asyncio.run(run())
 
 
-def test_calibration_preconditions_and_stop(monkeypatch):
+def test_calibration_preconditions():
     async def run():
         with pytest.raises(HardwareRefused, match="CORTEX_ENABLE_HARDWARE"):
             await cal.start_calibration("follower", CFG, enabled=False)
         with pytest.raises(HardwareRefused, match="leader arm's port"):
             await cal.start_calibration("leader", CFG, enabled=True)
+
+    asyncio.run(run())
+
+
+def test_calibration_is_refused_on_windows_with_the_terminal_command(monkeypatch):
+    """LeRobot reads Enter from the console on Windows, so the studio can't relay prompts there."""
+    monkeypatch.setattr(cal.platform, "system", lambda: "Windows")
+    with pytest.raises(HardwareRefused, match="run `lerobot-calibrate` in a terminal") as e:
+        asyncio.run(cal.start_calibration("follower", CFG, enabled=True))
+    assert "--robot.port=/dev/fake" in str(e.value) and "--robot.id=a1" in str(e.value)
+    assert not cal.busy()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="LeRobot reads Enter from the console on Windows")
+def test_calibration_can_be_stopped(monkeypatch):
+    async def run():
         monkeypatch.setattr(cal, "calibrate_cmd", lambda d, c: [sys.executable, "-c", "input('press ENTER: ')"])
         await cal.start_calibration("follower", CFG, enabled=True)
         await until(lambda: cal.snapshot()["prompt"])
