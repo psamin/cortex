@@ -10,7 +10,7 @@ TABLES = (
     "projects", "robot_configs", "episodes", "episode_artifacts", "dataset_versions",
     "dataset_episode_links", "analyses", "failure_clusters", "recommendations",
     "training_jobs", "checkpoints", "evaluation_runs", "simulation_branches",
-    "tool_audit_logs", "autopilot_runs", "agent_collections", "agent_attempts",
+    "tool_audit_logs", "autopilot_runs", "agent_collections", "agent_attempts", "rl_sandboxes", "rl_rounds",
 )
 
 M = TypeVar("M", bound=BaseModel)

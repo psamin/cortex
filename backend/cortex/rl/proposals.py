@@ -60,7 +60,8 @@ def propose(project_id: str, weaknesses: list[Weakness], budget: SandboxBudget |
         env = SandboxEnv(condition=w.condition, cube_offset=w.cube_offset, light_scales=(
             round(w.light_scale * 0.8, 3), round(w.light_scale * 1.2, 3)), scene_digest=scene_digest)
         sb = RLSandbox(project_id=project_id, weakness=w, env=env, reward_weights=reward,
-                       params=[PARAMS[n] for n in names], budget=budget or SandboxBudget())
+                       params=[PARAMS[n] for n in names],
+                       budget=budget.model_copy(deep=True) if budget else SandboxBudget())  # one per sandbox
         sb.estimate = Estimate(demos_expected=sb.budget.demos, assumptions=_assumptions())
         out.append(sb)
     return out
