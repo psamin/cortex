@@ -67,6 +67,8 @@ async def lifespan(app: FastAPI):
         for col in await CTX.repo.list("agent_collections", AgentCollection, status=status):
             col.status, col.error = "failed", "interrupted by a backend restart; recorded attempts are kept"
             await CTX.repo.save("agent_collections", col)
+    if swept := await simulation_runner.sweep_interrupted(CTX):
+        log.info("marked %d interrupted evaluation(s) failed", swept)
     resumed = await autopilot.resume_all(CTX)
     if resumed:
         log.info("resumed %d autopilot run(s)", resumed)

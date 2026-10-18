@@ -36,6 +36,7 @@ log = logging.getLogger(__name__)
 REPO = Path(__file__).resolve().parents[3]
 SBATCH = REPO / "infra" / "futurama" / "train_act.sbatch"
 POLL_S = 30
+MAX_SSH_FAILURES = 20  # consecutive failed squeue calls (~10 min at POLL_S) before the poller gives up
 
 
 class ApprovalRequired(PermissionError):
@@ -159,7 +160,7 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
     else:
         tj.status = JobStatus.queued
         await _save(ctx, tj, "submitting to Futurama")
-        ctx.jobs.submit("train", tj.project_id, lambda job: _tracked(ctx, tj, _run_slurm(ctx, tj, job)),
+        ctx.jobs.submit("train", tj.project_id, lambda job: _tracked(ctx, tj, _run_slurm(ctx, tj, job), job),
                         idempotency_key=f"train:{tj.id}")
     await ctx.audit(actor, "launch_training_job", tj.project_id, {"id": tj.id, "backend": tj.backend}, "ok",
                     f"{tj.id} launched on {tj.backend}", approved=True)
@@ -188,19 +189,43 @@ async def _sh(*args: str, timeout: float = 600) -> tuple[int, str]:
     return p.returncode or 0, out.decode(errors="replace")
 
 
-async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str]) -> str:
+async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str], job=None) -> str:
     """Run Slurm work so the durable TrainingJob always ends terminal: a failed ssh/rsync/sbatch or a
-    stop must not leave it 'queued' (Autopilot waits on the stored status and would wait forever)."""
+    stop must not leave it 'queued' (Autopilot waits on the stored status and would wait forever).
+    A backend shutdown is not a stop: a submitted Slurm job keeps running and ``resume_pollers`` re-attaches
+    to it on the next start. A user stop cancels the Slurm job too."""
     try:
         return await work
     except BaseException as e:
         cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob) or tj
-        if cur.status not in (JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled):
-            stopped = isinstance(e, asyncio.CancelledError)
-            cur.status = JobStatus.cancelled if stopped else JobStatus.failed
-            cur.error = "stopped by user" if stopped else f"{type(e).__name__}: {e}"[:500]
+        cur.external_id = cur.external_id or tj.external_id
+        if cur.status in (JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled):
+            raise
+        cancelled = isinstance(e, asyncio.CancelledError)
+        if cancelled and ctx.jobs.closing:
+            if cur.external_id:
+                raise  # stays queued/running with its Slurm id; the next start polls it again
+            cur.status, cur.error = JobStatus.failed, "interrupted by a backend restart before Slurm accepted it"
             await _save(ctx, cur, cur.status)
+            raise
+        stopped = cancelled or (job is not None and ctx.jobs.stop_requested(job.id))
+        if stopped and cur.external_id:
+            await scancel(ctx, cur.external_id)
+        cur.status = JobStatus.cancelled if stopped else JobStatus.failed
+        cur.error = "stopped by user" if stopped else f"{type(e).__name__}: {e}"[:500]
+        await _save(ctx, cur, cur.status)
         raise
+
+
+async def scancel(ctx: Ctx, external_id: str) -> None:
+    """Best effort: the stop is recorded either way, and a failure is logged for the operator."""
+    host = ctx.settings.futurama_ssh_host
+    if not host:
+        return
+    rc, out = await _sh("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, f"scancel {external_id}",
+                        timeout=60)
+    if rc != 0:
+        log.warning("scancel %s failed (%s): %s", external_id, rc, out[-300:])
 
 
 async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
@@ -262,10 +287,18 @@ async def poll_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     host = ctx.settings.futurama_ssh_host
     remote = f"{ctx.settings.futurama_repo_dir}/jobs/{tj.id}"
     ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host]
-    seen = 0
+    seen, misses = 0, 0
     while True:
         rc, state = await _sh(*ssh, f"squeue -h -j {tj.external_id} -o %T", timeout=60)
         state = state.strip()
+        if "Invalid job id" in state:
+            break  # Slurm already purged the finished job: it left the queue
+        misses = misses + 1 if rc != 0 else 0
+        if misses >= MAX_SSH_FAILURES:
+            tj.status, tj.error = JobStatus.failed, (f"lost contact with {host}: squeue failed {misses} times in a "
+                                                     f"row ({state[-200:]}); slurm job {tj.external_id} may still run")
+            await _save(ctx, tj, "failed")
+            raise RuntimeError(tj.error)
         rc2, logtxt = await _sh(*ssh, f"cat {remote}/slurm-{tj.external_id}.out 2>/dev/null | tail -n +{seen + 1}",
                                 timeout=60)
         if rc2 == 0 and logtxt:
@@ -350,7 +383,7 @@ async def resume_pollers(ctx: Ctx) -> None:
     for status in (JobStatus.queued, JobStatus.running):
         for tj in await ctx.repo.list("training_jobs", TrainingJob, status=status):
             if tj.backend == "futurama_slurm" and tj.external_id:
-                ctx.jobs.submit("train", tj.project_id, lambda job, tj=tj: _tracked(ctx, tj, poll_slurm(ctx, tj, job)),
+                ctx.jobs.submit("train", tj.project_id, lambda job, tj=tj: _tracked(ctx, tj, poll_slurm(ctx, tj, job), job),
                                 idempotency_key=f"train:{tj.id}")
 
 
