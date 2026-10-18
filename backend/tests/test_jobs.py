@@ -23,7 +23,7 @@ def test_jobs_persist_notify_and_survive_restart(tmp_path):
 
     ok, bad, stuck, snapshot = asyncio.run(run())
     assert ok.status == "succeeded" and ok.result_ref == "ds_1"
-    assert bad.status == "failed" and "no GPU" in bad.error
+    assert bad.status == "failed" and "no GPU" in bad.error_detail  # people see a sentence, not the raw error
     assert ("import", "succeeded") in finished and ("train", "failed") in finished
     saved = {j["id"]: j["status"] for j in json.loads(snapshot)}
     assert saved[ok.id] == "succeeded" and saved[stuck.id] == "running"

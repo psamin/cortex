@@ -106,4 +106,11 @@ export const useEvaluation = (evid: string | null | undefined, poll = false) =>
   });
 
 export const useJobQuery = (id: string | null | undefined, poll = false) =>
-  useQuery({ queryKey: ["job", id], queryFn: () => api.job(id!), enabled: !!id, refetchInterval: poll ? 3000 : false, retry: 0 });
+  useQuery({
+    queryKey: ["job", id],
+    queryFn: () => api.job(id!),
+    enabled: !!id,
+    // a job that no longer exists (e.g. from before job history survived restarts) is not polled forever
+    refetchInterval: (q) => (poll && q.state.status !== "error" ? 3000 : false),
+    retry: 0,
+  });

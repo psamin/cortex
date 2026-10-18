@@ -19,6 +19,7 @@ from pydantic import BaseModel, ValidationError
 
 from ..config import settings
 from ..context import Ctx, build_ctx
+from ..errors import describe
 from ..models import (
     Analysis,
     Checkpoint,
@@ -117,12 +118,28 @@ async def _503(_, e: RuntimeError):
     from ..services.agent_collection_service import PlannerUnavailable
     if isinstance(e, PlannerUnavailable):
         return JSONResponse({"detail": str(e), "code": e.code, "planner_unavailable": True}, 503)
-    return JSONResponse({"detail": f"{type(e).__name__}: {e}"}, 500)
+    return _internal(e)
+
+
+def _internal(e: Exception) -> JSONResponse:
+    """People get a sentence; the raw error goes to `error_detail` and the log, never the headline."""
+    msg, detail = describe(e)
+    if detail is not None:
+        log.error("request failed: %s", detail, exc_info=e)
+    return JSONResponse({"detail": msg, "error_detail": detail, "code": "internal_error" if detail else None},
+                        500 if detail else 400)
+
+
+@app.exception_handler(Exception)
+async def _500(_, e: Exception):
+    return _internal(e)
 
 
 @app.exception_handler(ValueError)
 async def _400(_, e: ValueError):
-    return JSONResponse({"detail": str(e)}, 400)
+    if isinstance(e, ValidationError) or describe(e)[1] is None:  # bad input, or raised on purpose by Cortex
+        return JSONResponse({"detail": str(e)}, 400)
+    return _internal(e)
 
 
 @app.exception_handler(FileNotFoundError)

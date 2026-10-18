@@ -99,7 +99,28 @@ def load_log(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
     p = _log_path(ctx, pid)
     if not p.exists():
         return []
-    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()]
+    return tidy_job_rows([json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()])
+
+
+def tidy_job_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Job rows in words people can act on, also for rows written before that rule existed; a
+    failure followed by a success of the same kind is marked superseded (it stays in history)."""
+    from ..errors import friendly
+
+    later_ok: set[str] = set()
+    for e in reversed(entries):
+        if e.get("kind") != "job_done":
+            continue
+        if e.get("status") == "failed":
+            label = JOB_LABELS.get(e.get("job_kind", ""), e.get("job_kind", "Job"))
+            if "detail" not in e:  # old row: "<label> failed: <raw error>"
+                raw = str(e.get("text", "")).split(" failed: ", 1)[-1]
+                msg, detail = friendly(raw)
+                e["text"], e["detail"] = f"{label} failed: {msg}", detail
+            e["superseded"] = e.get("job_kind") in later_ok
+        elif e.get("status") == "succeeded":
+            later_ok.add(e.get("job_kind", ""))
+    return entries
 
 
 def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any]) -> None:
@@ -299,7 +320,8 @@ async def post_job_done(ctx: Ctx, job) -> None:
             "failed": f"{label} failed: {job.error or job.message or 'unknown error'}",
             "cancelled": f"{label} stopped"}.get(job.status, f"{label}: {job.status}")
     entry = {"kind": "job_done", "job_id": job.id, "job_kind": job.kind, "status": job.status,
-             "text": text, "ref_ids": [r for r in (job.result_ref or "").split(",") if r][:12]}
+             "text": text, "detail": getattr(job, "error_detail", None),
+             "ref_ids": [r for r in (job.result_ref or "").split(",") if r][:12]}
     _append_log(ctx, job.project_id, entry)
     ctx.bus.publish(job.project_id, "chat", entry)
 

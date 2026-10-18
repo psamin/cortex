@@ -16,6 +16,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
+from ..errors import WorkerFailed, describe
 from ..models import new_id, now
 
 log = logging.getLogger(__name__)
@@ -32,7 +33,8 @@ class Job(BaseModel):
     progress: float = 0.0
     message: str = ""
     result_ref: str | None = None
-    error: str | None = None
+    error: str | None = None  # written for people (see cortex.errors)
+    error_detail: str | None = None  # technical text for internal errors
     idempotency_key: str | None = None
     created_at: str = Field(default_factory=lambda: now().isoformat())
 
@@ -73,7 +75,8 @@ class JobManager:
             for row in json.loads(persist.read_text() or "[]"):
                 j = Job.model_validate(row)
                 if j.status not in TERMINAL:
-                    j.status, j.error = "failed", "interrupted by a backend restart"
+                    j.status, j.error = "failed", "It stopped because Cortex restarted. Run it again."
+                    j.error_detail = "interrupted by a backend restart"
                 self.jobs[j.id] = j
             self._save()
 
@@ -125,9 +128,10 @@ class JobManager:
                 self.update(job, status="succeeded", progress=1.0, result_ref=ref)
             except asyncio.CancelledError:
                 self.update(job, status="cancelled", message="stopped by user")
-            except Exception as e:  # surfaced to the UI and the agent
+            except Exception as e:  # surfaced to the UI and the agent, in words people can act on
                 log.exception("job %s failed", job.id)
-                self.update(job, status="failed", error=f"{type(e).__name__}: {e}")
+                msg, detail = describe(e)
+                self.update(job, status="failed", error=msg, error_detail=detail)
 
         self.tasks[job.id] = asyncio.create_task(run())
         return job
@@ -170,7 +174,7 @@ class JobManager:
                     del err_tail[:-20]
 
         err_task = asyncio.create_task(drain_err())
-        result_error = None
+        result_error, user_facing = None, False
         assert proc.stdout
         async for raw in proc.stdout:
             try:
@@ -179,7 +183,7 @@ class JobManager:
                 self.log(job, raw.decode(errors="replace").rstrip())
                 continue
             if ev.get("type") == "result" and not ev.get("ok"):
-                result_error = ev.get("error")
+                result_error, user_facing = ev.get("error"), bool(ev.get("user_facing"))
                 self.log(job, ev.get("trace", ""))
             if on_event:
                 r = on_event(ev)
@@ -188,4 +192,6 @@ class JobManager:
         rc = await proc.wait()
         await err_task
         if rc != 0:
-            raise RuntimeError(result_error or f"worker exited {rc}: {' | '.join(err_tail[-5:])}")
+            if result_error:
+                raise WorkerFailed(result_error, user_facing)
+            raise WorkerFailed(f"worker exited {rc}: {' | '.join(err_tail[-5:])}")

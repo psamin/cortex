@@ -14,6 +14,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ..errors import worker_error
+
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 
 
@@ -63,5 +65,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        emit(type="result", ok=False, error=f"{type(e).__name__}: {e}")
+        emit(type="result", ok=False, **worker_error(e))
         sys.exit(1)
