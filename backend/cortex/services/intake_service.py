@@ -14,6 +14,7 @@ import hashlib
 import io
 import json
 import threading
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
@@ -24,7 +25,8 @@ from ..sim.scene import SceneInfo, build_scene
 
 CAMERAS = ("top", "front", "wrist_cam")
 _render_lock = threading.Lock()
-_envs: dict[str, Any] = {}  # scene digest -> SceneEnv (renders reuse the GL context)
+_envs: OrderedDict[str, Any] = OrderedDict()  # scene digest -> SceneEnv, most recently used last
+MAX_ENVS = 2  # each holds a MuJoCo model and a GL context
 # OpenGL contexts belong to the thread that made them (WGL on Windows is strict about it), so every
 # scene env is created, rendered and closed on this one thread.
 _gl = ThreadPoolExecutor(max_workers=1, thread_name_prefix="cortex-gl")
@@ -141,7 +143,15 @@ def _env(info: SceneInfo):
     if env is None:
         env = _envs[info.digest] = SceneEnv(info)
         env.reset(0)
+        while len(_envs) > MAX_ENVS:  # runs on the GL thread, so closing here is safe
+            _envs.popitem(last=False)[1].close()
+    _envs.move_to_end(info.digest)
     return env
+
+
+async def on_gl(fn, *args):
+    """Run a function that touches MuJoCo rendering on the one GL thread."""
+    return await _on_gl(fn, *args)
 
 
 def scene_info(ctx: Ctx, p: Project) -> SceneInfo:
