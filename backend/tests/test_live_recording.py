@@ -2,6 +2,7 @@
 
 import io
 import json
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -205,3 +206,60 @@ def test_a_live_sim_run_is_saved_with_the_simulators_verdict(client):
     assert row["label"] == "Live sim · seed 7" and row["metric"] == "45 steps · 20 ms/frame"
     st = c.get(f"/api/projects/{pid}/state").json()
     assert st["evaluations"] == [] and st["replays"][0]["success"] is True  # one run is not an evaluation
+
+
+def test_a_live_sim_run_without_a_project_is_kept_as_a_physical_skills_replay(client):
+    """Served sim skills (e.g. unscrew) have no project: their live runs are kept in skill_replays (#319)."""
+    import av
+
+    c, mapping = client
+    mapping.write_text("{}")
+    assert c.get("/api/live-policy/sim/jenga/7").status_code == 200
+
+    reps = []
+    for _ in range(100):  # saved in the background after the stream ends
+        reps = next(s for s in c.get("/api/skills").json() if s["task"] == "jenga")["replays"]
+        if reps:
+            break
+        time.sleep(0.1)
+    assert len(reps) == 1 and re.fullmatch(r"/api/skills/jenga/replays/live_\d{8}-\d{6}_seed7\.mp4", reps[0])
+    r = c.get(reps[0])
+    assert r.status_code == 200 and r.headers["content-type"] == "video/mp4"
+    with av.open(io.BytesIO(r.content)) as v:
+        assert sum(1 for _ in v.decode(video=0)) == 23  # 45 frames streamed, every other kept
+    from cortex.config import settings
+
+    assert [f.name for f in (settings().data_dir / "skill_replays" / "jenga").iterdir()] == [reps[0].split("/")[-1]]
+
+
+def test_skill_replays_keep_the_newest_live_runs_and_never_the_curated_ones(tmp_path):
+    import os
+
+    import av
+
+    from cortex.services.live_recording import KEEP_LIVE, keep_skill_replay
+
+    d = tmp_path / "skill_replays" / "unscrew"
+    d.mkdir(parents=True)
+    (d / "unscrew_live_00.mp4").write_bytes(b"curated")
+    os.utime(d / "unscrew_live_00.mp4", (1, 1))  # older than every live run
+    for i in range(KEEP_LIVE + 2):
+        (d / f"live_2026010{i // 10}-0000{i % 10:02d}_seed{i}.mp4").write_bytes(b"old")
+        os.utime(d / f"live_2026010{i // 10}-0000{i % 10:02d}_seed{i}.mp4", (100 + i, 100 + i))
+    jpgs = []
+    for v in range(6):  # the GPU server's 960x540 frames
+        buf = io.BytesIO()
+        Image.fromarray(np.full((540, 960, 3), 10 * v, np.uint8)).save(buf, format="JPEG")
+        jpgs.append(buf.getvalue())
+
+    p = keep_skill_replay(tmp_path, "unscrew", 42, jpgs)
+    assert p.parent == d and re.fullmatch(r"live_\d{8}-\d{6}_seed42\.mp4", p.name)
+    with av.open(str(p)) as v:
+        assert (v.streams.video[0].width, v.streams.video[0].height) == (960, 540)
+    live = sorted(f.name for f in d.glob("live_*.mp4"))
+    assert len(live) == KEEP_LIVE and p.name in live
+    assert "live_20260100-000000_seed0.mp4" not in live and "live_20260100-000001_seed1.mp4" not in live
+    assert (d / "unscrew_live_00.mp4").read_bytes() == b"curated"
+    assert not [f for f in d.iterdir() if f.name.startswith(".")]  # no half-written file left
+    with pytest.raises(ValueError):
+        keep_skill_replay(tmp_path, "../x", 1, jpgs)

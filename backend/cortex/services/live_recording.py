@@ -7,7 +7,8 @@ frame's measurements, which the server sends as part headers: X-Frame, X-Inferen
 X-Gripper-Err (held-out demos), X-Success and X-Policy (sim). Nothing is encoded while streaming. When the
 stream ends (finished, or the viewer left) the session is encoded to mp4 in a thread, uploaded and stored as
 a PolicyReplay (live_inference, or live_sim) in the task's project from infra/futurama/projects.json
-(<task>, or sim_<task>).
+(<task>, or sim_<task>). A live sim run whose task has no project (e.g. a sim skill the GPU server serves that
+was never imported) is kept as a Physical Skills replay instead: <data dir>/skill_replays/<task>/live_*.mp4.
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ import asyncio
 import io
 import json
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -24,13 +26,14 @@ import numpy as np
 
 from ..context import Ctx
 from ..models import LIVE_SIM_NOTE, PolicyReplay, ReplayEpisode
-from . import replay_service
+from . import replay_service, skills_service
 
 log = logging.getLogger(__name__)
 BOUNDARY = b"--frame"
 MIN_FRAMES = 30  # about a second at 30 fps: shorter visits are clicks, not runs
 KEEP_EVERY = 2  # the server streams at 30 fps; the saved video plays at 15 fps, in real time
 MAX_KEPT = 1800  # 2 minutes of video at most in memory
+KEEP_LIVE = 20  # live_*.mp4 kept per task in skill_replays; other files there are curated and never deleted
 _TASKS: set[asyncio.Task] = set()
 
 
@@ -168,18 +171,43 @@ def encode_mp4(jpegs: list[bytes], path: Path, fps: int) -> None:
                 out.mux(pkt)
 
 
+def keep_skill_replay(data_dir: Path, task: str, seed: int, jpegs: list[bytes]) -> Path:
+    """Encode a live sim run into the Physical Skills replay folder of `task`, newest first in GET /api/skills.
+    Written under a hidden name and renamed, so a half-written file is never listed. Keeps the newest KEEP_LIVE
+    live_*.mp4; never touches the other (curated) replays."""
+    if not skills_service.TASK.match(task):
+        raise ValueError(f"bad task name {task!r}")
+    d = data_dir / skills_service.REPLAYS / task
+    name = f"live_{datetime.now(UTC):%Y%m%d-%H%M%S}_seed{seed}.mp4"
+    tmp = d / f".{name}"  # replay_urls and replay_file skip dot files
+    try:
+        encode_mp4(jpegs, tmp, 30 // KEEP_EVERY)
+        tmp.replace(d / name)
+    finally:
+        tmp.unlink(missing_ok=True)
+    live = sorted(d.glob("live_*.mp4"), key=lambda f: (f.stat().st_mtime, f.name), reverse=True)
+    for old in live[KEEP_LIVE:]:
+        old.unlink(missing_ok=True)
+    return d / name
+
+
 async def save_session(ctx: Ctx, task: str, episode: int, rec: StreamRecorder, server: dict[str, Any],
                        job: str | None = None, kind: str = "live_inference") -> PolicyReplay | None:
     """Store a finished (or abandoned) live session in the task's project. None when there is nothing to keep.
 
     kind live_inference: /live/<task>/<episode> on a held-out real demo (project key <task>).
-    kind live_sim: /sim/<task>/<seed>, closed loop in MuJoCo (project key sim_<task>; episode is the seed)."""
+    kind live_sim: /sim/<task>/<seed>, closed loop in MuJoCo (project key sim_<task>; episode is the seed).
+    A live_sim run with no project is kept as a Physical Skills replay instead (returns None)."""
     rec.close()
     sim = kind == "live_sim"
     pid = await replay_service.project_for(ctx, f"sim_{task}" if sim else task)
     if pid is None:
-        log.info("live %s %s/%s not saved: no project for this task in %s", kind, task, episode,
-                 ctx.settings.futurama_projects_file)
+        if sim and rec.frames >= MIN_FRAMES and rec.jpegs and 1 in rec.success_frames:  # only runs that succeeded
+            p = await asyncio.to_thread(keep_skill_replay, ctx.data_dir, task, episode, rec.jpegs)
+            log.info("live sim %s seed %s kept as a Physical Skills replay %s (no project)", task, episode, p.name)
+        else:
+            log.info("live %s %s/%s not saved: no project for this task in %s", kind, task, episode,
+                     ctx.settings.futurama_projects_file)
         return None
     if rec.frames < MIN_FRAMES or not rec.jpegs:
         return None
