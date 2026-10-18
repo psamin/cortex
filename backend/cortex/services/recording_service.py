@@ -62,8 +62,11 @@ async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition
                 await finalize_episode(ctx, ep, ev, blur_ref, auto_accept)
                 done.append(ep.id)
 
+        from .intake_service import scene_payload
+
         cfg = {
             "mode": "record", "max_steps": 240, "live_dir": str(ctx.local(live_key(project.id))),
+            "scene": scene_payload(ctx, project),
             "episodes": [{"seed": ep.seed, "condition": ep.condition.model_dump(),
                           "out_dir": str(ctx.local(episode_key(project.id, ep.id)))} for ep in specs],
         }

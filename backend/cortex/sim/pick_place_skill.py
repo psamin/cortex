@@ -196,7 +196,8 @@ class PickPlaceSkill:
         r = np.r_[dst[0] + p.get("release_dx", 0.0), dst[1] + p.get("release_dy", 0.0)]
         rz = gz + 0.006 + p.get("release_dz", 0.0)
         ax2 = next((a for a in approaches(r, "side")
-                    if self._ik(np.r_[r, gz + LIFT], a)[0] < 0.01 and self._ik(np.r_[r, rz], a)[0] < 0.006), None)
+                    if self._ik(np.r_[r, gz + LIFT], a, self._measured())[0] < 0.01
+                    and self._ik(np.r_[r, rz], a, self._measured())[0] < 0.006), None)
         if ax2 is None:
             self.failed = "no reachable side placement at the target"
             return

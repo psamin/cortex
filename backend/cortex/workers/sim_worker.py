@@ -123,12 +123,13 @@ def cmd_record(cfg: dict[str, Any]) -> dict[str, Any]:
     """cfg: {episodes: [{seed, condition, out_dir}], live_dir, max_steps}. One process, many demos."""
     from PIL import Image
 
-    from ..sim.policies import ExpertPolicy
+    from ..sim import env_factory
 
     live_dir = Path(cfg["live_dir"])
     live_dir.mkdir(parents=True, exist_ok=True)
-    max_steps = cfg.get("max_steps", 240)
-    env = PickPlaceEnv(episode_steps=max_steps)
+    scene = cfg.get("scene")
+    max_steps = env_factory.max_steps(scene, cfg.get("max_steps", 240))
+    env = env_factory.make_env(scene, max_steps)
     preview: Preview | None = None
     results = []
     for i, spec in enumerate(cfg["episodes"]):
@@ -143,7 +144,7 @@ def cmd_record(cfg: dict[str, Any]) -> dict[str, Any]:
             env.reset(spec["seed"], var)
             preview = Preview(env, live_dir, live=True)
         emit(type="episode_start", index=i, total=len(cfg["episodes"]), seed=spec["seed"], condition=cond)
-        ep = run_episode(env, ExpertPolicy(), spec["seed"], var, max_steps, preview, record=True)
+        ep = run_episode(env, env_factory.oracle(scene), spec["seed"], var, max_steps, preview, record=True)
         buf = ep.pop("buf")
         n = len(buf["action"])
         np.savez_compressed(
@@ -168,6 +169,7 @@ def cmd_record(cfg: dict[str, Any]) -> dict[str, Any]:
 
 
 def cmd_evaluate(cfg: dict[str, Any]) -> dict[str, Any]:
+    from ..sim import env_factory
     from ..sim.policies import load_policy
 
     out = Path(cfg["out_dir"])
@@ -176,9 +178,11 @@ def cmd_evaluate(cfg: dict[str, Any]) -> dict[str, Any]:
     var = Variation(cube_region=v["cube_region"], lighting=v["lighting"],
                     cube_offset=tuple(v.get("cube_offset", (0.0, 0.0))), light_scale=v.get("light_scale", 1.0))
     pol = cfg["policy"]
-    policy = load_policy(pol["kind"], pol.get("checkpoint_path"))
-    max_steps = cfg.get("max_steps", 300)
-    env = PickPlaceEnv(episode_steps=max_steps)
+    scene = cfg.get("scene")
+    policy = (env_factory.oracle(scene) if pol["kind"] == "scripted_expert" and scene
+              else load_policy(pol["kind"], pol.get("checkpoint_path")))
+    max_steps = env_factory.max_steps(scene, cfg.get("max_steps", 300))
+    env = env_factory.make_env(scene, max_steps)
     env.reset(cfg["seeds"][0], var)
     preview = Preview(env, out, live=False)
     videos_left = cfg.get("max_videos", 2)

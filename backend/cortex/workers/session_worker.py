@@ -44,7 +44,10 @@ def jpeg_b64(img) -> str:
 
 def main() -> None:
     configure_gl()
+    from ..sim import env_factory
+
     env = PickPlaceEnv(episode_steps=10_000)
+    env_digest: str | None = None
     session: ManipulationSession | None = None
     camera: DemoCamera | None = None
     trace: list[dict[str, Any]] = []
@@ -54,6 +57,11 @@ def main() -> None:
             req = json.loads(line)
             op = req.get("op")
             if op == "reset":
+                if env_factory.digest(req.get("scene")) != env_digest:  # another project's scene
+                    env.close()
+                    env = env_factory.make_env(req.get("scene"), 10_000)
+                    env_digest = env_factory.digest(req.get("scene"))
+                    camera = None
                 sc = req["scenario"]
                 var = Variation(cube_region=sc["cube_region"], lighting=sc["lighting"],
                                 cube_offset=tuple(sc.get("cube_offset", (0, 0))),
