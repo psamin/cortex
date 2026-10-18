@@ -13,16 +13,16 @@ export function HeroCopy() {
 
       <h1
         id="hero-title"
-        className="reveal mt-5 kn-serif sm:mt-7 text-[clamp(2.6rem,5.4vw,5.1rem)] font-light leading-[1.02] tracking-[-0.022em] text-ink"
+        className="reveal mt-5 kn-serif sm:mt-7 text-[clamp(2.4rem,4.1vw,4.4rem)] font-light leading-[1.04] tracking-[-0.022em] text-ink"
         style={{ animationDelay: "160ms" }}
       >
-        Agents train robots.
+        <span className="lg:whitespace-nowrap">Agents train robots.</span>
         <br />
-        <span className="text-ink-3">No human in the loop.</span>
+        <span className="text-ink-3 lg:whitespace-nowrap">No human in the loop.</span>
       </h1>
 
       <p
-        className="reveal mt-5 max-w-[30rem] sm:mt-7 kn-sans text-[15px] leading-[1.65] text-ink-2"
+        className="reveal mt-5 max-w-[34rem] sm:mt-7 kn-sans text-[15px] leading-[1.65] text-ink-2"
         style={{ animationDelay: "260ms" }}
       >
         {BRAND.description}
