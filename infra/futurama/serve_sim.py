@@ -90,37 +90,30 @@ def visible_seed(task: str, env, seed: int) -> int:
     return seed
 
 
-FRAME_W, FRAME_H, MAIN_W = 960, 540, 720  # 16:9: the 4:3 camera view, then a 240 px column on the right
+FRAME_W, FRAME_H, BAR = 960, 540, 34  # 16:9: the camera across the full width, one line of stats under it
 
 
-def _wrap(d: ImageDraw.ImageDraw, text: str, width: float) -> list[str]:
-    out, cur = [], ""
-    for word in text.split(" "):
-        t = f"{cur} {word}".strip()
-        if cur and d.textlength(t, font=FONT) > width:
-            out.append(cur)
-            cur = word
-        else:
-            cur = t
-    return out + [cur]
-
-
-def _frame(main: np.ndarray, wrist: np.ndarray | None, lines: list[tuple[str, tuple[int, int, int]]]) -> bytes:
-    """One widescreen JPEG: the camera view on the left; on the right the policy's wrist camera (if given) and the
-    live stats, so nothing is drawn over the arm."""
+def _frame(main: np.ndarray, wrist: np.ndarray | None, left: str, right: tuple[str, tuple[int, int, int]]) -> bytes:
+    """One widescreen JPEG: the camera view across the full width (centre band of the 4:3 render), the policy's
+    wrist camera small in the corner, and the live stats on one line underneath, so nothing covers the arm."""
     im = Image.new("RGB", (FRAME_W, FRAME_H), (14, 14, 14))
-    im.paste(Image.fromarray(main).resize((MAIN_W, FRAME_H), Image.BILINEAR), (0, 0))
-    side, y = FRAME_W - MAIN_W, 0
-    if wrist is not None:
-        im.paste(Image.fromarray(wrist).resize((side, side * 3 // 4), Image.BILINEAR), (MAIN_W, 0))
-        y = side * 3 // 4
+    vh = FRAME_H - BAR
+    src = Image.fromarray(main)
+    ch = round(src.width * vh / FRAME_W)  # source rows that keep the aspect
+    top = max(0, (src.height - ch) // 2)
+    im.paste(src.crop((0, top, src.width, top + ch)).resize((FRAME_W, vh), Image.BILINEAR), (0, 0))
     d = ImageDraw.Draw(im)
-    y += 14
-    for text, color in lines:
-        for ln in _wrap(d, text, side - 24):
-            d.text((MAIN_W + 12, y), ln, fill=color, font=FONT)
-            y += 20
-        y += 8
+    if wrist is not None:
+        iw, ih = 208, 156
+        x, y = FRAME_W - iw - 10, vh - ih - 10
+        d.rectangle([x - 2, y - 2, x + iw + 1, y + ih + 1], fill=(235, 235, 235))
+        im.paste(Image.fromarray(wrist).resize((iw, ih), Image.BILINEAR), (x, y))
+    y = vh + (BAR - 18) // 2
+    rx = FRAME_W - 12 - d.textlength(right[0], font=FONT)
+    while left and d.textlength(left, font=FONT) > rx - 36:  # never run into the stats on the right
+        left = left[:-2].rstrip() + "…"
+    d.text((12, y), left, fill=(225, 225, 225), font=FONT)
+    d.text((rx, y), right[0], fill=right[1], font=FONT)
     buf = io.BytesIO()
     im.save(buf, format="JPEG", quality=70)
     return buf.getvalue()
@@ -131,7 +124,7 @@ VIEWS = ("both", "front", "wrist")
 
 # A 3/4 close-up on the part being worked, for people watching (the policy's front camera sees the arm's back).
 # (azimuth, elevation, distance m); the policy never sees it.
-CLOSEUP = {"unscrew": (150, -32, 0.42), "unscrew_black": (150, -32, 0.42), "pick_place": (150, -38, 0.75)}
+CLOSEUP = {"unscrew": (150, -26, 0.55), "unscrew_black": (150, -26, 0.55), "pick_place": (150, -32, 0.85)}
 
 
 def _closeup(env, task: str) -> np.ndarray | None:
@@ -144,7 +137,7 @@ def _closeup(env, task: str) -> np.ndarray | None:
     w = env.world
     cam = mujoco.MjvCamera()
     cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-    cam.lookat[:] = env.cube_pos()
+    cam.lookat[:] = env.cube_pos() + (0, 0, 0.05)  # a little above the part, so the arm is in frame too
     cam.azimuth, cam.elevation, cam.distance = CLOSEUP[task]
     w.renderer.update_scene(w.data, camera=cam)
     return w.renderer.render().copy()
@@ -200,15 +193,11 @@ def _episode(p: dict[str, Any], seed: int, stop, view: str = "both",
         t_act, t_step, t_frame, steps = t_act + t1 - t0, t_step + t3 - t2, t_frame + t2 - t1, steps + 1
         held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
         if frame is not None:
-            status = ("Task complete, verified by the simulator", (110, 220, 130)) if success else (
-                "Running", (200, 200, 200))
-            jpg = _frame(*frame, [
-                (TITLES.get(p["task"], p["task"]), (240, 240, 240)),
-                (f"{p['variant'].upper()} policy, trained only in simulation", (160, 200, 255)),
-                (f"practice layout {seed}" if p.get("layouts") or p.get("layout_seeds")
-                 else f"unseen layout (seed {seed})", (160, 200, 255)),
-                (f"step {step}  ·  {ms:4.1f} ms on GPU", (160, 200, 255)),
-                status])
+            where = "practice layout" if p.get("layouts") or p.get("layout_seeds") else "new layout"
+            jpg = _frame(*frame, f"{TITLES.get(p['task'], p['task'])}  ·  {p['variant'].upper()}, sim-trained"
+                         f"  ·  {where}",
+                         (f"step {step}  ·  {ms:.1f} ms GPU  ·  " + ("done, verified by sim" if success else "running"),
+                          (110, 220, 130) if success else (160, 200, 255)))
             yield jpg, step, ms, success
         if held >= 3 * SETTLE:
             break
