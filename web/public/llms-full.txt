@@ -543,12 +543,12 @@ Answer intake questions by merging a partial spec. Returns the merged spec, what
 Arguments:
 
 - `project_id` (string, required)
-- `patch` (object, required): Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table.
+- `patch` (object, required): Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table. Moving conveyors: environment.conveyors [{name, start, end, width, height, speed_mps}] (metres, m/s; start to end is the direction of travel; height is the belt top), merged by name; an object with on: '<conveyor>' starts on that belt and rides it.
 
 JSON schema:
 
 ```json
-{"properties":{"project_id":{"type":"string"},"patch":{"additionalProperties":true,"description":"Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table.","type":"object"}},"required":["project_id","patch"],"type":"object"}
+{"properties":{"project_id":{"type":"string"},"patch":{"additionalProperties":true,"description":"Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table. Moving conveyors: environment.conveyors [{name, start, end, width, height, speed_mps}] (metres, m/s; start to end is the direction of travel; height is the belt top), merged by name; an object with on: '<conveyor>' starts on that belt and rides it.","type":"object"}},"required":["project_id","patch"],"type":"object"}
 ```
 
 ### get_intake_status
