@@ -29,6 +29,7 @@ from datetime import datetime
 from typing import Any
 
 from ..context import CURRENT_CALL, Ctx
+from ..errors import NotFound
 from ..models import new_id, now
 
 log = logging.getLogger(__name__)
@@ -88,7 +89,7 @@ async def list_keys(ctx: Ctx, owner: str) -> list[dict[str, Any]]:
 async def revoke_key(ctx: Ctx, owner: str, key_id: str) -> dict[str, Any]:
     row = await ctx.store.get("agent_keys", key_id)
     if not row or row["owner_id"] != owner:
-        raise KeyError(f"agent key {key_id}")
+        raise NotFound(f"agent key {key_id}")
     row["data"]["revoked_at"] = row["data"].get("revoked_at") or now().isoformat()
     await ctx.store.put("agent_keys", {**row, "status": "revoked"})
     return {**row["data"], "status": "revoked"}
@@ -198,7 +199,7 @@ async def list_sessions(ctx: Ctx, owner: str) -> list[dict[str, Any]]:
 async def session_calls(ctx: Ctx, owner: str, session_id: str, limit: int = 500) -> list[dict[str, Any]]:
     row = await ctx.store.get("agent_sessions", session_id)
     if not row or row["owner_id"] != owner:
-        raise KeyError(f"agent session {session_id}")
+        raise NotFound(f"agent session {session_id}")
     rows = (await ctx.store.list("tool_audit_logs", where={"session_id": session_id}))[-limit:]
     return [await call_view(ctx, r) for r in rows]
 

@@ -12,6 +12,7 @@ from collections import defaultdict
 from typing import Any
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import Analysis, EpisodeDiagnosis, FailureCluster, Project
 from . import claude_code_diagnosis as ccd
 from . import recording_service as rec
@@ -186,7 +187,7 @@ async def label_diagnosis(ctx: Ctx, analysis_id: str, ref_id: str, status: str, 
                           actor: str = "gui") -> EpisodeDiagnosis:
     an = await ctx.repo.get("analyses", analysis_id, Analysis)
     if an is None:
-        raise KeyError(analysis_id)
+        raise NotFound(analysis_id)
     for d in an.diagnoses:
         if d.episode_id == ref_id:
             d.status = status  # type: ignore[assignment]
@@ -201,7 +202,7 @@ async def label_diagnosis(ctx: Ctx, analysis_id: str, ref_id: str, status: str, 
                             {"analysis_id": analysis_id, "ref": ref_id, "status": status, "label": label}, "ok",
                             f"{ref_id}: {status}")
             return d
-    raise KeyError(ref_id)
+    raise NotFound(ref_id)
 
 
 async def latest_analysis(ctx: Ctx, project_id: str) -> Analysis | None:

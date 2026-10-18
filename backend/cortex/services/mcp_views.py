@@ -16,6 +16,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import DatasetVersion, JobStatus
 from . import agent_collection_service as acs
 from . import recording_service, simulation_runner, training_service
@@ -75,7 +76,7 @@ async def collection_snapshot(ctx: Ctx, a: ViewArgs.Collection, actor: str) -> d
     elif cols:
         col = max(cols, key=lambda c: c.created_at)
     else:
-        raise KeyError(f"no collection in project {a.project_id}")
+        raise NotFound(f"no collection in project {a.project_id}")
     rows = sorted(await acs.list_attempts(ctx, a.project_id, col.id), key=lambda r: r.index)
     frame, age = _live_frame(ctx, a.project_id)
     t = col.totals
@@ -119,11 +120,11 @@ async def evaluation_report(ctx: Ctx, a: ViewArgs.Evaluation, actor: str) -> dic
     if a.evaluation_id:
         ev = await simulation_runner.get_evaluation(ctx, a.evaluation_id)
         if ev is None:
-            raise KeyError(a.evaluation_id)
+            raise NotFound(a.evaluation_id)
     else:
         evs = await simulation_runner.list_evaluations(ctx, a.project_id)
         if not evs:
-            raise KeyError(f"no evaluation in project {a.project_id}")
+            raise NotFound(f"no evaluation in project {a.project_id}")
         ev = max(evs, key=lambda e: e["run"].created_at)
     run = ev["run"]
     branches = []
@@ -156,7 +157,7 @@ async def review_training_job(ctx: Ctx, a: ViewArgs.Review, actor: str) -> dict[
         jobs = await ctx.repo.list("training_jobs", TrainingJob, project_id=a.project_id)
         proposed = [j for j in jobs if j.status == JobStatus.proposed]
         if not proposed:
-            raise KeyError(f"no proposed training job in project {a.project_id}")
+            raise NotFound(f"no proposed training job in project {a.project_id}")
         tj = max(proposed, key=lambda j: j.created_at)
     ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
     awaiting = tj.status == JobStatus.proposed

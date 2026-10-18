@@ -16,6 +16,7 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import FailureCluster, Project, new_id, now
 from ..rl import Pilot, RLSandbox, SandboxBudget, estimate, find_weaknesses, propose
 from ..rl.types import IterationStats, SandboxResult, Weakness
@@ -56,7 +57,7 @@ async def weaknesses(ctx: Ctx, project: Project, checkpoint_id: str | None = Non
 async def get(ctx: Ctx, sandbox_id: str) -> RLSandbox:
     sb = _live.get(sandbox_id) or await ctx.repo.get("rl_sandboxes", sandbox_id, RLSandbox)
     if sb is None:
-        raise KeyError(f"RL sandbox {sandbox_id}")
+        raise NotFound(f"RL sandbox {sandbox_id}")
     return sb
 
 
@@ -183,7 +184,7 @@ async def accept(ctx: Ctx, project: Project, ids: list[str], budget_cap_usd: flo
     sbs = [await get(ctx, i) for i in ids]
     for sb in sbs:
         if sb.project_id != project.id:
-            raise KeyError(f"RL sandbox {sb.id} in project {project.id}")
+            raise NotFound(f"RL sandbox {sb.id} in project {project.id}")
         if sb.status != "ready":
             raise ValueError(f"{sb.id} is '{sb.status}'; only sandboxes with a finished pilot can be accepted")
         if sb.budget.executor != "local_cpu":
