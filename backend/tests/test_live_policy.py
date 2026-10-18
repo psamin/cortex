@@ -16,9 +16,9 @@ POLICIES = {"gpu": "NVIDIA H200", "policies": {"jenga": {"checkpoint": "jenga_01
 
 @pytest.fixture(autouse=True)
 def _reset_state():
-    lp.STATE.update(job=None, tunnel=None, phase="stopped", step=None, detail=None, error=None)
+    lp.STATE.update(job=None, tunnel=None, phase="stopped", step=None, detail=None, error=None, failed_at=0.0)
     yield
-    lp.STATE.update(job=None, tunnel=None, phase="stopped", step=None, detail=None, error=None)
+    lp.STATE.update(job=None, tunnel=None, phase="stopped", step=None, detail=None, error=None, failed_at=0.0)
 
 
 def _ctx(url: str, host: str | None = None):
@@ -52,7 +52,7 @@ async def test_status_reports_the_served_policies(server):
 
 async def test_status_explains_when_nothing_is_running():
     st = await lp.status(_ctx("http://127.0.0.1:9"))
-    assert not st["available"] and "requests one on Futurama" in st["reason"]
+    assert not st["available"] and "Click Request a GPU" in st["reason"]
 
 
 async def test_start_needs_the_cluster_configured():
@@ -166,3 +166,19 @@ async def test_connects_once_the_server_is_ready(monkeypatch):
     monkeypatch.setattr(lp.asyncio, "sleep", no_sleep)
     await lp._connect_when_ready(_ctx("http://127.0.0.1:9", "futurama"), "10580")
     assert seen == ["queued", "prepare"] and opened == [("zapp", 30580)]
+
+
+async def test_a_failed_request_cools_down_before_asking_the_cluster_again(monkeypatch):
+    """#221: never hammer the shared cluster: after a failure, start() refuses for a while without any ssh."""
+    sent = []
+
+    async def fake_sh(*args, timeout=60):
+        sent.append(args[-1])
+        return 1, "sbatch: error: Batch job submission failed"
+
+    monkeypatch.setattr(lp, "_sh", fake_sh)
+    with pytest.raises(RuntimeError):
+        await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
+    with pytest.raises(RuntimeError, match="protects your Futurama access"):
+        await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
+    assert len(sent) == 1  # the second request never reached the cluster

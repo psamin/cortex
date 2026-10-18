@@ -1,11 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleDashed, Cpu, Square } from "lucide-react";
 import { ApiError, api } from "../api/client";
 import { cn } from "../lib/format";
 
 /** Trained policies running on a Futurama GPU over held-out episodes they never trained on (#157).
- *  Opening the tab requests a GPU when none is allocated, and narrates each Slurm step until it's live. */
+ *  "Request a GPU" (one click; never automatic) attaches to a running server or submits one, then narrates each
+ *  Slurm step until it's live. */
 const SIM_TITLE: Record<string, string> = {
   jenga: "Jenga", screwdriver: "Screwdriver", unscrew: "Unscrew (grip)", palletize: "Palletizing", suture: "Suture",
 };
@@ -32,15 +33,7 @@ export function GpuStage({ hint = "" }: { hint?: string }) {
   const policies = Object.entries(s?.policies ?? {});
   const err = (start.error ?? stop.error) as ApiError | null;
 
-  // opening the tab is the request: allocate a GPU unless one is up, coming up, or just failed
-  const asked = useRef(false);
-  useEffect(() => {
-    if (s && !s.available && s.phase === "stopped" && !s.error && !asked.current) {
-      asked.current = true;
-      start.mutate();
-    }
-  }, [s, start]);
-
+  // a GPU is only ever requested by an explicit click (#221): the cluster is shared and access can be revoked
   if (!s?.available) {
     const order = Object.keys(s?.steps ?? {});
     const at = s?.step ? order.indexOf(s.step) : start.isPending ? 0 : -1;
