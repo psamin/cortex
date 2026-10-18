@@ -1060,6 +1060,12 @@ async def call_tool(name: str, args: dict[str, Any], request: Request):
 
     who = "mcp" if request.headers.get("x-cortex-actor", "mcp") != "agent" else "agent"
     caller = await agent_obs.resolve(ctx(), request.headers, who)  # agent key, MCP session, client (#105)
+    # An agent launched by a studio chat carries that chat's project: a call that takes project_id but leaves it out
+    # works in (and is logged on) that project, not a new one.
+    bound = request.headers.get("x-cortex-project")
+    tool = orch.TOOLS.get(name)
+    if bound and tool and "project_id" in tool.args.model_fields and not args.get("project_id"):
+        args = {**args, "project_id": bound}
     try:
         return await orch.call_tool(ctx(), name, args, who, caller)
     except ValidationError as e:

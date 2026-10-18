@@ -21,7 +21,7 @@ const AGENT_KEY = process.env.CORTEX_AGENT_KEY;
 const REQUIRE_AGENT_KEY = /^(1|true|yes)$/i.test(process.env.CORTEX_REQUIRE_AGENT_KEY ?? "");
 
 /** Who is calling, forwarded on every backend call so the studio can show the agent's session live. */
-export type Identity = { sessionId?: string; client?: string; agentKey?: string };
+export type Identity = { sessionId?: string; client?: string; agentKey?: string; project?: string };
 
 type ClientInfo = { name?: unknown; version?: unknown } | undefined;
 const fmt = (i: ClientInfo) =>
@@ -84,7 +84,7 @@ export function identityOf(ctx: ToolCtx): Identity {
   const client = fmt(ctx.client.info()) ?? (sessionId ? clients.get(sessionId) : undefined);
   // 2026-era clients have no session at all: group their calls per client (and key) instead.
   if (!sessionId && client) sessionId = `client-${client}-${agentKey ? agentKey.slice(0, 7) : "local"}`;
-  return { sessionId, client, agentKey };
+  return { sessionId, client, agentKey, project: header("x-cortex-project") };
 }
 
 type Json = Record<string, unknown>;
@@ -174,6 +174,7 @@ async function send(tool: string, args: Json, signal?: AbortSignal, who: Identit
   if (who.agentKey) headers["X-Cortex-Agent-Key"] = who.agentKey;
   if (who.sessionId) headers["X-Cortex-Agent-Session"] = who.sessionId;
   if (who.client) headers["X-Cortex-Client"] = who.client;
+  if (who.project) headers["X-Cortex-Project"] = who.project; // the studio chat's project, when it launched this agent
   if (relayEnabled() && runnerConnected()) {
     try {
       const r = await relayCall(tool, args, headers, signal);
