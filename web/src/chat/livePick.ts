@@ -6,6 +6,7 @@ export type Pick = { kind: "sim"; task: string; seed: number } | { kind: "replay
 export const SIM_TITLE: Record<string, string> = {
   jenga: "Jenga", screwdriver: "Screwdriver", unscrew: "Unscrew (grip)", unscrew_black: "Unscrewing policy 2", palletize: "Palletizing", suture: "Suture",
   pick_place: "Pick and place the cube", jenga_big: "Jenga (push, pull out, place on top)",
+  sort_cubes: "Sort cubes by color",
 };
 // which sim task a project is about, from its name and prompt; earlier entries win ("Screwdriver" before "Unscrew").
 // No "box": cube-in-a-box projects are not palletizing.
