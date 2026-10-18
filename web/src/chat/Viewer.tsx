@@ -7,7 +7,8 @@ import { augmentedByEpisode } from "../lib/augment";
 import type { Job } from "../api/types";
 import { conditionWords } from "../components/Workcell";
 import { cn } from "../lib/format";
-import { DashedOrbit, IsoGrid, SketchScene } from "../sketch";
+import { DashedOrbit, SketchScene } from "../sketch";
+import { InfoTip } from "../components/ui";
 import { useRolloutVideo, useRollouts, type Camera, type CameraInfo, type Rollout, type RolloutOrigin } from "./rollouts";
 
 export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
@@ -110,8 +111,6 @@ export function Viewer({
 
   return (
     <section className="relative flex h-full min-h-0 flex-col bg-bench text-ink" aria-label="Robot simulation viewer">
-      {/* technical-drawing backdrop */}
-      <IsoGrid cell={32} />
       {/* toolbar */}
       <div className="relative flex items-center gap-3 border-b border-line bg-bench px-4 py-2.5">
         <div className="flex shrink-0 rounded-full border border-line-strong bg-plate p-0.5">
@@ -119,7 +118,7 @@ export function Viewer({
             active={showLive}
             onClick={() => setMode("live")}
             disabled={!liveJob && mode !== "live"}
-            title={liveJob ? "Watch the simulation live" : "Nothing is running; the live view switches on by itself when a job starts"}
+            title={liveJob ? "Watch the simulation live" : "Turns on when a job starts"}
           >
             <Radio className={cn("h-3.5 w-3.5", liveJob && "text-fault")} /> Live
           </ToolbarTab>
@@ -201,9 +200,9 @@ export function Viewer({
           </div>
         ) : !current ? (
           <div className="relative flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-            <SketchScene width={300} label="FIG.02 / SCENE" value="NO ROLLOUTS YET" className="mb-2" />
-            <p className="kn-display text-[28px] text-ink">{(rollouts.data ?? []).length ? "Nothing matches this filter." : "No simulation videos yet."}</p>
-            <p className="max-w-sm text-xs leading-5 text-ink-3">Ask the agent to collect demonstrations. The robot appears here live while it works.</p>
+            <SketchScene width={300} label="FIG.02 / SCENE" value="NO ROLLOUTS" className="mb-2" />
+            <p className="kn-display text-[28px] text-ink">{(rollouts.data ?? []).length ? "No matches" : "No videos yet"}</p>
+            <p className="max-w-sm text-xs leading-5 text-ink-3">Ask the agent to collect demos.</p>
           </div>
         ) : compare && counterpart ? (
           <CompareStage a={current} b={counterpart} camera={camera} />
@@ -215,8 +214,9 @@ export function Viewer({
       {/* selector */}
       {!showLive && filtered.length > 0 && (
         <div className="relative border-t border-line bg-bench">
-          <p className="px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
-            Newest first · ✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict
+          <p className="flex items-center gap-1.5 px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
+            Newest first · ✓ sim-verified · ✗ failed
+            <InfoTip>✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict</InfoTip>
           </p>
           <div className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 pt-1.5 scroll-thin">
             {filtered.slice(0, 80).map((r) => (
@@ -278,7 +278,7 @@ function LiveStage({ pid, job }: { pid: string; job?: Job }) {
   return (
     <div className="relative flex h-full items-center justify-center p-6 pb-14">
       {failed || !job ? (
-        <div className="kn-label text-center">{job ? "Live stream unavailable" : "Nothing is running right now."}</div>
+        <div className="kn-label text-center">{job ? "Live stream unavailable" : "Nothing running"}</div>
       ) : (
         <Frame>
           <img src={src} alt="Live MuJoCo simulation" onError={() => setFailed(true)} className="block h-full w-auto max-w-full object-contain" />
@@ -358,7 +358,7 @@ function VideoSurface({ url, loading, videoRef }: { url: string | null | undefin
     return (
       <div className="flex flex-col items-center gap-2 text-ink-3">
         <VideoOff className="h-6 w-6" strokeWidth={1.25} />
-        <span className="kn-label">{url ? "This camera has no video for this episode" : "No video recorded for this episode"}</span>
+        <span className="kn-label">{url ? "No video for this camera" : "No video recorded"}</span>
       </div>
     );
   return (
@@ -459,13 +459,13 @@ function Hud({
       <div className="min-w-0">
         <div className="kn-label kn-label-rule">
           <span className="truncate">
-            <span className="text-ink">FIG.02</span>&nbsp;&nbsp;{asked ? "Simulated task" : "Scene"} · {liveJob ? "Live studio view" : cam ? cam.label : "Task"}
+            <span className="text-ink">FIG.02</span>&nbsp;&nbsp;{asked ? "Simulated task" : "Scene"}
           </span>
         </div>
         <div className="kn-display mt-2 truncate text-[24px] text-ink">{goal}</div>
         {asked && (
           <div className="truncate text-xs text-ink-3" title={`The simulator only has the cube-and-bowl scene. You asked: ${asked}`}>
-            You asked: “{asked}”. The simulator only has the cube-and-bowl scene.
+            Asked: “{asked}” · sim has cube and bowl only
           </div>
         )}
         <div className="mt-1.5 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-2">
@@ -473,7 +473,6 @@ function Hud({
             <>
               <span className="h-1.5 w-1.5 rounded-full bg-fault live-dot" />
               <span title="Rendered for people; not what the policy sees">Live · studio view</span>
-              <span className="truncate normal-case tracking-[0.04em] text-ink-3">· {liveJob.message || liveJob.kind.replace(/_/g, " ")}</span>
             </>
           ) : activity?.busy ? (
             <>
@@ -488,19 +487,19 @@ function Hud({
       </div>
       {rollout && (
         <dl className="flex min-w-0 max-w-[50%] shrink flex-col items-stretch gap-1.5 pt-0.5 font-mono text-[10.5px] uppercase tracking-[0.1em]">
-          <Readout k="By">{rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who}</Readout>
+          <Readout k="By">{rollout.origin === "oracle" ? "Oracle · privileged" : rollout.who}</Readout>
           {(rollout.imported || rollout.condition) && (
             <Readout k={rollout.imported ? "Data" : "Cond"} title={[rollout.source, rollout.task].filter(Boolean).join(" · ") || undefined}>
               {rollout.imported ? `${rollout.source ?? "imported dataset"}${rollout.task ? ` · “${rollout.task}”` : ""}` : rollout.condition ? conditionWords(rollout.condition) : ""}
             </Readout>
           )}
           <Readout k="Result" tone={rollout.success === null ? "text-ink-2" : rollout.success ? "text-pass" : "text-fault"}>
-            {rollout.success === null ? "Not judged by the simulator" : rollout.success ? "Success, verified by the simulator" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
+            {rollout.success === null ? "Not judged" : rollout.success ? "Success · sim-verified" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
           </Readout>
           {aug && (
             <Readout k="Aug" title={aug.tip}>
               <span className="cursor-help border-b border-dotted border-ink-3">
-                +{aug.n} augmented {aug.n === 1 ? "copy" : "copies"} (training only)
+                +{aug.n} aug (training only)
               </span>
             </Readout>
           )}
@@ -512,7 +511,6 @@ function Hud({
           {cam && (
             <Readout k="Cam" title={cam.detail}>
               {cam.label}
-              {cam.detail ? <span className="normal-case tracking-normal text-ink-3"> · {cam.detail}</span> : ""}
             </Readout>
           )}
         </dl>
