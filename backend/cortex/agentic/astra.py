@@ -96,6 +96,7 @@ class PlannerConfig:
     max_usd: float = 1.50
     reasoning_effort: str = "low"
     timeout_s: float = 120.0
+    max_images: int = 4  # images kept in each request; vLLM serves Qwen3-VL with --limit-mm-per-prompt image=8
     endpoint: str = ""  # chat/completions URL; recorded on every attempt
     point_format: str = "pixels"  # how the model reports image points: pixels | norm1000
     openrouter_extras: bool = True  # OpenRouter-only request fields (reasoning, usage.include)
@@ -130,6 +131,27 @@ class BudgetExceeded(Exception):
     pass
 
 
+OMITTED = {"type": "text", "text": "[earlier image omitted; the latest images are below]"}
+
+
+def window_images(messages: list[dict[str, Any]], keep: int) -> list[dict[str, Any]]:
+    """A copy of `messages` with only the newest `keep` images; older ones become a text note.
+    The conversation itself (and so the recorded trace) keeps every image."""
+    seen, out = 0, []
+    for m in reversed(messages):
+        content = m.get("content")
+        if isinstance(content, list):
+            parts = []
+            for part in reversed(content):
+                if part.get("type") == "image_url":
+                    seen += 1
+                    part = part if seen <= keep else OMITTED
+                parts.append(part)
+            m = {**m, "content": parts[::-1]}
+        out.append(m)
+    return out[::-1]
+
+
 class AstraPlanner:
     def __init__(self, cfg: PlannerConfig, transport: httpx.BaseTransport | None = None):
         self.cfg = cfg
@@ -140,7 +162,7 @@ class AstraPlanner:
             raise BudgetExceeded(f"model-call budget of {self.cfg.max_calls} reached")
         if usage.cost_usd >= self.cfg.max_usd:
             raise BudgetExceeded(f"episode cost budget ${self.cfg.max_usd:.2f} reached")
-        body: dict[str, Any] = {"model": self.cfg.model, "messages": messages,
+        body: dict[str, Any] = {"model": self.cfg.model, "messages": window_images(messages, self.cfg.max_images),
                                 "tools": tool_schemas(self.cfg.point_format), "tool_choice": "auto",
                                 "parallel_tool_calls": False}
         if self.cfg.openrouter_extras:
