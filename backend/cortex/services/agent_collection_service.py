@@ -84,13 +84,32 @@ async def selfhosted_reachable(ctx: Ctx) -> str | None:
                 "scripts/vlm_futurama.sh up (needs the GT VPN)")
 
 
+async def openrouter_balance_problem(ctx: Ctx) -> str | None:
+    """None if the OpenRouter account behind the route has credit left, else why not."""
+    import httpx
+
+    r = ctx.model
+    if r is None or r.provider not in ("openrouter", "insforge"):
+        return None
+    try:
+        async with httpx.AsyncClient(timeout=5) as c:
+            resp = await c.get("https://openrouter.ai/api/v1/credits", headers={"Authorization": f"Bearer {r.api_key}"})
+        if resp.status_code >= 400:
+            return None  # can't tell (some keys can't read credits); let the call itself report
+        d = resp.json().get("data", {})
+        left = float(d.get("total_credits", 0)) - float(d.get("total_usage", 0))
+        return None if left > 0.05 else f"the OpenRouter account has ${max(left, 0):.2f} of credit; add credits to use {r.planner_model}"
+    except Exception:
+        return None
+
+
 async def planner_status(ctx: Ctx) -> dict[str, Any]:
     p = resolve_planner(ctx)
     if not p:
         reason = (f"InsForge Model Gateway: {ctx.gateway_error}" if ctx.gateway_error else
                   "No model endpoint: set PLANNER_BASE_URL (self-hosted) or an InsForge/OpenRouter key.")
         return {"available": False, "model": None, "provider": None, "reason": reason}
-    down = await selfhosted_reachable(ctx)
+    down = await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)
     if down:
         return {"available": False, "model": p["model"], "provider": p["provider"], "route": p["label"],
                 "reason": down}
@@ -155,7 +174,7 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
         raise PlannerUnavailable("No agent planner is configured (self-hosted endpoint or InsForge/OpenRouter key). "
                                  "Cortex does not substitute another model; use collector='oracle' for "
                                  "scripted-oracle demos.")
-    if req.collector == "agent" and (down := await selfhosted_reachable(ctx)):
+    if req.collector == "agent" and (down := await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)):
         raise PlannerUnavailable(down)
     paid = bool(planner and planner["price_per_m"])
     cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
