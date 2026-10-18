@@ -171,6 +171,9 @@ async def finish(ctx: Ctx, session_id: str, believes_success: bool, summary: str
             "note": "successful episodes become LeRobot demonstrations; failures are kept as diagnostics only"}
 
 
+CLOSE_TIMEOUT_S = 20  # how long a worker gets to exit cleanly after the close op
+
+
 async def close(session_id: str) -> None:
     s = SESSIONS.pop(session_id, None)
     if s is None:
@@ -179,9 +182,13 @@ async def close(session_id: str) -> None:
         if s.proc.returncode is None and s.proc.stdin:
             s.proc.stdin.write(b'{"op":"close"}\n')
             await s.proc.stdin.drain()
-            await asyncio.wait_for(s.proc.wait(), 5)
-    except Exception:
-        s.proc.kill()
+            # GL teardown can take a while on a busy Windows machine; 5 s killed healthy workers mid-exit
+            await asyncio.wait_for(s.proc.wait(), CLOSE_TIMEOUT_S)
+    except Exception:  # noqa: BLE001 - closing is best effort; it must never fail the episode or collection
+        try:
+            s.proc.kill()
+        except ProcessLookupError:  # it exited on its own between the wait and the kill
+            pass
 
 
 async def _reap_idle(ctx: Ctx) -> None:
