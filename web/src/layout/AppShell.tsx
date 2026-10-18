@@ -134,7 +134,7 @@ export function AppShell() {
   return (
     <div className="flex h-full flex-col">
       <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line px-4">
-        <Link to="/" className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-rail">
+        <Link to="/studio" className="flex items-center gap-2 rounded-md px-1 py-0.5 hover:bg-rail">
           <Logo />
           <span className="text-sm font-semibold tracking-[-0.01em]">Cortex</span>
         </Link>
