@@ -119,19 +119,23 @@ async def start(ctx: Ctx) -> dict[str, Any]:
         raise ValueError("FUTURAMA_SSH_HOST is not set in .env, so Cortex can't start a GPU job.")
     if (await status(ctx))["available"] or STATE["phase"] == "starting":
         return await status(ctx)
+    # Attaching to a server that is already allocated asks nothing of Slurm, so the cooldown after a failed
+    # request only blocks a NEW submission. The newest queued/running serve job wins (an older one may be ending).
     wait = COOLDOWN_S - (time.time() - STATE["failed_at"])
-    if wait > 0:
-        raise RuntimeError(f"The last GPU request failed, so Cortex waits {int(wait // 60) + 1} more min before "
-                           "asking the cluster again (this protects your Futurama access).")
     STATE.update(phase="starting", error=None, job=None)
     _step("request")
     d = s.futurama_policy_dir
+    submit = "echo NONE" if wait > 0 else (
+        f"rm -f live/server.json && sbatch --parsable -J cortex-serve --gres={s.live_policy_gres} "
+        f"serve_policy.sbatch $HOME/{d.removeprefix('~/')}")
     rc, out = await _sh("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", s.futurama_ssh_host,
-                        f"cd {d} && j=$(squeue -u $USER -n cortex-serve -h -o %i | head -1); "
-                        f"if [ -n \"$j\" ]; then echo ATTACH $j; else rm -f live/server.json && "
-                        f"sbatch --parsable -J cortex-serve --gres={s.live_policy_gres} "
-                        f"serve_policy.sbatch $HOME/{d.removeprefix('~/')}; fi")
+                        f"cd {d} && j=$(squeue -u $USER -n cortex-serve -h -t PENDING,CONFIGURING,RUNNING -o %i "
+                        f"| sort -n | tail -1); if [ -n \"$j\" ]; then echo ATTACH $j; else {submit}; fi")
     out = _clean(out)
+    if rc == 0 and "NONE" in out.split():
+        STATE.update(phase="stopped", step=None)
+        raise RuntimeError(f"The last GPU request failed, so Cortex waits {int(wait // 60) + 1} more min before "
+                           "asking the cluster for a new GPU (this protects your Futurama access).")
     attach = next((ln.split()[1] for ln in out.splitlines() if ln.startswith("ATTACH ")), None)
     job = attach or next((ln.strip() for ln in out.splitlines() if ln.strip().isdigit()), None)
     if rc != 0 or not job:
