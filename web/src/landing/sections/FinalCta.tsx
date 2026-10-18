@@ -15,7 +15,7 @@ const LINKS = [
 /** The last ask, then the footer. */
 export function FinalCta() {
   return (
-    <section id="start" aria-labelledby="start-title" className="kn-gutter border-t border-line py-28 lg:py-36">
+    <section id="start" aria-labelledby="start-title" className="kn-splash-band kn-gutter border-t border-line py-28 lg:py-36">
       <div>
         <div className="kn-label kn-label-rule">
           <span className="text-ink">Start</span>
