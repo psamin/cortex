@@ -69,9 +69,10 @@ class PlaceReport(BaseModel):
     name: str
     kind: str  # "start" | "zone"
     ok: bool
-    grasp_err_mm: float
-    carry_err_mm: float
+    grasp_err_mm: float | None  # None: no IK solution at all with the gripper pointing the way the grasp needs
+    carry_err_mm: float | None
     suggestion: tuple[float, float] | None = None  # nearest reachable spot on the same bearing
+    detail: str | None = None
 
 
 class ConveyorReport(BaseModel):
@@ -148,6 +149,19 @@ def _ik_err(env: SceneEnv, xyz: np.ndarray, mode: str = "top") -> tuple[np.ndarr
     return best_q, best_e  # type: ignore[return-value]
 
 
+def _mm(err: float) -> float | None:
+    return round(err * 1000, 1) if np.isfinite(err) else None
+
+
+def _place(name: str, kind: str, ok: bool, err: float, carry: float, suggestion) -> PlaceReport:
+    unsolved = [w for w, e in (("grasp", err), ("carry", carry)) if not np.isfinite(e)]
+    detail = None if ok else (
+        f"the arm has no {' or '.join(unsolved)} pose here with the gripper within {APPROACH_TOL_DEG:.0f} "
+        "degrees of the angle the grasp needs" if unsolved else "out of reach at grasp or carry height")
+    return PlaceReport(name=name, kind=kind, ok=ok, grasp_err_mm=_mm(err), carry_err_mm=_mm(carry),
+                       suggestion=suggestion, detail=detail)
+
+
 def check(spec: IntakeSpec, info: SceneInfo, env: SceneEnv | None = None) -> FeasibilityReport:
     own = env is None
     env = env or SceneEnv(info)
@@ -173,24 +187,23 @@ def check(spec: IntakeSpec, info: SceneInfo, env: SceneEnv | None = None) -> Fea
             qg, eg = _ik_err(env, np.array([sx, sy, gz]), mode)
             qc, ec = _ik_err(env, np.array([sx, sy, gz + LIFT]), mode)
             ok = eg < GRASP_TOL and ec < REACH_TOL
-            places.append(PlaceReport(name=o.name, kind="start", ok=ok, grasp_err_mm=round(eg * 1000, 1),
-                                      carry_err_mm=round(ec * 1000, 1),
-                                      suggestion=None if ok else _nearest_reachable(env, sx, sy, gz, mode)))
-            carry_qs.setdefault(o.name, []).append(qc)
+            places.append(_place(o.name, "start", ok, eg, ec,
+                                 None if ok else _nearest_reachable(env, sx, sy, gz, mode)))
+            if qc is not None:  # no IK solution at all (#310 bug 3): reported above, no pose to weigh
+                carry_qs.setdefault(o.name, []).append(qc)
         gz = grasp_height(pick.height) if pick else 0.015
         mode = grasp_mode(pick.height) if pick else "top"
         for zn, ((cx, cy), _) in info.zones.items():
             qr, er = _ik_err(env, np.array([cx, cy, gz + 0.01]), mode)
             qc, ec = _ik_err(env, np.array([cx, cy, gz + LIFT]), mode)
             ok = max(er, ec) < REACH_TOL
-            places.append(PlaceReport(name=zn, kind="zone", ok=ok, grasp_err_mm=round(er * 1000, 1),
-                                      carry_err_mm=round(ec * 1000, 1),
-                                      suggestion=None if ok else _nearest_reachable(env, cx, cy, gz + 0.01, mode)))
-            if pick:
+            places.append(_place(zn, "zone", ok, er, ec,
+                                 None if ok else _nearest_reachable(env, cx, cy, gz + 0.01, mode)))
+            if pick and qc is not None:
                 carry_qs.setdefault(pick.name, []).append(qc)
         reports = [_object_report(env, o, opening, limit, carry_qs.get(o.name, [])) for o in objs]
         ok = all(r.ok for r in reports) and all(p.ok for p in places) and all(c.ok for c in conveyors)
-        bad = [r.name for r in reports if not r.ok] + [p.name for p in places if not p.ok]
+        bad = [r.name for r in reports if not r.ok] + [f"{p.name} ({p.detail})" for p in places if not p.ok]
         bad += [f"conveyor {c.name}" for c in conveyors if not c.ok]
         # The agent reads this. It must report a physical limit to its human, not edit the world to pass:
         # in a live agent test, it shrank a real mug so the simulated one would fit the jaws.
@@ -268,9 +281,13 @@ def _object_report(env: SceneEnv, o: ObjectSpec, opening: float, limit: float,
     for q in carry_qs:
         worst = max(worst, float(np.max(np.abs(static_torque(env, q, o.mass_kg)))))
     cap = PAYLOAD_FRACTION * limit
-    payload = Check(ok=worst <= cap, value=round(worst, 3), limit=round(cap, 3),
-                    detail=f"worst holding torque {worst:.2f} N·m vs {cap:.2f} N·m allowed "
-                           f"({PAYLOAD_FRACTION:.0%} of the {limit:.2f} N·m actuator limit)")
+    if not carry_qs:  # no reachable carry pose: the start or zone check already says why
+        payload = Check(ok=True, value=None, limit=round(cap, 3),
+                        detail="not checked: the arm reaches no carry pose for it (see its start and zone checks)")
+    else:
+        payload = Check(ok=worst <= cap, value=round(worst, 3), limit=round(cap, 3),
+                        detail=f"worst holding torque {worst:.2f} N·m vs {cap:.2f} N·m allowed "
+                               f"({PAYLOAD_FRACTION:.0%} of the {limit:.2f} N·m actuator limit)")
     ok = grasp.ok and payload.ok
     return ObjectReport(name=o.name, ok=ok, grasp=grasp, payload=payload,
                         tall=o.height > TALL_RATIO * o.grasp_width, grasp_mode=grasp_mode(o.height),

@@ -181,7 +181,7 @@ export function SkillsPage() {
         <Link to="/studio" className="mb-4 inline-flex h-8 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[13px] text-ink-2 hover:text-ink">
           <ArrowLeft className="h-3.5 w-3.5" /> Back to studio
         </Link>
-        <div className="kn-label kn-label-rule">
+        <div className="kn-label">
           <span className="text-ink">Physical Skills</span>
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-x-6 gap-y-3">

@@ -19,6 +19,8 @@ const META: Record<string, Meta> = {
   launch_training_job: { stage: "train", tier: "golden", step: 5 },
   evaluate_learned_policy: { stage: "evaluate", tier: "golden", step: 7 },
   improve_policy: { stage: "improve", tier: "golden", step: 8 },
+  save_physical_skill: { stage: "improve", tier: "golden", step: 9 },
+  deploy_physical_skill: { stage: "improve", tier: "golden", step: 10 },
   get_project_state: { stage: "anytime", tier: "golden", step: 6 },
   get_next_actions: { stage: "anytime", tier: "golden" },
   get_job: { stage: "anytime", tier: "golden" },

@@ -335,8 +335,11 @@ async def list_skills(ctx: Ctx, real: bool = False) -> list[dict[str, Any]]:
                  {"kind": "none", "value": None, "n": None, "label": "Not measured yet", "detail": NONE_DETAIL})
         past = await _runs(ctx, mine)
         evidence = await _evidence(ctx, score, branches, runs, held)
+        saved = next((c.skill_name for c in sorted(cks, key=lambda c: c.created_at, reverse=True) if c.skill_name),
+                     None)  # a name saved with cortex.save_physical_skill (#310) wins over the derived one
         out.append({
-            "id": f"sk_{gid}", "name": _name(task, sim, p), "task": task, "data": "sim" if sim else "real",
+            "id": f"sk_{gid}", "name": saved or _name(task, sim, p), "saved": saved is not None, "task": task,
+            "data": "sim" if sim else "real",
             "instruction": _prompt(p), "robot": _robot(tj),
             "project_id": p.id, "project_name": p.name, "policy_type": rep.policy_type,
             "policy": _policy(rep.policy_type), "variant": variant, "steps": rep.step,
