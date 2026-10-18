@@ -25,7 +25,7 @@ export function PlanPage() {
         {(s) => (
           <>
             <div>
-              <h1 className="text-2xl font-semibold tracking-[-0.015em]">{s.project.name}</h1>
+              <h1 className="kn-display text-[36px] leading-tight">{s.project.name}</h1>
               <p className="mt-1 text-sm text-ink-3">“{s.project.task_prompt}”</p>
             </div>
             <AutopilotHero project={s.project} />
@@ -95,7 +95,7 @@ export function ProjectSpecView({ project }: { project: Project }) {
             return (
               <div className="px-2.5 py-2" title={cell.reason || undefined}>
                 <div className="flex items-baseline gap-1">
-                  <span className={cn("num text-xl font-semibold", done ? "text-pass" : "text-ink")}>{cell.collected}</span>
+                  <span className={cn("num kn-display text-[26px]", done ? "text-pass" : "text-ink")}>{cell.collected}</span>
                   <span className="num text-xs text-ink-3">/ {cell.target}</span>
                 </div>
                 {cell.reason && <div className="mt-0.5 line-clamp-2 text-2xs leading-snug text-ink-3">{cell.reason}</div>}

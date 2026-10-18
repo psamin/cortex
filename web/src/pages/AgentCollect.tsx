@@ -128,7 +128,7 @@ export function AgentCollect({ project, collector, onUseOracle }: { project: Pro
 // ------------------------------------------------------------------ planner status
 function PlannerUnavailable({ reason, onUseOracle }: { reason: string; onUseOracle: () => void }) {
   return (
-    <div className="flex flex-wrap items-start gap-3 rounded-md bg-caution/5 p-3.5 shadow-[0_0_0_1px_rgb(var(--caution)/.35)]">
+    <div className="flex flex-wrap items-start gap-3 rounded-md bg-caution/5 p-3.5 border border-caution/35">
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-caution" />
       <div className="min-w-0 flex-1">
         <p className="text-sm font-medium text-ink">No planning model is available for the agent.</p>
@@ -362,7 +362,7 @@ function RaiseBudget({ pid, current, message, onRaised }: { pid: string; current
     },
   });
   return (
-    <div className="mt-3 flex flex-wrap items-center gap-2 rounded bg-caution/5 p-2.5 shadow-[0_0_0_1px_rgb(var(--caution)/.35)]">
+    <div className="mt-3 flex flex-wrap items-center gap-2 rounded bg-caution/5 p-2.5 border border-caution/35">
       <p className="min-w-[240px] flex-1 text-xs text-ink-2">{message}</p>
       <span className="text-xs text-ink-3">$</span>
       <Input type="number" min={0} step={1} value={value} onChange={(e) => setValue(Number(e.target.value) || 0)} className="num h-7 w-20 font-mono" aria-label="New model budget" />
@@ -584,11 +584,11 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <div className="num text-3xl font-semibold leading-none text-pass">{t.successes ?? 0}</div>
+              <div className="num kn-display text-[40px] leading-none text-pass">{t.successes ?? 0}</div>
               <div className="mt-1 text-2xs text-ink-3">demos (simulator-verified)</div>
             </div>
             <div>
-              <div className="num text-3xl font-semibold leading-none text-ink-2">{t.failures ?? 0}</div>
+              <div className="num kn-display text-[40px] leading-none text-ink-2">{t.failures ?? 0}</div>
               <div className="mt-1 text-2xs text-ink-3">failed attempts</div>
             </div>
           </div>

@@ -191,7 +191,7 @@ export function AttemptDrawer({ attemptId, onClose }: { attemptId: string | null
       ref={ref}
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
-      className="m-0 ml-auto h-full max-h-none w-[600px] max-w-[100vw] bg-plate p-0 text-ink shadow-[0_0_0_1px_var(--line-strong),-24px_0_48px_-12px_rgba(0,0,0,.5)]"
+      className="m-0 ml-auto h-full max-h-none w-[600px] max-w-[100vw] bg-plate p-0 text-ink border border-line-strong"
     >
       {attemptId && (
         <div className="flex h-full flex-col">

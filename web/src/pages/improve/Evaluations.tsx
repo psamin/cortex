@@ -113,7 +113,7 @@ function EvaluationCard({
   const oracle = e.run.policy.kind === "scripted_expert";
   const done = e.branches.length > 0 && e.branches.every((b) => b.result);
   return (
-    <article className={cn("rounded-md bg-plate shadow-[0_0_0_1px_var(--line)]", selected && "shadow-[0_0_0_1px_var(--line-strong)]")}>
+    <article className={cn("rounded-md bg-plate border border-line", selected && "border border-line-strong")}>
       <header className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
         <label className={cn("flex items-center gap-2", !done && "opacity-50")} title={done ? "Include in comparison" : "Wait for all branches to finish"}>
           <input
@@ -126,7 +126,7 @@ function EvaluationCard({
           />
           {seriesColor && <span className="h-2.5 w-2.5 rounded-sm" style={{ background: seriesColor }} />}
         </label>
-        <span className="text-sm font-semibold">{policyLabel(e.run)}</span>
+        <span className="text-sm font-medium">{policyLabel(e.run)}</span>
         {oracle && !/oracle/i.test(e.run.policy_label) && (
           <Badge tone="hypothesis" title="The scripted expert generates the demos. It is a reference ceiling, not a learned policy.">
             oracle reference · not a learned policy
@@ -154,7 +154,7 @@ function BranchCard({ b }: { b: SimulationBranch }) {
   const live = b.status === "queued" || b.status === "running";
   const shifted = b.spec.cube_offset[0] !== 0 || b.spec.cube_offset[1] !== 0;
   return (
-    <div className="rounded bg-well p-3 shadow-[inset_0_0_0_1px_var(--line)]">
+    <div className="rounded bg-well p-3 border border-line">
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="truncate text-sm font-medium capitalize">{b.spec.name.replace(/_/g, " ")}</div>
@@ -174,7 +174,7 @@ function BranchCard({ b }: { b: SimulationBranch }) {
       {r ? (
         <>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="num text-3xl font-semibold tracking-[-0.02em]">{pct(r.success_rate)}</span>
+            <span className="num kn-display text-[40px]">{pct(r.success_rate)}</span>
             <span className="num font-mono text-2xs text-ink-3" title="95% confidence interval">
               [{pct(r.ci95[0])}, {pct(r.ci95[1])}]
             </span>
@@ -247,7 +247,7 @@ function EpisodeStrip({ episodes }: { episodes: EpisodeResult[] }) {
         ))}
       </div>
       {sel && (
-        <div className="mt-2 rounded bg-plate p-2 text-2xs text-ink-3 shadow-[0_0_0_1px_var(--line)]">
+        <div className="mt-2 rounded bg-plate p-2 text-2xs text-ink-3 border border-line">
           <div className="mb-1 flex flex-wrap gap-x-3">
             <span className="font-mono text-ink">seed {sel.seed}</span>
             <span className={sel.success ? "text-pass" : "text-fault"}>{sel.success ? "success" : sel.failure_mode ?? "fail"}</span>
@@ -277,7 +277,7 @@ function Comparison({ pid, evals, order }: { pid: string; evals: EvaluationWithB
 
   if (sorted.length === 0)
     return (
-      <div className="flex items-center gap-2 rounded-md px-3.5 py-2.5 text-xs text-ink-3 shadow-[0_0_0_1px_var(--line)]">
+      <div className="flex items-center gap-2 rounded-md px-3.5 py-2.5 text-xs text-ink-3 border border-line">
         <GitCompare className="h-3.5 w-3.5" />
         Tick finished evaluations (up to {MAX_COMPARE}) to compare them side by side.
       </div>
@@ -319,7 +319,7 @@ function Comparison({ pid, evals, order }: { pid: string; evals: EvaluationWithB
               cursor={{ fill: "rgb(var(--rail) / .6)" }}
               content={({ active, payload, label }) =>
                 active && payload?.length ? (
-                  <div className="rounded bg-rail px-2.5 py-2 text-xs shadow-[0_0_0_1px_var(--line-strong),0_8px_16px_-8px_rgba(0,0,0,.4)]">
+                  <div className="rounded bg-rail px-2.5 py-2 text-xs border border-line-strong">
                     <div className="mb-1 font-medium capitalize text-ink">{label}</div>
                     {payload.map((p) => {
                       const i = Number(String(p.dataKey).slice(1));
@@ -485,7 +485,7 @@ function LaunchDialog({ pid, open, onClose }: { pid: string; open: boolean; onCl
           </Select>
         </Field>
         {cks.data && cks.data.length === 0 && <p className="-mt-2 text-2xs text-ink-3">No checkpoints yet — train a policy to evaluate it.</p>}
-        <div className="rounded bg-well p-3 text-xs text-ink-2 shadow-[inset_0_0_0_1px_var(--line)]">
+        <div className="rounded bg-well p-3 text-xs text-ink-2 border border-line">
           <div className="mb-1 text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Branches (backend defaults)</div>
           <ul className="space-y-0.5">
             <li>

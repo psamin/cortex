@@ -39,16 +39,16 @@ export function WorkcellGrid({
                 aria-pressed={!!isSel}
                 aria-label={`${r}, ${l} lighting`}
                 className={cn(
-                  "min-w-0 rounded text-left transition-[box-shadow,background-color] duration-100",
+                  "min-w-0 rounded-sm text-left transition-[border-color,background-color] duration-100",
                   isSel
-                    ? "bg-servo/[.07] shadow-[0_0_0_1.5px_rgb(var(--servo))]"
-                    : "bg-well shadow-[inset_0_0_0_1px_var(--line)] hover:shadow-[inset_0_0_0_1px_var(--line-strong)]",
+                    ? "bg-servo/[.07] border border-servo"
+                    : "bg-plate border border-line hover:border-line-strong",
                 )}
               >
                 {content}
               </button>
             ) : (
-              <div key={r} className="min-w-0 rounded bg-well shadow-[inset_0_0_0_1px_var(--line)]">
+              <div key={r} className="min-w-0 rounded bg-well border border-line">
                 {content}
               </div>
             );

@@ -29,7 +29,7 @@ export function SetupPage() {
   return (
     <div className="max-w-[880px] space-y-4 px-5 py-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-[-0.01em]">Setup</h1>
+        <h1 className="kn-display text-[36px] leading-tight">Setup</h1>
         <p className="mt-0.5 text-sm text-ink-3">Where this project's work runs. Unavailable options say why.</p>
       </div>
       {q.isLoading || (d && !draft) ? (
@@ -94,7 +94,7 @@ function Choices({ options, value, onChange, name, readOnly }: { options: InfraO
     <ul className="space-y-1.5">
       {options.map((o) => (
         <li key={o.id}>
-          <label className={cn("flex items-start gap-2.5 rounded-lg px-2 py-1.5", !readOnly && o.available && "cursor-pointer hover:bg-rail/60")}>
+          <label className={cn("flex items-start gap-2.5 rounded px-2 py-1.5", !readOnly && o.available && "cursor-pointer hover:bg-rail/60")}>
             {readOnly ? (
               <span className={cn("mt-1.5 h-2 w-2 shrink-0 rounded-full", o.available ? "bg-pass" : "bg-ink-4")} />
             ) : (

@@ -110,9 +110,9 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
   const e = t.estimate;
 
   return (
-    <article className="rounded-md bg-plate shadow-[0_0_0_1px_var(--line)]">
+    <article className="rounded-md bg-plate border border-line">
       <header className="flex flex-wrap items-center gap-2 border-b border-line-soft px-3.5 py-2.5">
-        <span className="text-sm font-semibold uppercase">{t.policy_type}</span>
+        <span className="text-sm font-medium uppercase">{t.policy_type}</span>
         <span className="font-mono text-2xs text-ink-3">{t.id}</span>
         <StatusBadge status={t.status} />
         <span className="text-2xs text-ink-3">
@@ -157,13 +157,13 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
         </div>
 
         {/* estimate + approval gate */}
-        <div className={cn("rounded p-3", e.paid ? "bg-caution/5 shadow-[0_0_0_1px_rgb(var(--caution)/.35)]" : "bg-well shadow-[inset_0_0_0_1px_var(--line)]")}>
+        <div className={cn("rounded p-3", e.paid ? "bg-caution/5 border border-caution/35" : "bg-well border border-line")}>
           <div className="flex items-center justify-between">
             <span className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Resource estimate</span>
             {e.paid ? <Badge tone="caution">paid</Badge> : <Badge>no charge</Badge>}
           </div>
           <div className="mt-2 flex items-baseline gap-1">
-            <span className="num text-2xl font-semibold">{usd(e.est_cost_usd)}</span>
+            <span className="num kn-display text-[30px]">{usd(e.est_cost_usd)}</span>
             <span className="text-xs text-ink-3">est.</span>
           </div>
           <div className="mt-1 text-xs text-ink-2">

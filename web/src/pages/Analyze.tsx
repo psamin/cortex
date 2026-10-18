@@ -49,7 +49,7 @@ export function AnalyzePage() {
     <div className="space-y-4 px-5 py-5">
       <div className="flex items-end justify-between gap-4">
         <div>
-          <h1 className="text-xl font-semibold tracking-[-0.01em]">Analyze</h1>
+          <h1 className="kn-display text-[36px] leading-tight">Analyze</h1>
           <p className="mt-0.5 text-sm text-ink-3">
             Measured quality checks plus VLM diagnoses. Diagnoses are hypotheses until you confirm them.
           </p>
@@ -105,7 +105,7 @@ function RunAnalysis({ pid, analysis }: { pid: string; analysis?: Analysis }) {
   const vlm = analysis?.vlm_provider ? describeProvider(analysis.vlm_provider) : null;
 
   return (
-    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md bg-plate px-3.5 py-3 shadow-[0_0_0_1px_var(--line)]">
+    <div className="flex flex-wrap items-center gap-x-6 gap-y-3 rounded-md bg-plate px-3.5 py-3 border border-line">
       <div className="min-w-[220px] flex-1">
         {analysis ? (
           <>
@@ -324,7 +324,7 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
               ) : (
                 <ul className="space-y-1.5">
                   {q.flags.map((f) => (
-                    <li key={f.code} className="rounded bg-well p-2 shadow-[inset_0_0_0_1px_var(--line)]">
+                    <li key={f.code} className="rounded bg-well p-2 border border-line">
                       <div className="flex items-center gap-1.5">
                         <Badge tone={sevTone[f.severity]}>{f.severity}</Badge>
                         <span className="font-mono text-xs text-ink">{f.code}</span>
@@ -470,7 +470,7 @@ function ClusterCard({ c, onSelectEpisode }: { c: FailureCluster; onSelectEpisod
     <div className={cn("rounded p-3", hypothesis ? "prov-hypothesis" : "prov-measured")}>
       <div className="flex items-start justify-between gap-2">
         <div>
-          <div className="text-sm font-semibold capitalize">{humanize(c.category)}</div>
+          <div className="text-sm font-medium capitalize">{humanize(c.category)}</div>
           <div className="mt-1 flex flex-wrap gap-1">
             <Badge tone={c.source === "vlm" ? "hypothesis" : "neutral"}>{c.source}</Badge>
             {hypothesis && <HypothesisBadge />}
@@ -478,7 +478,7 @@ function ClusterCard({ c, onSelectEpisode }: { c: FailureCluster; onSelectEpisod
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="num text-xl font-semibold leading-none">{c.episode_ids.length}</span>
+          <span className="num kn-display text-[26px] leading-none">{c.episode_ids.length}</span>
           <span className="text-2xs text-ink-3">episodes</span>
         </div>
       </div>
@@ -508,7 +508,7 @@ function ClusterCard({ c, onSelectEpisode }: { c: FailureCluster; onSelectEpisod
             key={id}
             type="button"
             onClick={() => onSelectEpisode(id)}
-            className="rounded-sm bg-rail px-1.5 py-px font-mono text-[10.5px] text-ink-2 shadow-[0_0_0_1px_var(--line)] hover:text-servo"
+            className="rounded-sm bg-rail px-1.5 py-px font-mono text-[10.5px] text-ink-2 border border-line hover:text-servo"
           >
             <Play className="mr-0.5 inline h-2.5 w-2.5" />
             {id}
