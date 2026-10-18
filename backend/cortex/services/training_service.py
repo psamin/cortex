@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections.abc import Awaitable
 from pathlib import Path
 
 from ..context import Ctx
@@ -117,7 +118,8 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
     else:
         tj.status = JobStatus.queued
         await _save(ctx, tj, "submitting to Futurama")
-        ctx.jobs.submit("train", tj.project_id, lambda job: _run_slurm(ctx, tj, job), idempotency_key=f"train:{tj.id}")
+        ctx.jobs.submit("train", tj.project_id, lambda job: _tracked(ctx, tj, _run_slurm(ctx, tj, job)),
+                        idempotency_key=f"train:{tj.id}")
     await ctx.audit(actor, "launch_training_job", tj.project_id, {"id": tj.id, "backend": tj.backend}, "ok",
                     f"{tj.id} launched on {tj.backend}", approved=True)
     return tj
@@ -143,6 +145,21 @@ async def _sh(*args: str, timeout: float = 600) -> tuple[int, str]:
         p.kill()
         return 124, "timeout"
     return p.returncode or 0, out.decode(errors="replace")
+
+
+async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str]) -> str:
+    """Run Slurm work so the durable TrainingJob always ends terminal: a failed ssh/rsync/sbatch or a
+    stop must not leave it 'queued' (Autopilot waits on the stored status and would wait forever)."""
+    try:
+        return await work
+    except BaseException as e:
+        cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob) or tj
+        if cur.status not in (JobStatus.succeeded, JobStatus.failed, JobStatus.cancelled):
+            stopped = isinstance(e, asyncio.CancelledError)
+            cur.status = JobStatus.cancelled if stopped else JobStatus.failed
+            cur.error = "stopped by user" if stopped else f"{type(e).__name__}: {e}"[:500]
+            await _save(ctx, cur, cur.status)
+        raise
 
 
 async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
@@ -257,7 +274,7 @@ async def resume_pollers(ctx: Ctx) -> None:
     for status in (JobStatus.queued, JobStatus.running):
         for tj in await ctx.repo.list("training_jobs", TrainingJob, status=status):
             if tj.backend == "futurama_slurm" and tj.external_id:
-                ctx.jobs.submit("train", tj.project_id, lambda job, tj=tj: poll_slurm(ctx, tj, job),
+                ctx.jobs.submit("train", tj.project_id, lambda job, tj=tj: _tracked(ctx, tj, poll_slurm(ctx, tj, job)),
                                 idempotency_key=f"train:{tj.id}")
 
 
