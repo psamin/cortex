@@ -12,7 +12,7 @@ dependencies = [
   "numpy>=1.26",
   "pillow>=10",
   "python-multipart>=0.0.9",
-  "lerobot[dataset,training]==0.6.1",
+  "lerobot[dataset,training,feetech]==0.6.1",
   "mujoco>=3.3.7",
   "gymnasium>=1.0",
 ]
