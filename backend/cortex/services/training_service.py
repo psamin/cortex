@@ -19,6 +19,7 @@ from pathlib import Path
 
 from ..context import Ctx
 from ..models import (
+    GPU_CHOICES,
     Checkpoint,
     DatasetVersion,
     JobStatus,
@@ -39,14 +40,15 @@ class ApprovalRequired(PermissionError):
     code = "training_approval"
 
 
-def estimate(policy_type: str, steps: int, backend: str, n_frames: int) -> ResourceEstimate:
+def estimate(policy_type: str, steps: int, backend: str, n_frames: int, gres: str = "gpu:l40s:1") -> ResourceEstimate:
     # ACT (~52M params, 2x 96x128 cams, batch 8): ~12 it/s measured class on L40S-class GPUs is
     # an assumption until our first run reports it; SmolVLA is ~5x slower per step.
     its = 12.0 if policy_type == "act" else 2.5
     hours = steps / its / 3600 + 0.15  # + env setup
     paid = backend == "hf_jobs"
     return ResourceEstimate(
-        gpu="1x L40S (Futurama general partition)" if backend == "futurama_slurm" else "1x GPU (your choice)",
+        gpu=f"{GPU_CHOICES.get(gres, gres)} (Futurama general partition)" if backend == "futurama_slurm"
+        else "1x GPU (your choice)",
         gpu_hours=round(hours, 2), est_cost_usd=round(hours * 1.8, 2) if paid else 0.0, paid=paid,
         notes=(f"{steps} steps, batch 8 over {n_frames} frames; throughput is an estimate until measured. "
                + ("Free GT allocation; queue wait not included." if backend == "futurama_slurm" else "")))
@@ -57,13 +59,19 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
     ds = await ctx.repo.get("dataset_versions", dataset_version_id, DatasetVersion)
     if ds is None:
         raise KeyError(dataset_version_id)
-    backend = "futurama_slurm" if ctx.settings.futurama_ssh_host else "manual"
+    infra = project.infra
+    backend = infra.training_backend if infra.training_backend != "auto" else (
+        "futurama_slurm" if ctx.settings.futurama_ssh_host else "manual")
+    if backend == "futurama_slurm" and not ctx.settings.futurama_ssh_host:
+        raise ValueError("Training on Futurama was chosen, but FUTURAMA_SSH_HOST is not set in .env.")
     steps = steps or (20_000 if policy_type == "act" else 20_000)
     cfg = {
         "policy.type": policy_type, "steps": steps, "batch_size": 8, "save_freq": steps // 2,
         "dataset.repo_id": f"cortex/{project.id}_{ds.id}", "dataset.root": ds.lerobot_root,
         "fps": FPS, "seed": 1000, "lerobot": "0.6.1",
         "cameras": ["observation.images.front", "observation.images.wrist"],
+        "slurm": {"partition": ctx.settings.futurama_partition, "gres": infra.training_gres,
+                  "time_min": infra.training_walltime_min},
     }
     if policy_type == "smolvla":
         cfg["policy.path"] = "lerobot/smolvla_base"
@@ -74,7 +82,7 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
            "SmolVLA fine-tuning: language-conditioned and pretrained, but ~5x slower per step.")
     tj = TrainingJob(project_id=project.id, dataset_version_id=ds.id, policy_type=policy_type,  # type: ignore[arg-type]
                      backend=backend, config=cfg, rationale=why,  # type: ignore[arg-type]
-                     estimate=estimate(policy_type, steps, backend, ds.num_frames))
+                     estimate=estimate(policy_type, steps, backend, ds.num_frames, infra.training_gres))
     await ctx.repo.save("training_jobs", tj)
     ctx.changed(project.id, "training_jobs", tj.id)
     await ctx.audit(actor, "propose_training_job", project.id, {"dataset_version_id": ds.id, "policy": policy_type},
@@ -178,8 +186,10 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     c = tj.config
     export = (f"ALL,STEPS={c['steps']},BATCH={c['batch_size']},SAVE={c['save_freq']},"
               f"REPO_ID={c['dataset.repo_id']}")
-    rc, out = await _sh(*ssh, f"cd {remote} && sbatch --parsable -p {ctx.settings.futurama_partition} "
-                              f"--gres={ctx.settings.futurama_gres} --export={export} train_act.sbatch {remote}")
+    slurm = c.get("slurm") or {}  # chosen in the studio; older jobs fall back to the .env defaults
+    rc, out = await _sh(*ssh, f"cd {remote} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
+                              f"--gres={slurm.get('gres', ctx.settings.futurama_gres)} "
+                              f"-t {int(slurm.get('time_min', 120))} --export={export} train_act.sbatch {remote}")
     m = re.search(r"^(\d+)", out.strip().splitlines()[-1] if out.strip() else "")
     if rc != 0 or not m:
         raise RuntimeError(f"sbatch failed: {out[-400:]}")

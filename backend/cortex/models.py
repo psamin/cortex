@@ -100,6 +100,20 @@ class AutopilotPolicy(BaseModel):
     allow_paid_jobs: bool = False  # paid cloud GPUs always need an explicit click
 
 
+GPU_CHOICES = {"gpu:l40s:1": "1x L40S 48 GB", "gpu:l40:1": "1x L40 48 GB", "gpu:l4:1": "1x L4 24 GB",
+               "gpu:h200:1": "1x H200 141 GB (one shared node: expect to queue)"}
+
+
+class InfraChoice(BaseModel):
+    """Where this project's stages run. GET /api/projects/{pid}/infra lists the options and their live
+    availability. Futurama jobs always use the general partition (research use), one GPU."""
+
+    planner: Literal["auto", "claude_code", "model"] = "auto"
+    training_backend: Literal["auto", "futurama_slurm", "manual"] = "auto"
+    training_gres: Literal["gpu:l40s:1", "gpu:l40:1", "gpu:l4:1", "gpu:h200:1"] = "gpu:l40s:1"
+    training_walltime_min: int = Field(120, ge=15, le=24 * 60)  # the general partition's limit is 1 day
+
+
 class Project(BaseModel):
     id: str = Field(default_factory=lambda: new_id("prj"))
     name: str
@@ -108,6 +122,7 @@ class Project(BaseModel):
     spec: TaskSpec
     plan: CollectionPlan
     autopilot: AutopilotPolicy = Field(default_factory=AutopilotPolicy)
+    infra: InfraChoice = Field(default_factory=InfraChoice)
     created_at: datetime = Field(default_factory=now)
 
 
