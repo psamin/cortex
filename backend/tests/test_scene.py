@@ -31,7 +31,7 @@ def cube_env(tmp_path):
 
 def test_scene_has_objects_zones_obstacles_and_parks_upstream_bodies(tmp_path):
     spec, info = make("pick up the small water bottle", tmp_path, environment={
-        "obstacles": [{"name": "shelf", "shape": "box", "size": [0.06, 0.2, 0.1], "center": [0.36, 0.0]}]})
+        "obstacles": [{"name": "shelf", "shape": "box", "size": [0.04, 0.1, 0.1], "center": [0.38, 0.05]}]})
     xml = info.path.read_text()
     for name in ("obj_small_water_bottle", "zone_spot_a", "zone_spot_b", "obs_shelf", "assetdir="):
         assert name in xml
