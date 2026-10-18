@@ -99,7 +99,7 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
                 try:
                     await ctx.publish_file(ep.artifacts[kind])
                 except Exception as e:  # long episodes' npz can exceed InsForge's REST upload cap (413; S3 path: #81)
-                    if kind != "episode" or "413" not in str(e):
+                    if kind != "episode" or not ("413" in str(e) or "upload cap" in str(e)):
                         raise
                     log.warning("kept %s on this machine only: %s", ep.artifacts[kind], str(e)[:120])
             await ctx.repo.save("episodes", ep)
