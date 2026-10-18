@@ -856,13 +856,13 @@ Call this first when you connect: give yourself a short, distinctive name (and w
 
 Arguments:
 
-- `name` (string, required, max length 40): a short, distinctive name for yourself, e.g. 'Atlas'
+- `name` (string, required, max length 40): a short, distinctive name you invent for yourself (one word, not 'Agent' or 'Claude')
 - `purpose` (string | null, default null): what you are here to do, in a few words
 
 JSON schema:
 
 ```json
-{"properties":{"name":{"description":"a short, distinctive name for yourself, e.g. 'Atlas'","maxLength":40,"minLength":1,"type":"string"},"purpose":{"anyOf":[{"maxLength":200,"type":"string"},{"type":"null"}],"default":null,"description":"what you are here to do, in a few words"}},"required":["name"],"type":"object"}
+{"properties":{"name":{"description":"a short, distinctive name you invent for yourself (one word, not 'Agent' or 'Claude')","maxLength":40,"minLength":1,"type":"string"},"purpose":{"anyOf":[{"maxLength":200,"type":"string"},{"type":"null"}],"default":null,"description":"what you are here to do, in a few words"}},"required":["name"],"type":"object"}
 ```
 
 ### request_gpu
