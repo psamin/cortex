@@ -37,6 +37,7 @@ import { refRoute } from "../components/refs";
 import { cn, num, pct, usd } from "../lib/format";
 import { useChat } from "./ChatProvider";
 import { useViewerFocus } from "./focus";
+import { AUG_NOTE, datasetBreakdown } from "../lib/augment";
 import { prefixOf } from "./model";
 
 // ------------------------------------------------------------------ shell
@@ -206,15 +207,6 @@ function DemoRow({ pid, refId, text, ids, live }: { pid: string; refId: string; 
   );
 }
 
-function Stat({ value, label, tone, large }: { value: ReactNode; label: string; tone?: "pass"; large?: boolean }) {
-  return (
-    <div>
-      <div className={cn("num font-semibold leading-none tracking-[-0.02em]", large ? "text-4xl" : "text-2xl", tone === "pass" ? "text-pass" : "text-ink")}>{value}</div>
-      <div className="mt-1 text-xs text-ink-3">{label}</div>
-    </div>
-  );
-}
-
 // ------------------------------------------------------------------ evaluation (ev_)
 function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: boolean }) {
   const first = useEvaluation(id);
@@ -274,23 +266,15 @@ function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: b
 // ------------------------------------------------------------------ dataset (ds_)
 function DatasetCard({ pid, id, large }: { pid: string; id: string; large?: boolean }) {
   const q = useDatasets(pid);
+  const episodes = useEpisodes(pid);
   if (q.isLoading) return <Loading large={large} />;
   const d = q.data?.find((x) => x.id === id);
   if (!d) return <Missing what="this dataset" />;
-  const sources = new Set(d.links.map((l) => l.episode_id)).size;
-  const aug = d.links.filter((l) => l.augmentation).length;
-  const train = d.links.filter((l) => l.split === "train").length;
+  const b = datasetBreakdown(d, new Map((episodes.data ?? []).map((e) => [e.id, e])));
   return (
-    <CardShell pid={pid} refId={id} large={large} icon={<Database className="h-4 w-4" />} title={`Dataset ${d.name}`} meta="LeRobot format, ready to train" status={<Pill tone="ok">built</Pill>}>
-      <div className="flex items-end gap-6">
-        <Stat value={sources} label="source demos" large={large} />
-        <Stat value={aug} label="augmented copies" large={large} />
-        <Stat value={d.num_frames.toLocaleString()} label="frames" large={large} />
-      </div>
-      <div className="mt-2.5 text-xs text-ink-3">
-        {train} train · {d.links.length - train} held out for eval
-        {d.augmentations.length > 0 && ` · ${d.augmentations.map((a) => a.type.replace("_", " ")).join(", ")}`}
-      </div>
+    <CardShell pid={pid} refId={id} large={large} icon={<Database className="h-4 w-4" />} title={`Dataset ${d.name}`} meta={`LeRobot format · ${d.num_frames.toLocaleString()} frames`} status={<Pill tone="ok">built</Pill>}>
+      <p className="text-sm text-ink-2">{b.text}</p>
+      {b.hasAug && <p className="mt-1 text-xs text-ink-3">{AUG_NOTE}</p>}
     </CardShell>
   );
 }

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CircleDashed, Columns2, Pause, Play, Radio, VideoOff } from "lucide-react";
 import { api } from "../api/client";
 import { isJobActive, useJobs } from "../api/events";
+import { useDatasets } from "../api/hooks";
+import { augmentedByEpisode } from "../lib/augment";
 import type { Job } from "../api/types";
 import { conditionWords } from "../components/Workcell";
 import { cn } from "../lib/format";
@@ -62,6 +64,8 @@ export function Viewer({
   sel: ViewerSelection;
 }) {
   const rollouts = useRollouts(pid);
+  const datasets = useDatasets(pid);
+  const augmented = useMemo(() => augmentedByEpisode(datasets.data ?? []), [datasets.data]);
   const jobs = useJobs();
   const liveJob: Job | undefined = useMemo(
     () => Object.values(jobs).find((j) => j.project_id === pid && isJobActive(j) && LIVE_KINDS.test(j.kind)),
@@ -181,7 +185,7 @@ export function Viewer({
         )}
       </div>
 
-      <Hud goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
+      <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
 
       {/* stage */}
       <div className="relative min-h-0 flex-1">
@@ -223,6 +227,11 @@ export function Viewer({
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", r.success === null ? "bg-white/30" : r.success ? "bg-[#4ac480]" : "bg-[#ec6060]")} />
                 <span className="whitespace-nowrap">{chipText(r)}</span>
+                {augmented.get(r.id) && (
+                  <span className="whitespace-nowrap rounded bg-white/[.08] px-1.5 text-[10.5px] text-white/60" title={augmented.get(r.id)!.tip}>
+                    +{augmented.get(r.id)!.n} augmented
+                  </span>
+                )}
               </button>
             ))}
           </div>
@@ -405,6 +414,7 @@ function Controls({ refs, url }: { refs: React.RefObject<HTMLVideoElement>[]; ur
 
 /** Heads-up band above the stage: the task and what is happening now, plus what is on screen. */
 function Hud({
+  aug,
   goal,
   asked,
   activity,
@@ -412,6 +422,7 @@ function Hud({
   rollout,
   cam,
 }: {
+  aug?: { n: number; tip: string };
   goal: string;
   asked?: string | null;
   activity: { label: string; busy: boolean } | null;
@@ -458,6 +469,11 @@ function Hud({
           <span className={cn("font-medium", rollout.success === null ? "text-white/60" : rollout.success ? "text-[#7ddca5]" : "text-[#f39a9a]")}>
             {rollout.success === null ? "Not judged by the simulator" : rollout.success ? "Success, verified by the simulator" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
           </span>
+          {aug && (
+            <span className="cursor-help text-white/55 underline decoration-dotted underline-offset-2" title={aug.tip}>
+              +{aug.n} augmented {aug.n === 1 ? "copy" : "copies"} (training only)
+            </span>
+          )}
           <span className="font-mono text-[11px] text-white/40">
             {[rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null, rollout.frames ? `${rollout.frames} frames` : null, rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null]
               .filter(Boolean)

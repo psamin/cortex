@@ -5,14 +5,10 @@ import { CornerDownRight, Database, Plus } from "lucide-react";
 import { api } from "../../api/client";
 import { isJobActive, useJob, useTrackJob } from "../../api/events";
 import { useDatasets, useEpisodes } from "../../api/hooks";
-import type { Augmentation, AugmentationType, DatasetVersion, Job } from "../../api/types";
+import type { Augmentation, AugmentationType, DatasetVersion, Episode, Job } from "../../api/types";
 import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, Select, SkeletonRows, Toggle, InlineError } from "../../components/ui";
 import { ago, cn } from "../../lib/format";
-
-export function augLabel(a: Augmentation) {
-  const [k, v] = Object.entries(a.params)[0] ?? [];
-  return `${a.type.replace("_", " ")}${k ? ` ${k}=${v}` : ""}`;
-}
+import { AUG_NOTE, augWords, datasetBreakdown } from "../../lib/augment";
 
 function stats(d: DatasetVersion) {
   const sources = new Set(d.links.map((l) => l.episode_id));
@@ -44,6 +40,8 @@ function lineage(ds: DatasetVersion[]): { d: DatasetVersion; depth: number }[] {
 export function DatasetsTab() {
   const { pid = "" } = useParams();
   const q = useDatasets(pid);
+  const episodes = useEpisodes(pid);
+  const epById = new Map((episodes.data ?? []).map((e) => [e.id, e]));
   const [open, setOpen] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
   const job = useJob(jobId);
@@ -78,7 +76,7 @@ export function DatasetsTab() {
           ) : (
             <div className="space-y-2">
               {lineage(ds).map(({ d, depth }) => (
-                <VersionRow key={d.id} d={d} depth={depth} parentName={ds.find((x) => x.id === d.parent_id)?.name} />
+                <VersionRow key={d.id} d={d} depth={depth} parentName={ds.find((x) => x.id === d.parent_id)?.name} eps={epById} />
               ))}
             </div>
           )
@@ -99,8 +97,9 @@ export function DatasetsTab() {
   );
 }
 
-function VersionRow({ d, depth, parentName }: { d: DatasetVersion; depth: number; parentName?: string }) {
+function VersionRow({ d, depth, parentName, eps }: { d: DatasetVersion; depth: number; parentName?: string; eps: Map<string, Episode> }) {
   const s = stats(d);
+  const breakdown = datasetBreakdown(d, eps);
   const total = Math.max(1, s.original + s.aug);
   return (
     <div className="flex gap-2" style={{ paddingLeft: Math.min(depth, 4) * 24 }}>
@@ -115,10 +114,7 @@ function VersionRow({ d, depth, parentName }: { d: DatasetVersion; depth: number
         <div className="mt-2.5 grid grid-cols-2 gap-4 lg:grid-cols-[1.4fr_1fr_1fr]">
           <div>
             <div className="mb-1 flex justify-between text-2xs text-ink-3">
-              <span>
-                <span className="num font-medium text-ink">{s.original}</span> source + <span className="num font-medium text-ink">{s.aug}</span> augmented
-              </span>
-              <span className="num">{s.sources} robot episodes</span>
+              <span className="text-ink-2">{breakdown.text}</span>
             </div>
             <div className="flex h-1.5 overflow-hidden rounded-full bg-rail">
               <div className="bg-servo" style={{ width: `${(s.original / total) * 100}%` }} />
@@ -126,10 +122,7 @@ function VersionRow({ d, depth, parentName }: { d: DatasetVersion; depth: number
             </div>
           </div>
           <div className="text-2xs text-ink-3">
-            split <span className="num font-mono text-ink">{s.train}</span> train / <span className="num font-mono text-ink">{s.eval}</span> eval
-            <div className="mt-0.5">
-              eval {Math.round(d.eval_fraction * 100)}% · seed <span className="font-mono">{d.split_seed}</span>
-            </div>
+            held out {Math.round(d.eval_fraction * 100)}% of source demos · seed <span className="font-mono">{d.split_seed}</span>
           </div>
           <div className="text-2xs text-ink-3">
             <span className="num font-mono text-ink">{d.num_frames.toLocaleString()}</span> frames
@@ -144,11 +137,12 @@ function VersionRow({ d, depth, parentName }: { d: DatasetVersion; depth: number
           <div className="mt-2.5 flex flex-wrap gap-1">
             {d.augmentations.map((a, i) => (
               <Badge key={i}>
-                <span className="font-mono">{augLabel(a)}</span>
+                <span className="font-mono">{augWords(a)}</span>
               </Badge>
             ))}
           </div>
         )}
+        {breakdown.hasAug && <p className="mt-1.5 text-2xs text-ink-3">{AUG_NOTE}</p>}
       </div>
     </div>
   );
