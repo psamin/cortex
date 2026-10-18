@@ -29,6 +29,18 @@ def tool(c, name, **args):
     return r.json()
 
 
+def finished(c, out, deadline_s=1800):
+    """Poll a job to a terminal state. Rendered side-grasp demos are long; a loaded CPU can take many minutes."""
+    import time
+
+    job = out.get("job") or out["evaluation"]["run"]
+    end = time.monotonic() + deadline_s
+    while job["status"] in ("queued", "running") and time.monotonic() < end:
+        time.sleep(10)
+        job = tool(c, "get_job", job_id=out["job"]["id"])["job"]
+    return job
+
+
 def bottle_project(c):
     pid = tool(c, "start_intake", prompt="pick up the small water bottle and put it on the mat")["project_id"]
     tool(c, "update_intake", project_id=pid, patch={
@@ -43,13 +55,14 @@ def test_oracle_demo_and_evaluation_run_in_the_intake_scene(client):
     pid = bottle_project(client)
     rec = tool(client, "record_demonstrations", project_id=pid,
                conditions=[{"cube_region": "center", "lighting": "normal", "count": 1}], wait_s=600)
-    assert rec["job"]["status"] == "succeeded", rec
+    assert finished(client, rec)["status"] == "succeeded", rec
     eps = tool(client, "list_episodes", project_id=pid)["episodes"]
     assert len(eps) == 1 and eps[0]["success"], eps
     assert eps[0]["frames"] > 300  # a side-grasp cycle, not the 240-step cube oracle
 
     ev = tool(client, "launch_simulation_evaluation", project_id=pid, policy="scripted_expert",
               episodes_per_branch=1, wait_s=900)
+    assert finished(client, ev)["status"] == "succeeded", ev
     runs = client.get(f"/api/projects/{pid}/evaluations").json()
     assert runs, ev
     base = next(b for b in runs[-1]["branches"] if b["spec"]["name"] == "baseline")
