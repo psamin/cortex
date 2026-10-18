@@ -25,7 +25,26 @@ type Def = {
   description: string;
   inputSchema: z.ZodObject;
   annotations: ToolAnnotations;
+  /** Map MCP input onto a backend registry tool (default: same name, same args). */
+  backend?: (input: Record<string, unknown>) => [string, Record<string, unknown>];
 };
+
+const sessionId = z.string().describe("Robot session id (rs_...) from cortex.robot_start_episode");
+const pose = z.object({
+  x: z.number().describe("metres, +x forward from the robot base"),
+  y: z.number().describe("metres, +y to the robot's left"),
+  z: z.number().describe("metres above the table"),
+  yaw_deg: z.number().nullish().describe("gripper yaw; omit to keep"),
+});
+const imagePoint = z.object({
+  u: z.number().min(0).max(479).describe("pixel column in the latest 480x480 overhead image (0 = left)"),
+  v: z.number().min(0).max(479).describe("pixel row (0 = top)"),
+});
+/** robot_act wrapper: (session_id, ...tool args) -> backend robot_act */
+const act = (tool: string, pick: (i: Record<string, unknown>) => Record<string, unknown> = () => ({})) =>
+  (input: Record<string, unknown>): [string, Record<string, unknown>] =>
+    ["robot_act", { session_id: input.session_id, tool, args: pick(input) }];
+const ROBOT: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
 
 const TOOLS: Def[] = [
   {
@@ -337,6 +356,103 @@ const TOOLS: Def[] = [
     }),
     annotations: WRITE,
   },
+
+  // ---- drive the simulated arm yourself (Cortex validates + executes every command; the simulator judges success)
+  {
+    name: "robot_start_episode",
+    title: "Robot: start episode",
+    description:
+      "Start a simulated SO-101 pick-and-place episode that YOU control (fresh seed). Then: cortex.robot_observe -> " +
+      "cortex.robot_propose_grasp (point at the red cube's centre in the overhead image) -> cortex.robot_gripper open -> " +
+      "cortex.robot_move to pregrasp -> robot_move to grasp -> robot_gripper closed -> cortex.robot_verify_grasp -> " +
+      "robot_move up to z=0.075 -> cortex.robot_observe -> cortex.robot_place (point at the green box's centre) -> " +
+      "cortex.robot_check_success -> cortex.robot_finish_episode. You never send motor commands: Cortex checks workspace, " +
+      "reachability, joint limits and collisions, then executes with IK. Rejected commands return an error code; adjust " +
+      "and retry. Successful episodes become LeRobot demonstrations.",
+    inputSchema: z.object({
+      project_id: projectId,
+      cube_region: z.enum(["left", "center", "right"]).optional(),
+      lighting: z.enum(["dim", "normal", "bright"]).optional(),
+    }),
+    annotations: ROBOT,
+  },
+  {
+    name: "robot_observe",
+    title: "Robot: observe",
+    description:
+      "Look at the scene. 'overhead' (default) first moves the arm out of view, then returns a 480x480 top-down image " +
+      "with a pixel grid every 40 px: image up = +x (forward), image left = +y. Use it to point at the cube and the box.",
+    inputSchema: z.object({ session_id: sessionId, camera: z.enum(["overhead", "front", "wrist"]).optional() }),
+    annotations: ROBOT,
+    backend: act("observe_scene", (i) => (i.camera ? { camera: i.camera } : {})),
+  },
+  {
+    name: "robot_state",
+    title: "Robot: state",
+    description: "Joint angles, gripper opening (0-100), end-effector xyz, whether an object is held, step budget.",
+    inputSchema: z.object({ session_id: sessionId }),
+    annotations: READ,
+    backend: act("get_robot_state"),
+  },
+  {
+    name: "robot_propose_grasp",
+    title: "Robot: propose grasp",
+    description:
+      "Point at the red cube's centre in the most recent overhead image. Cortex back-projects the pixel through the " +
+      "calibrated camera, refines it in the image, estimates the cube's yaw, and returns validated pregrasp/grasp poses.",
+    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
+    annotations: ROBOT,
+    backend: act("propose_grasp", (i) => ({ object_id: "red_cube", image_point: i.image_point })),
+  },
+  {
+    name: "robot_move",
+    title: "Robot: move gripper",
+    description: "Move the gripper tip to a pose (use the poses from robot_propose_grasp). Validated before it moves.",
+    inputSchema: z.object({ session_id: sessionId, target: pose, reason: z.string().max(200).optional() }),
+    annotations: ROBOT,
+    backend: act("move_end_effector", (i) => ({ target: i.target, reason: i.reason ?? "" })),
+  },
+  {
+    name: "robot_gripper",
+    title: "Robot: gripper",
+    description: "Open or close the gripper. Reports whether it stalled on an object (i.e. is holding something).",
+    inputSchema: z.object({ session_id: sessionId, state: z.enum(["open", "closed"]) }),
+    annotations: ROBOT,
+    backend: act("set_gripper", (i) => ({ state: i.state })),
+  },
+  {
+    name: "robot_verify_grasp",
+    title: "Robot: verify grasp",
+    description: "Check from proprioception whether the cube is held; also returns the wrist-camera image.",
+    inputSchema: z.object({ session_id: sessionId }),
+    annotations: ROBOT,
+    backend: act("verify_grasp"),
+  },
+  {
+    name: "robot_place",
+    title: "Robot: place",
+    description: "Carry the held cube to the point you mark at the green box's centre (overhead image) and release it.",
+    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
+    annotations: ROBOT,
+    backend: act("place_object", (i) => ({ image_point: i.image_point })),
+  },
+  {
+    name: "robot_check_success",
+    title: "Robot: check success",
+    description: "Simulator ground truth: is the cube resting inside the box?",
+    inputSchema: z.object({ session_id: sessionId }),
+    annotations: READ,
+    backend: act("check_task_success"),
+  },
+  {
+    name: "robot_finish_episode",
+    title: "Robot: finish episode",
+    description:
+      "End the episode. The simulator (not you) decides success; successes are saved as demonstrations, failures as diagnostics.",
+    inputSchema: z.object({ session_id: sessionId, believes_success: z.boolean(), summary: z.string().max(400).optional() }),
+    annotations: ROBOT,
+    backend: (i) => ["robot_finish_episode", { session_id: i.session_id, believes_success: i.believes_success, summary: i.summary ?? "" }],
+  },
 ];
 
 /** Registers every backend tool as `cortex.<name>`. */
@@ -350,7 +466,10 @@ export function registerTools(server: MCPServer) {
         inputSchema: t.inputSchema,
         annotations: { title: t.title, ...t.annotations },
       },
-      async (input, ctx) => callTool(t.name, input as Record<string, unknown>, ctx.signal),
+      async (input, ctx) => {
+        const [name, args] = t.backend ? t.backend(input as Record<string, unknown>) : [t.name, input as Record<string, unknown>];
+        return callTool(name, args, ctx.signal);
+      },
     );
   }
 }
