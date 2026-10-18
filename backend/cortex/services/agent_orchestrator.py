@@ -819,8 +819,12 @@ async def t_intake_status(ctx, a, actor):
     from ..intake import status
 
     p = await get_project(ctx, a.project_id)
-    if p.intake is None:
-        raise ValueError("this project has no intake; call start_intake")
+    if p.intake is None:  # a probe, not a failure: the default cube project has none and needs none
+        return {"summary": "No intake yet: this project uses the default cube tabletop scene. Call start_intake only "
+                           "to describe different objects or a different layout.",
+                "ref_ids": [p.id], "has_intake": False, "complete": False, "questions": [],
+                "scene_built": p.scene is not None, "scene_stale": False,
+                "scene_digest": (p.scene or {}).get("digest")}
     from .intake_service import scene_stale
 
     st = status(p.intake).model_dump(mode="json")

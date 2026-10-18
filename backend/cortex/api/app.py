@@ -57,6 +57,8 @@ async def lifespan(app: FastAPI):
     global CTX
     logging.basicConfig(level=logging.INFO)
     CTX = await build_ctx(settings())
+    from ..services import autonomy
+    autonomy.claim(CTX)  # an older backend still shutting down starts no more agent turns
     for n in CTX.notes:
         log.warning(n)
     await training_service.resume_pollers(CTX)
@@ -72,6 +74,8 @@ async def lifespan(app: FastAPI):
     resumed = await autopilot.resume_all(CTX)
     if resumed:
         log.info("resumed %d autopilot run(s)", resumed)
+    if resumed := await autonomy.resume_after_restart(CTX):  # studio agent turns the restart cut off
+        log.info("resuming %d autonomous agent turn(s) cut off by the restart", resumed)
     app.mount("/files", StaticFiles(directory=CTX.data_dir, check_dir=False), name="files")
     yield
     from ..services import live_policy_service
@@ -1003,6 +1007,21 @@ class ChatReq(BaseModel):
 @app.post("/api/projects/{pid}/agent")
 async def chat(pid: str, req: ChatReq):
     return StreamingResponse(agent.chat(ctx(), pid, req.message, req.thread), media_type="text/event-stream")
+
+
+@app.get("/api/projects/{pid}/agent/state")
+async def chat_state(pid: str):
+    """{running, thread, status, resuming, waiting, paused}: whether a turn is really running in this backend, so the
+    studio never shows a live line for a turn that is gone, and a pause that needs the Continue button."""
+    from ..services import autonomy
+    return autonomy.status(ctx(), pid)
+
+
+@app.post("/api/projects/{pid}/agent/continue")
+async def chat_continue(pid: str):
+    """The Continue button: pick the autonomous workflow up again after a pause."""
+    from ..services import autonomy
+    return {"resumed": await autonomy.resume(ctx(), pid)}
 
 
 @app.post("/api/projects/{pid}/agent/stop")

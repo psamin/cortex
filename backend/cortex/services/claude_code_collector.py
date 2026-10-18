@@ -11,6 +11,7 @@ Cortex closes the episode itself as a failed attempt (never a demonstration).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import shutil
 from typing import Any
@@ -23,6 +24,8 @@ from .claude_code_agent import MCP_URL
 ROBOT_TOOLS = ["robot_observe", "robot_state", "robot_propose_grasp", "robot_move", "robot_gripper",
                "robot_verify_grasp", "robot_place", "robot_check_success", "robot_finish_episode"]
 MAX_TURNS = 30
+ATTEMPT_IDLE_S = 300  # silence from one attempt's `claude -p`; past it the attempt ends as failed, the job goes on
+ATTEMPT_MAX_S = 900  # one attempt end to end
 
 PROMPT = """You are generating one robot demonstration for Cortex. Robot session {sid} is already started
 ({setting}). Use ONLY the cortex robot tools with session_id="{sid}":
@@ -68,8 +71,19 @@ async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario
                                                 stderr=asyncio.subprocess.DEVNULL, limit=16 * 1024 * 1024)
     result: dict[str, Any] = {}
     assert proc.stdout
+    lines, deadline = proc.stdout.__aiter__(), asyncio.get_running_loop().time() + ATTEMPT_MAX_S
     try:
-        async for raw in proc.stdout:
+        while True:  # a hung attempt must never hang the whole collection (and the autonomous chain behind it)
+            left = deadline - asyncio.get_running_loop().time()
+            try:
+                raw = await asyncio.wait_for(anext(lines), max(0.1, min(ATTEMPT_IDLE_S, left)))
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                result = {"subtype": "timed out"}
+                with contextlib.suppress(ProcessLookupError):
+                    proc.kill()
+                break
             try:
                 ev = json.loads(raw)
             except json.JSONDecodeError:
@@ -81,7 +95,13 @@ async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario
                                                                    "index": index, "text": block["text"][:500]})
             elif ev.get("type") == "result":
                 result = ev
-        await proc.wait()
+                break
+        try:
+            await asyncio.wait_for(proc.wait(), 15)
+        except TimeoutError:  # it lingers after its result: it's done either way
+            with contextlib.suppress(ProcessLookupError):
+                proc.kill()
+            await proc.wait()
     except BaseException:  # job cancelled: stop Claude and release the simulator
         if proc.returncode is None:
             proc.kill()

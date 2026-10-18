@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, Info, PanelLeftClose, PanelLeftOpen, Paperclip, Square, SquarePen, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, Info, PanelLeftClose, PanelLeftOpen, Paperclip, Play, Square, SquarePen, X } from "lucide-react";
 import { api } from "../api/client";
 import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
@@ -237,6 +237,7 @@ export function Conversation({ pid }: { pid: string }) {
       <div className="shrink-0 px-4 pb-4 pt-2">
         <div className="mx-auto max-w-[680px]">
           {!trainingApprovalInChat && <PendingApproval pid={pid} />}
+          {chat.paused && !chat.busy && <PausedBar reason={chat.paused.reason} onContinue={chat.continueRun} />}
           {empty && hasNext && (
             <div className="mb-2.5">
               <NextSteps pid={pid} onPick={chat.send} />
@@ -526,6 +527,27 @@ function LiveStatus({ status, startedAt }: { status: { state: string; tool?: str
         {text}
       </span>
       {s >= 3 && <span className="num shrink-0 font-mono text-[10.5px] text-ink-4">{s}s</span>}
+    </div>
+  );
+}
+
+/** The automatic steps stopped (a step kept getting cut off, or too many in a row): one click picks them up again. */
+function PausedBar({ reason, onContinue }: { reason: string; onContinue: () => void }) {
+  return (
+    <div className="enter mb-2.5 flex items-center gap-2.5 rounded border border-caution/40 bg-caution/5 px-3.5 py-2.5 text-sm" role="status">
+      <Hand className="h-4 w-4 shrink-0 text-caution" strokeWidth={1.5} />
+      <span className="min-w-0 flex-1 truncate text-ink-2" title={reason}>
+        <span className="mr-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-caution">Paused</span>
+        {reason}
+      </span>
+      <button
+        type="button"
+        onClick={onContinue}
+        className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-ink bg-ink px-3 py-1 text-xs font-medium text-bench hover:opacity-90"
+      >
+        <Play className="h-3 w-3" strokeWidth={2} />
+        Continue
+      </button>
     </div>
   );
 }

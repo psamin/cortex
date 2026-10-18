@@ -41,6 +41,7 @@ class FakeClaude:
     """A `claude -p` process: streams the given events, or nothing at all (hung) when `events` is None."""
 
     def __init__(self, events=None):
+        self.pid = 0
         self.returncode = None
         self.stderr = None
         self.killed = False

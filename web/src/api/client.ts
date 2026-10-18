@@ -11,6 +11,7 @@ import type {
   Analysis,
   AuditRow,
   AgentThread,
+  AgentState,
   AutopilotPolicy,
   AutopilotRun,
   Checkpoint,
@@ -181,6 +182,10 @@ export const api = {
   stopAutopilot: (pid: string) => post<AutopilotRun | null>(`/projects/${pid}/autopilot/stop`),
   /** End the autonomous chain: no more automatic steps, and the running one stops. */
   stopAgent: (pid: string) => post<{ stopped: boolean }>(`/projects/${pid}/agent/stop`),
+  /** Whether a turn is really running in the backend, its live line, and a pause waiting for Continue. */
+  agentState: (pid: string) => get<AgentState>(`/projects/${pid}/agent/state`),
+  /** The Continue button: pick the autonomous workflow up again after a pause. */
+  continueAgent: (pid: string) => post<{ resumed: boolean }>(`/projects/${pid}/agent/continue`),
   setAutopilotPolicy: (pid: string, policy: Partial<AutopilotPolicy>) =>
     put<AutopilotPolicy>(`/projects/${pid}/autopilot/policy`, policy),
   eventsUrl: (pid: string) => `${API_BASE}/projects/${pid}/events`,

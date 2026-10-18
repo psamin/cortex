@@ -161,29 +161,70 @@ def tidy_job_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any], tid: str | None = None) -> None:
     from . import chat_store
 
+    if autonomy.superseded(ctx):  # a newer backend took the chat over: the turn it ended writes nothing more
+        return
     t = await chat_store.current(ctx, pid, tid)
     await chat_store.append(ctx, pid, t["id"], entry)
 
 
 async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:
     """Stream one user turn and record it to the chat thread (the latest unless `tid` is given).
-    Turns in a project run one at a time: a message sent during an automatic step waits for it."""
-    async with autonomy.lock(pid):
-        async for chunk in turn(ctx, pid, message, tid):
+    Turns in a project run one at a time: a message sent during an automatic step waits for it.
+    The turn runs in its own task, so it outlives the request: when the studio goes away (a reload, another page),
+    it keeps going and the rest streams on the project event stream, as an automatic turn does."""
+    q: asyncio.Queue[str | None] = asyncio.Queue()
+    out = {"listening": True, "thread": tid}
+
+    async def run() -> None:
+        try:
+            async with autonomy.lock(pid):
+                async for chunk in turn(ctx, pid, message, tid):
+                    if chunk.startswith("event: thread"):
+                        out["thread"] = json.loads(chunk.split("data: ", 1)[1])["id"]
+                    if out["listening"]:
+                        q.put_nowait(chunk)
+                    else:
+                        autonomy.relay(ctx, pid, chunk, out["thread"])
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            log.exception("studio agent turn failed")
+        finally:
+            q.put_nowait(None)
+
+    autonomy.track_turn(pid, asyncio.get_running_loop().create_task(run()))
+    try:
+        while (chunk := await q.get()) is not None:
             yield chunk
+    finally:
+        out["listening"] = False
 
 
 async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: str | None = None) -> AsyncIterator[str]:
     """One agent turn; the caller holds autonomy.lock(pid). `auto`: Cortex woke the agent (autonomous mode)
-    because this work finished; the row shows that instead of a user message."""
-    import time
-
+    because this work finished; the row shows that instead of a user message. The turn is marked as running until
+    it ends (autonomy.run_started), so a restart that cuts it off is picked up on the next start."""
     from . import chat_store, project_cleanup
 
     tid = (await chat_store.current(ctx, pid, tid))["id"]
     yield _sse("thread", {"id": tid})
     await project_cleanup.restore(ctx, pid)  # a chat is history: an empty project deleted earlier comes back
     autonomy.turn_started(ctx, pid, auto=bool(auto))
+    autonomy.run_started(ctx, pid, tid, auto=bool(auto))
+    cut_off = False
+    try:
+        async for chunk in _turn(ctx, pid, message, tid, auto):
+            yield chunk
+    except asyncio.CancelledError:  # the backend is stopping mid-turn (the next start picks it up), or a user stop
+        cut_off = autonomy.was_cut_off(pid)
+        raise
+    finally:
+        autonomy.run_finished(ctx, pid, cut_off)
+
+
+async def _turn(ctx: Ctx, pid: str, message: str, tid: str, auto: str | None) -> AsyncIterator[str]:
+    import time
+
     if auto:
         row = autonomy.notice("auto", f"Continuing on my own: {auto}")
         await _append_log(ctx, pid, row, tid)
@@ -202,6 +243,8 @@ async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: s
             d = {}
         if ev == "text":
             text.append(d.get("delta", ""))
+        elif ev == "status":  # the live line, for a studio that opens the chat mid-turn
+            autonomy.set_status(pid, d.get("text"))
         elif ev == "todos":
             await _append_log(ctx, pid, {"kind": "todos", "items": d.get("items", [])}, tid)
         elif ev == "notice":  # Cortex's own line, e.g. which engine answered and why
@@ -229,8 +272,8 @@ async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: s
                 if row := await autonomy.approve_if_covered(ctx, pid, ref):
                     await _append_log(ctx, pid, row, tid)
                     yield _sse("notice", row)
-        elif ev == "done":
-            await autonomy.turn_ended(ctx, pid, tid, last_result_at)
+        elif ev == "done":  # is_error: the agent stopped before it finished (crash, timeout, turn limit)
+            await autonomy.turn_ended(ctx, pid, tid, last_result_at, failed=bool(d.get("is_error")))
 
 
 async def _ends_with_done(chunks: AsyncIterator[str]) -> AsyncIterator[str]:
@@ -308,8 +351,15 @@ async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor:
             hist.append({"role": "assistant", "content": "".join(text)})
             return
         except cc.Unavailable as e:  # it did nothing yet, so the next engine answers this turn
+            if autonomy.superseded(ctx):  # a newer backend ended Claude Code and took the turn over
+                yield _sse("done", {"is_error": True})
+                return
             eng = "model" if ctx.model and ctx.settings.agent_engine == "auto" else "rules"
             nxt = ctx.model.label if eng == "model" and ctx.model else f"the {RULES_LABEL}"
+            if eng == "rules" and actor != "gui":  # an automatic turn: see below
+                yield _sse("notice", autonomy.notice("engine", f"{_cap(str(e))}."))
+                yield _sse("done", {"is_error": True})
+                return
             yield _sse("notice", autonomy.notice("engine", f"{_cap(str(e))}: {nxt} answered instead."))
     if eng == "model":
         hist[-1]["content"] = prompt
@@ -318,7 +368,13 @@ async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor:
                 yield chunk
         except ModelUnavailable as e:
             eng = "rules"
+            if actor != "gui":  # an automatic turn: see below
+                yield _sse("notice", autonomy.notice("engine", f"{_cap(str(e))}."))
+                yield _sse("done", {"is_error": True})
+                return
             yield _sse("notice", autonomy.notice("engine", f"{_cap(str(e))}: the {RULES_LABEL} answered instead."))
+    # An automatic turn never falls back to the built-in planner: its keyword rules would act on the wake-up text
+    # (e.g. record demos again on every wake-up). The turn ends as failed, so it is retried a few times, then paused.
     if eng == "rules":
         async for chunk in _rules(ctx, pid, message, hist, scene[0] if scene else None):
             yield chunk
@@ -449,6 +505,8 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
     assert route is not None
     async with httpx.AsyncClient(timeout=httpx.Timeout(MODEL_TIMEOUT_S, connect=10)) as http:
         for step in range(MAX_TURNS):
+            if autonomy.superseded(ctx):  # a newer backend took the turn over: it continues from here
+                return
             yield _sse("status", {"state": "thinking", "text": "Thinking…"})
             try:
                 async with asyncio.timeout(MODEL_TIMEOUT_S):  # the whole reply, also when it trickles in

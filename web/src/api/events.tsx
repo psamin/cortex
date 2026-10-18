@@ -183,6 +183,7 @@ export function ProjectEventsProvider({ pid, children }: { pid: string; children
       dropped = false;
       api.jobs(pid).then((js) => js.forEach((j) => store.upsertJob(j))).catch(() => {});
       qcRef.current.invalidateQueries({ predicate: (q) => q.queryKey.includes(pid) });
+      store.chatListeners.forEach((fn) => fn({ kind: "reconnected" })); // the chat re-reads what is really running
     };
     es.onerror = () => {
       dropped = true;

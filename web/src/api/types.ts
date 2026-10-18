@@ -839,6 +839,17 @@ export interface AgentThread {
   updated_at: ISODate;
 }
 
+/** GET /projects/{pid}/agent/state: whether a studio agent turn is really running in the backend (and its live
+ *  line), one about to resume, a chain waiting on background work, or a pause that needs the Continue button. */
+export interface AgentState {
+  running: boolean;
+  thread: string | null;
+  status: string | null;
+  resuming: boolean;
+  waiting: boolean;
+  paused: { thread: string; reason: string; at: number } | null;
+}
+
 /** GET /api/live-policy: the Futurama GPU server running trained policies (#157). */
 export interface LivePolicyStatus {
   available: boolean;
