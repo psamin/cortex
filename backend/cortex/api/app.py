@@ -649,6 +649,29 @@ async def hardware_process_stop(request: Request):
     return await calibrate.stop()
 
 
+@app.post("/api/projects/{pid}/hardware/teleop")
+async def hardware_teleop(pid: str, request: Request):
+    from ..services import hardware_service as hs
+    _local_human(request)
+    req = hs.TeleopRequest.model_validate(await request.json())
+    return await hs.start_teleop(ctx(), await orch.get_project(ctx(), pid), req)
+
+
+@app.get("/api/hardware/run")
+async def hardware_run():
+    from ..services import hardware_service as hs
+    return hs.snapshot()
+
+
+@app.post("/api/hardware/run/{op}")
+async def hardware_run_op(op: Literal["heartbeat", "end_episode", "stop", "release"], request: Request):
+    """heartbeat: the operator is holding the deadman (send ~10 Hz while held; lapses stop the arm)."""
+    from ..services import hardware_service as hs
+    _local_human(request)
+    await hs.send(op)
+    return {"ok": True} if op == "heartbeat" else hs.snapshot()
+
+
 # ------------------------------------------------------------------ studio read models
 @app.get("/api/projects/{pid}/iterations")
 async def iterations(pid: str):

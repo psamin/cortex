@@ -53,10 +53,11 @@ def extract_archive(archive: Path, dest: Path) -> Path:
 
 
 async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_episodes: int = 10,
-                       actor: str = "gui") -> Job:
+                       actor: str = "gui", planner: str = "human demonstration (imported)",
+                       label: str | None = None) -> Job:
     imp_id = new_id("imp")
     base = ctx.local(import_key(project.id, imp_id))
-    label = f"hf:{source['hub']}" if "hub" in source else f"upload:{Path(source['path']).name}"
+    label = label or (f"hf:{source['hub']}" if "hub" in source else f"upload:{Path(source['path']).name}")
 
     async def run(job: Job) -> str:
         cfg: dict[str, Any] = {"source": source, "root": str(base / "lerobot"), "max_episodes": max_episodes,
@@ -86,7 +87,7 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
                          condition=Condition(), seed=-1, num_frames=r["num_frames"], fps=int(res["fps"]),
                          success=None, status=EpisodeStatus.accepted,
                          artifacts={"episode": rel("episode.npz"), "front": rel("front.mp4"), "thumb": rel("thumb.jpg")},
-                         provenance={"planner": "human demonstration (imported)", "source": label,
+                         provenance={"planner": planner, "source": label,
                                      "source_episode_index": r["source_episode_index"], "robot_type": res["robot_type"],
                                      "cameras": res["cameras"], "task": r.get("task") or None,
                                      "note": "success not judged by the simulator; condition unknown"})

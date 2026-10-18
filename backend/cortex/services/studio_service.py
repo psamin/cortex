@@ -38,7 +38,7 @@ def cameras_for(kind: str, provenance: dict[str, Any] | None = None) -> list[dic
     if kind != "demo":
         return [STUDIO]  # failed attempts and evaluations keep only the studio render
     prov = provenance or {}
-    if prov.get("planner") != "human demonstration (imported)":
+    if not prov.get("cameras"):  # recorded episodes (imported, real teleop) carry their camera keys; sim ones don't
         return [STUDIO, *SIM_POLICY_CAMS]
     keys = list(prov.get("cameras") or [])
     name = lambda k: k.removeprefix("observation.images.")  # noqa: E731
