@@ -18,6 +18,7 @@ from typing import Any
 
 from ..context import Ctx
 from . import agent_orchestrator as orch
+from .narration import thought_line, todo_line, tool_line
 
 MCP_URL = "http://localhost:3000/mcp"
 MAX_TURNS = 40
@@ -136,7 +137,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     thread = await chat_store.current(ctx, pid, tid)  # each chat thread is its own Claude Code session
     if sid := thread.get("session_id"):
         cmd += ["--resume", sid]
-    yield sse("status", {"state": "thinking", "engine": "claude-code"})
+    yield sse("status", {"state": "starting", "engine": "claude-code", "text": "Starting Claude Code…"})
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(workdir), stdout=asyncio.subprocess.PIPE,
                                                 stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024)
     pending: dict[str, str] = {}  # tool_use id -> tool name
@@ -151,23 +152,31 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
             t = ev.get("type")
             if t == "system" and ev.get("subtype") == "init":
                 await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
-                yield sse("status", {"state": "thinking", "engine": "claude-code", "model": ev.get("model")})
+                yield sse("status", {"state": "thinking", "engine": "claude-code", "model": ev.get("model"),
+                                     "text": "Planning…"})
             elif t == "assistant":
                 for block in ev.get("message", {}).get("content", []):
                     if block.get("type") == "text" and block.get("text"):
                         yield sse("text", {"delta": block["text"]})
+                    elif block.get("type") == "thinking" and (line := thought_line(block.get("thinking", ""))):
+                        yield sse("status", {"state": "thinking", "text": line})  # live only, never stored
                     elif block.get("type") == "tool_use":
                         if block.get("name") == "TodoWrite":  # Claude's own checklist: shown live as a task list
                             todos = (block.get("input") or {}).get("todos") or []
                             yield sse("todos", {"items": [{"text": t.get("content", ""), "status": t.get("status", "pending"),
                                                            "active": t.get("activeForm")} for t in todos]})
+                            if line := todo_line(todos):
+                                yield sse("status", {"state": "thinking", "text": line})
                             continue
                         if not block.get("name", "").startswith("mcp__cortex__"):
-                            continue  # Claude Code internals (e.g. ToolSearch) are not shown in the chat
+                            if block.get("name") == "ToolSearch":  # Claude Code loading the Cortex tools
+                                yield sse("status", {"state": "thinking", "text": "Loading the Cortex tools…"})
+                            continue  # Claude Code internals are not shown in the chat
                         name = _short_tool(block.get("name", ""))
                         pending[block.get("id", "")] = name
                         yield sse("tool_call", {"tool": name, "args": block.get("input", {})})
-                        yield sse("status", {"state": "running", "tool": name})
+                        yield sse("status", {"state": "running", "tool": name,
+                                             "text": tool_line(name, block.get("input"))})
             elif t == "user":
                 for block in ev.get("message", {}).get("content", []):
                     if isinstance(block, dict) and block.get("type") == "tool_result":
@@ -176,7 +185,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                         name = pending.pop(block.get("tool_use_id", ""))
                         for event, data in _result_events(name, block):
                             yield sse(event, data)
-                yield sse("status", {"state": "thinking"})
+                yield sse("status", {"state": "thinking", "text": "Deciding the next step…"})
             elif t == "result":
                 result = ev
                 if ev.get("session_id"):

@@ -53,7 +53,8 @@ export type ChatEvent =
   | { type: "tool_result"; tool: string; summary: string; ref_ids: string[]; ok?: boolean }
   | { type: "approval_required"; kind: string; ref_id: string; summary: string; args: Record<string, unknown> }
   | { type: "done"; turns?: number | null; cost_usd?: number | null; duration_ms?: number | null; is_error?: boolean | null }
-  | { type: "status"; state: string; tool?: string }
+  /** live only: `text` is one short line on what the agent is doing ("Collecting 20 demos in sim…") */
+  | { type: "status"; state: string; tool?: string; text?: string }
   | { type: "error"; message: string }
   | { type: "todos"; items: TodoItem[] }
   | { type: "changes"; items: ChangeItem[] }

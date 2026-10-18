@@ -18,6 +18,7 @@ import httpx
 from ..context import Ctx
 from . import agent_orchestrator as orch
 from . import autopilot
+from .narration import tool_line
 
 MAX_TURNS = 8
 HISTORY: dict[str, list[dict[str, Any]]] = {}
@@ -226,6 +227,7 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
         for _ in range(MAX_TURNS):
             route = ctx.model
             assert route is not None
+            yield _sse("status", {"state": "thinking", "text": "Thinking…"})
             r = await http.post(route.chat_url, headers={"Authorization": f"Bearer {route.api_key}"}, json={
                 "model": route.agent_model, "messages": msgs, "tools": tool_specs(), "max_tokens": 1200})
             if r.status_code >= 400:
@@ -246,6 +248,7 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
                 except json.JSONDecodeError:
                     args = {}
                 yield _sse("tool_call", {"tool": name, "args": args})
+                yield _sse("status", {"state": "running", "tool": name, "text": tool_line(name, args)})
                 try:
                     res, card = await run_tool(ctx, pid, name, args)
                     out = {"summary": res.get("summary"), "ref_ids": res.get("ref_ids", [])}
@@ -295,6 +298,7 @@ async def _rules(ctx: Ctx, pid: str, message: str, hist: list[dict[str, Any]]) -
         ck = await ctx.repo.list("checkpoints", Checkpoint, project_id=pid)
         args = {"policy": ck[-1].id if ck else "scripted_expert"}
     yield _sse("tool_call", {"tool": name, "args": args})
+    yield _sse("status", {"state": "running", "tool": name, "text": tool_line(name, args)})
     try:
         res, card = await run_tool(ctx, pid, name, args)
         if card:
