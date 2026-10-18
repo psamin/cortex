@@ -93,3 +93,19 @@ def test_collections_use_the_projects_planner_choice(tmp_path, monkeypatch):
                 await acs.start_collection(ctx, p2, StartAgentCollectionRequest(num_demos=1, planner=planner))
     asyncio.run(go())
     assert seen == ["model", "claude_code"]  # "auto" follows the project; an explicit request wins
+
+
+def test_the_agent_reads_and_changes_the_same_choices(tmp_path, monkeypatch):
+    monkeypatch.setattr(infra_service.cc, "available", lambda: "the `claude` CLI is not on PATH")
+    ctx, p = setup(tmp_path)
+
+    async def go():
+        got = await orch.call_tool(ctx, "get_infrastructure", {"project_id": p.id}, "mcp")
+        assert "planner / Claude Code (your agent): unavailable (the `claude` CLI is not on PATH)" in got["summary"]
+        out = await orch.call_tool(ctx, "set_infrastructure", {"project_id": p.id, "training_gres": "gpu:h200:1",
+                                                               "training_walltime_min": 300}, "mcp")
+        assert out["summary"].startswith("Saved. Chosen: planner auto, training auto on gpu:h200:1 for 300 min.")
+        assert (await orch.get_project(ctx, p.id)).infra.training_gres == "gpu:h200:1"
+        with pytest.raises(ValueError):  # validated like the studio's form
+            await orch.call_tool(ctx, "set_infrastructure", {"project_id": p.id, "training_walltime_min": 5}, "mcp")
+    asyncio.run(go())

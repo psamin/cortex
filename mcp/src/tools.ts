@@ -371,6 +371,30 @@ const TOOLS: Def[] = [
     }),
     annotations: { ...WRITE, openWorldHint: true },
   },
+  {
+    name: "get_infrastructure",
+    title: "Get infrastructure choices",
+    description:
+      "Where this project's stages run: planner, training backend (Futurama GPU or manual), GPU and walltime, " +
+      "evaluation and robot, each with live availability and the reason when unavailable.",
+    inputSchema: z.object({ project_id: projectId }),
+    annotations: READ,
+  },
+  {
+    name: "set_infrastructure",
+    title: "Set infrastructure choices",
+    description:
+      "Change this project's planner, training backend, GPU or walltime. Only stores the choice; training still " +
+      "needs the human's approval in the studio.",
+    inputSchema: z.object({
+      project_id: projectId,
+      planner: z.enum(["auto", "claude_code", "model"]).optional(),
+      training_backend: z.enum(["auto", "futurama_slurm", "manual"]).optional(),
+      training_gres: z.enum(["gpu:l40s:1", "gpu:l40:1", "gpu:l4:1", "gpu:h200:1"]).optional(),
+      training_walltime_min: z.number().int().min(15).max(1440).optional(),
+    }),
+    annotations: WRITE,
+  },
   // ---- drive the simulated arm yourself (Cortex validates + executes every command; the simulator judges success)
   {
     name: "robot_start_episode",
