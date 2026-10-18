@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, Hand, Plus, Power, Square, Trash2, X } from "lucide-react";
+import { AlertTriangle, Check, Hand, Plus, Power, Square, Trash2 } from "lucide-react";
 import { api } from "../api/client";
 import { useCheckpoints } from "../api/hooks";
 import type { CameraSpec, HardwareConfig, HardwareProcess, HardwareRun, HardwareStatus } from "../api/types";
@@ -36,13 +36,13 @@ export function RobotPage() {
         <div className="grid grid-cols-1 gap-4 min-[1200px]:grid-cols-2">
           <div className="space-y-4">
             <Checklist hw={hw} />
-            <SetupForm hw={hw} />
-            <Calibration hw={hw} />
+            {hw.enabled && <SetupForm hw={hw} />}
+            {hw.enabled && <Calibration hw={hw} />}
           </div>
           <div className="space-y-4">
             {run.data && <RunPanel run={run.data} pid={pid} />}
-            <Arming hw={hw} />
-            <RunStarters pid={pid} hw={hw} busy={!!run.data && run.data.state !== "finished"} />
+            {hw.enabled && <Arming hw={hw} />}
+            {hw.enabled && <RunStarters pid={pid} hw={hw} busy={!!run.data && run.data.state !== "finished"} />}
           </div>
         </div>
       )}
@@ -51,43 +51,42 @@ export function RobotPage() {
 }
 
 // ------------------------------------------------------------------ readiness
+/** A short setup guide: done steps are ticked, only the next step says what to do. Nothing in red. */
 function Checklist({ hw }: { hw: HardwareStatus }) {
-  const ok: string[] = [];
-  if (hw.enabled) ok.push("Hardware enabled on this machine");
-  if (hw.config.follower_port) ok.push(`Follower arm on ${hw.config.follower_port}`);
-  if (hw.calibration.follower.exists) ok.push(`Follower '${hw.calibration.follower.id}' calibrated`);
-  if (hw.armed) ok.push(`Armed by ${hw.armed.operator}`);
-  const teleopOk: string[] = [];
-  if (hw.config.leader_port) teleopOk.push(`Leader arm on ${hw.config.leader_port}`);
-  if (hw.calibration.leader.exists) teleopOk.push(`Leader '${hw.calibration.leader.id}' calibrated`);
-  const Row = ({ good, text }: { good: boolean; text: string }) => (
-    <li className="flex items-start gap-2 text-sm">
-      <span className={cn("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full", good ? "bg-pass/15 text-pass" : "bg-fault/15 text-fault")}>
-        {good ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
-      </span>
-      <span className={good ? "text-ink-2" : "text-ink"}>{text}</span>
-    </li>
-  );
+  const portOk = !!hw.config.follower_port && !hw.missing.some((m) => m.includes("port"));
+  const steps = [
+    { title: "Turn on real-arm mode", done: hw.enabled,
+      hint: "On the computer the arm plugs into, add CORTEX_ENABLE_HARDWARE=1 to .env and restart Cortex." },
+    { title: "Plug in the arm and choose its port", done: portOk, hint: "Pick the follower arm's USB port in Setup below." },
+    { title: "Calibrate the arm", done: hw.calibration.follower.exists,
+      hint: "Press Calibrate follower below; you move the joints by hand." },
+    { title: "Arm it", done: !!hw.armed, hint: "Confirm the e-stop is in reach, below." },
+  ];
+  const current = steps.findIndex((st) => !st.done);
+  const leaderReady = hw.teleop_missing.length === 0;
   return (
-    <Panel title="Readiness" actions={hw.ready_for_motion ? <Badge tone="pass">ready for motion</Badge> : <Badge tone="fault">not ready</Badge>}>
-      {!hw.enabled && (
-        <div className="mb-3 rounded bg-caution/10 px-3 py-2 text-sm text-ink border border-caution/30">
-          Hardware is off on this machine. On the computer wired to the arm, set <code className="font-mono text-xs">CORTEX_ENABLE_HARDWARE=1</code> in{" "}
-          <code className="font-mono text-xs">.env</code> and restart the backend.
-        </div>
-      )}
+    <Panel title="Real arm setup" actions={hw.ready_for_motion ? <Badge tone="pass">ready</Badge> : <span className="text-xs text-ink-3">step {current + 1} of {steps.length}</span>}>
+      {!hw.enabled && <p className="mb-3 text-sm text-ink-3">You're using the simulator, and everything works without an arm. Set up a real SO-101 only when you have one.</p>}
       {hw.driver_error && <InlineError error={hw.driver_error} fallback="The motor driver could not be loaded." className="mb-3" />}
-      <div className="mb-1 text-xs font-medium text-ink-3">Policy runs (follower arm)</div>
-      <ul className="space-y-1.5">
-        {ok.map((t) => <Row key={t} good text={t} />)}
-        {hw.missing.map((t) => <Row key={t} good={false} text={t} />)}
-      </ul>
-      <div className="mb-1 mt-3 text-xs font-medium text-ink-3">Teleop recording also needs (leader arm)</div>
-      <ul className="space-y-1.5">
-        {teleopOk.map((t) => <Row key={t} good text={t} />)}
-        {hw.teleop_missing.map((t) => <Row key={t} good={false} text={t} />)}
-      </ul>
-      {hw.note && <p className="mt-3 text-xs text-ink-3">{hw.note}</p>}
+      <ol className="space-y-2">
+        {steps.map((st, i) => (
+          <li key={st.title} className="flex items-start gap-2.5 text-sm">
+            <span className={cn("mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[11px]",
+              st.done ? "bg-pass/15 text-pass" : i === current ? "border border-servo text-servo" : "border border-line text-ink-4")}>
+              {st.done ? <Check className="h-3 w-3" /> : i + 1}
+            </span>
+            <div>
+              <div className={st.done || i === current ? "text-ink" : "text-ink-4"}>{st.title}</div>
+              {i === current && <div className="mt-0.5 text-xs text-ink-3">{st.hint}</div>}
+            </div>
+          </li>
+        ))}
+      </ol>
+      {hw.ready_for_motion && (
+        <p className="mt-3 text-xs text-ink-3">
+          {leaderReady ? "Leader arm ready for recording demos by hand." : "Optional: add and calibrate a leader arm to record demos by hand."} Each run asks you to confirm, and the arm moves only while you hold the deadman.
+        </p>
+      )}
     </Panel>
   );
 }
