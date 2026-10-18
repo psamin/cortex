@@ -16,7 +16,7 @@ export function refRoute(pid: string, id: string): string | null {
     br: `/p/${pid}/improve?tab=evaluations`,
     ac: `/p/${pid}/collect`,
     at: `/p/${pid}/collect`,
-    prj: `/p/${pid}/overview`,
+    prj: id === pid ? `/p/${pid}/overview` : `/p/${id}`, // another project (e.g. one a new task started): open it
   };
   return map[p] ?? null;
 }

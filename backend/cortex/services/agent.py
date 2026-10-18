@@ -281,6 +281,11 @@ async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor:
     scene: list[str] = []
     project = await orch.get_project(ctx, pid)
     if actor == "gui" and _wants_scene(project, message):
+        if any((have := await _counts(ctx, pid)).values()):  # this project's demos and results are another task's
+            async for chunk in _new_project_for(ctx, project, message, have):
+                yield chunk
+            yield _sse("done", {})
+            return
         async for chunk in _scene_from_prompt(ctx, pid, message, project.mode.value, scene):
             yield chunk
     # the agents hear what Cortex just built, so they work in that scene instead of rebuilding or using the cube
@@ -347,6 +352,23 @@ def _wants_scene(project, message: str) -> bool:
     if not project.scene:
         return bool(named - {"cube"})
     return bool(named - {catalogue.lookup(o.replace("_", " ")) for o in project.scene["objects"]})
+
+
+async def _new_project_for(ctx: Ctx, project, message: str, have: dict[str, int]) -> AsyncIterator[str]:
+    """A different task typed into a project that already has demos or results gets its own project, so the
+    old task's demos never show up in, or get trained into, the new one. The studio opens the new project
+    (the `project` event) and sends the message there, where it builds its own scene."""
+    from ..models import CreateProjectRequest
+
+    new = await orch.create_project(ctx, CreateProjectRequest(task_prompt=message, mode=project.mode,
+                                                              autopilot=project.autopilot), "gui")
+    what = ", ".join(f"{n} {one if n == 1 else many}" for table, (one, many) in CHANGE_LABELS.items()
+                     if (n := have.get(table)))
+    asked = message if len(message) <= 80 else message[:79] + "…"
+    text = (f"New task, new project: this one has {what} for “{project.spec.goal}”, so “{asked}” gets its own "
+            f"project and simulation and their demos don't mix. Opening {new.name}.")
+    yield _sse("notice", autonomy.notice("engine", text, [new.id]))
+    yield _sse("project", {"id": new.id, "name": new.name, "prompt": message})
 
 
 def _merge_patch(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:

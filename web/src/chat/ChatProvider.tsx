@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { api, ApiError, streamAgent } from "../api/client";
 import { useChatStream } from "../api/events";
 import { splitError } from "../components/ui";
@@ -83,6 +84,7 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
 
 export function ChatProvider({ pid, children }: { pid: string; children: ReactNode }) {
   const qc = useQueryClient();
+  const nav = useNavigate();
   const [items, setItems] = useState<ChatItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<unknown>(null);
@@ -216,12 +218,18 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
       setItems((xs) => applyEvent(xs, { type: "user", text }));
       const ctrl = new AbortController();
       abort.current = ctrl;
+      let moveTo: { id: string; prompt: string } | null = null;
       try {
         for await (const { event, data } of streamAgent(pid, text, ctrl.signal, threadRef.current)) {
           if (event === "thread" && typeof data.id === "string") {
             // the backend says which thread this turn belongs to (a new one on the first message)
             threadRef.current = data.id;
             setThreadId(data.id);
+            continue;
+          }
+          if (event === "project" && typeof data.id === "string") {
+            // a different task than this project's: Cortex made it its own project; open it and ask there
+            moveTo = { id: data.id, prompt: typeof data.prompt === "string" ? data.prompt : text };
             continue;
           }
           const ev = toEvent(event, data);
@@ -251,11 +259,16 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         setStatus(null);
         setTurnStartedAt(null);
         qc.invalidateQueries({ queryKey: ["agent-threads", pid] });
+        if (moveTo) queue.current = []; // messages typed meanwhile were for this project, not the new one
         const next = autoRef.current ? undefined : queue.current.shift(); // during an automatic turn it waits
         if (next) void run(next);
       }
+      if (moveTo) {
+        qc.invalidateQueries({ queryKey: ["projects"] });
+        nav(`/p/${moveTo.id}`, { state: { autoSend: moveTo.prompt } });
+      }
     },
-    [pid, qc],
+    [pid, qc, nav, setThreadId],
   );
   runRef.current = run;
 
