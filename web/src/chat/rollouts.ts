@@ -41,8 +41,10 @@ export interface Rollout {
 export type RolloutOrigin = "agent" | "oracle" | "imported" | "teleop" | "eval" | "attempt" | "replay";
 
 /** Classify a rollout by kind + planner (+ the episode when known). */
+const REPLAY_LABEL: Record<string, string> = { held_out_replay: "Held-out replay", live_inference: "Live GPU", live_sim: "Live sim" };
+
 function classify(kind: string, planner: string | null | undefined, ep?: Episode, policy?: string | null, replayKind?: string): { origin: RolloutOrigin; who: string } {
-  if (kind === "replay") return { origin: "replay", who: `${replayKind === "live_inference" ? "Live GPU" : "Held-out replay"} · policy ${policy ?? ""}`.trim() };
+  if (kind === "replay") return { origin: "replay", who: `${REPLAY_LABEL[replayKind ?? ""] ?? "Held-out replay"} · policy ${policy ?? ""}`.trim() };
   if (kind === "eval") return { origin: "eval", who: `Eval · ${policy && !/oracle/i.test(policy) ? `policy ${policy}` : "oracle"}` };
   if (kind === "attempt") return { origin: "attempt", who: planner === "scripted_ik_oracle" ? "Scripted oracle" : agentLabel(planner) };
   if ((ep && isImported(ep)) || /imported/i.test(planner ?? "")) return { origin: "imported", who: "Human (imported)" };

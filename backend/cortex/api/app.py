@@ -729,6 +729,7 @@ async def live_policy_stream(task: str, episode: int):
                     async for chunk in r.aiter_raw():
                         rec.feed(chunk)
                         yield chunk
+            rec.finished = True
         finally:  # finished, or the viewer left: encode and store in the background
             live_recording.save_soon(ctx(), task, episode, rec, st, lp.STATE.get("job"))
 
@@ -737,21 +738,29 @@ async def live_policy_stream(task: str, episode: int):
 
 @app.get("/api/live-policy/sim/{task}/{seed}")
 async def live_policy_sim(task: str, seed: int):
-    """A sim-trained policy running closed loop in MuJoCo on the GPU, on an unseen layout, as MJPEG."""
+    """A sim-trained policy running closed loop in MuJoCo on the GPU, on an unseen layout, as MJPEG.
+    The run is recorded as it passes and saved to the sim_<task> project when the stream ends (#179)."""
     import httpx
 
     from ..services import live_policy_service as lp
+    from ..services import live_recording
     st = await lp.status(ctx())
     if not st["available"]:
         raise HTTPException(503, st["reason"])
     if task not in (st.get("sim") or {}):
         raise NotFound(f"No sim-trained policy for '{task}' on the GPU server yet.")
+    rec = live_recording.StreamRecorder()
 
     async def gen():
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
-            async with c.stream("GET", f"{lp.url(ctx())}/sim/{task}/{seed}") as r:
-                async for chunk in r.aiter_raw():
-                    yield chunk
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
+                async with c.stream("GET", f"{lp.url(ctx())}/sim/{task}/{seed}") as r:
+                    async for chunk in r.aiter_raw():
+                        rec.feed(chunk)
+                        yield chunk
+            rec.finished = True
+        finally:  # finished, or the viewer left: encode and store in the background
+            live_recording.save_soon(ctx(), task, seed, rec, st, lp.STATE.get("job"), kind="live_sim")
 
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 

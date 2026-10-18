@@ -1,11 +1,13 @@
 """Record live GPU inference sessions into their project (#179).
 
-The studio's GPU tab streams /api/live-policy/stream/<task>/<ep> (MJPEG from serve_policy.py). As the
-stream passes through the API, StreamRecorder splits it into frames, keeps every other JPEG and every
-frame's measurements (serve_policy.py sends them as part headers: X-Inference-Ms, X-Joint-Err-Deg,
-X-Gripper-Err, X-Frame). Nothing is encoded while streaming. When the stream ends (finished, or the viewer
-left) the session is encoded to mp4 in a thread, uploaded and stored as a PolicyReplay of kind
-live_inference in the task's project (infra/futurama/projects.json).
+The studio streams /api/live-policy/stream/<task>/<ep> (a policy on a held-out real demo) and
+/api/live-policy/sim/<task>/<seed> (a sim-trained policy closed loop in MuJoCo), MJPEG from serve_policy.py.
+As a stream passes through the API, StreamRecorder splits it into frames, keeps every other JPEG and every
+frame's measurements, which the server sends as part headers: X-Frame, X-Inference-Ms, X-Joint-Err-Deg and
+X-Gripper-Err (held-out demos), X-Success and X-Policy (sim). Nothing is encoded while streaming. When the
+stream ends (finished, or the viewer left) the session is encoded to mp4 in a thread, uploaded and stored as
+a PolicyReplay (live_inference, or live_sim) in the task's project from infra/futurama/projects.json
+(<task>, or sim_<task>).
 """
 
 from __future__ import annotations
@@ -21,7 +23,7 @@ from urllib.parse import unquote
 import numpy as np
 
 from ..context import Ctx
-from ..models import PolicyReplay, ReplayEpisode
+from ..models import LIVE_SIM_NOTE, PolicyReplay, ReplayEpisode
 from . import replay_service
 
 log = logging.getLogger(__name__)
@@ -45,6 +47,9 @@ class StreamRecorder:
         self.last_index: int | None = None
         self.total: int | None = None
         self.instruction = ""
+        self.success_frames: list[int] = []
+        self.policy = ""  # sim streams: X-Policy, <variant>@<step>
+        self.finished = False  # set by the proxy when the upstream stream ended on its own
 
     def feed(self, chunk: bytes) -> None:
         self.buf += chunk
@@ -104,10 +109,21 @@ class StreamRecorder:
                 self.last_index, self.total = int(i), int(n)
         if not self.instruction and headers.get("x-instruction"):
             self.instruction = unquote(headers["x-instruction"])
+        if headers.get("x-success") in ("0", "1"):  # sim streams: the simulator's verdict so far
+            self.success_frames.append(int(headers["x-success"]))
+        if headers.get("x-policy"):
+            self.policy = headers["x-policy"]
+
+    @property
+    def success(self) -> bool | None:
+        """Sim streams: the verdict at the last frame received."""
+        return bool(self.success_frames[-1]) if self.success_frames else None
 
     @property
     def complete(self) -> bool:
-        return self.total is not None and self.last_index is not None and self.last_index + 1 >= self.total
+        """The stream ran to its end (the server finished), rather than the viewer leaving."""
+        return self.finished or (self.total is not None and self.last_index is not None
+                                 and self.last_index + 1 >= self.total)
 
 
 def _headers(raw: bytes | bytearray) -> dict[str, str]:
@@ -150,45 +166,62 @@ def encode_mp4(jpegs: list[bytes], path: Path, fps: int) -> None:
 
 
 async def save_session(ctx: Ctx, task: str, episode: int, rec: StreamRecorder, server: dict[str, Any],
-                       job: str | None = None) -> PolicyReplay | None:
-    """Store a finished (or abandoned) live session in the task's project. None when there is nothing to keep."""
+                       job: str | None = None, kind: str = "live_inference") -> PolicyReplay | None:
+    """Store a finished (or abandoned) live session in the task's project. None when there is nothing to keep.
+
+    kind live_inference: /live/<task>/<episode> on a held-out real demo (project key <task>).
+    kind live_sim: /sim/<task>/<seed>, closed loop in MuJoCo (project key sim_<task>; episode is the seed)."""
     rec.close()
-    pid = replay_service.project_for_task(ctx, task)
+    sim = kind == "live_sim"
+    pid = replay_service.project_for_task(ctx, f"sim_{task}" if sim else task)
     if pid is None:
-        log.info("live session %s/%s not saved: no project for this task in %s", task, episode,
+        log.info("live %s %s/%s not saved: no project for this task in %s", kind, task, episode,
                  ctx.settings.futurama_projects_file)
         return None
     if rec.frames < MIN_FRAMES or not rec.jpegs:
         return None
-    pol = (server.get("policies") or {}).get(task, {})
-    ck_name = str(pol.get("checkpoint", ""))
-    ck = await replay_service.checkpoint_named(ctx, pid, ck_name) if ck_name else None
-    rp = PolicyReplay(project_id=pid, kind="live_inference", status="complete" if rec.complete else "partial",
+    if sim:
+        s = (server.get("sim") or {}).get(task, {})
+        ck_name = rec.policy or (f"{s['variant']}@{s.get('step', '')}" if s.get("variant") else "")
+        ck = await replay_service.checkpoint_for_policy(ctx, pid, ck_name)
+    else:
+        ck_name = str((server.get("policies") or {}).get(task, {}).get("checkpoint", ""))
+        ck = await replay_service.checkpoint_named(ctx, pid, ck_name) if ck_name else None
+    what = f"/sim/{task}/{episode}" if sim else f"/live/{task}/{episode}"
+    rp = PolicyReplay(project_id=pid, kind=kind, status="complete" if rec.complete else "partial",
                       checkpoint_id=ck.id if ck else None, checkpoint_name=ck_name,
-                      policy_type=ck.policy_type if ck else "smolvla", task=task, gpu=server.get("gpu"), episodes=[],
-                      source=f"live GPU stream /live/{task}/{episode}" + (f", Slurm job {job}" if job else ""))
-    video = replay_service.file_key(pid, rp.id, f"ep{episode}.mp4")
+                      policy_type=ck.policy_type if ck else ck_name.split("@")[0] or "smolvla", task=task,
+                      gpu=server.get("gpu"), episodes=[],
+                      source=f"live GPU stream {what}" + (f", Slurm job {job}" if job else ""))
+    if sim:
+        rp.note = LIVE_SIM_NOTE
+    name = f"seed{episode}" if sim else f"ep{episode}"
+    video = replay_service.file_key(pid, rp.id, f"{name}.mp4")
     await asyncio.to_thread(encode_mp4, rec.jpegs, ctx.local(video), 30 // KEEP_EVERY)
     await ctx.publish_file(video)
-    trace = replay_service.file_key(pid, rp.id, f"ep{episode}_frames.json")
+    trace = replay_service.file_key(pid, rp.id, f"{name}_frames.json")
     ctx.local(trace).write_text(json.dumps({"inference_ms": rec.ms, "joint_err_deg": rec.err,
-                                            "gripper_err": rec.grip, "frames": rec.frames, "total": rec.total}))
+                                            "gripper_err": rec.grip, "success": rec.success_frames,
+                                            "frames": rec.frames, "total": rec.total}))
     await ctx.publish_file(trace)
     joint = replay_service.mean_or_none(rec.err)
     rp.episodes.append(ReplayEpisode(episode=episode, instruction=rec.instruction, frames=rec.frames,
                                      total_frames=rec.total, joint_mae_deg=joint,
                                      gripper_mae=replay_service.mean_or_none(rec.grip), inference_ms=_stats(rec.ms),
-                                     video_key=video, trace_key=trace))
+                                     video_key=video, trace_key=trace,
+                                     success=rec.success if sim else None,
+                                     steps=(rec.last_index + 1 if rec.last_index is not None else rec.frames)
+                                     if sim else None))
     rp.joint_mae_deg = joint
     return await replay_service.save(ctx, rp, actor="studio")
 
 
 def save_soon(ctx: Ctx, task: str, episode: int, rec: StreamRecorder, server: dict[str, Any],
-              job: str | None = None) -> None:
+              job: str | None = None, kind: str = "live_inference") -> None:
     """Schedule save_session after the stream ends; failures are logged, never raised into the response."""
     async def run() -> None:
         try:
-            rp = await save_session(ctx, task, episode, rec, server, job)
+            rp = await save_session(ctx, task, episode, rec, server, job, kind)
             if rp:
                 log.info("saved live session %s (%s ep %s, %d frames)", rp.id, task, episode, rec.frames)
         except Exception:

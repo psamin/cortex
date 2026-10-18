@@ -100,29 +100,50 @@ async def import_replay_dir(ctx: Ctx, pid: str, folder: Path, source: str, actor
     return await save(ctx, rp, actor)
 
 
+async def checkpoint_for_policy(ctx: Ctx, pid: str, policy: str) -> Checkpoint | None:
+    """The checkpoint a sim stream names as X-Policy <variant>@<step>: .../runs/<variant>/checkpoints/<step>/..."""
+    variant, _, step = policy.partition("@")
+    if not variant or not step.isdigit():
+        return None
+    for c in reversed(await ctx.repo.list("checkpoints", Checkpoint, project_id=pid)):
+        parts = Path(c.path.split(":", 1)[-1]).parts
+        for i in range(len(parts) - 3):
+            if parts[i:i + 2] == ("runs", variant) and parts[i + 2] == "checkpoints" and \
+                    parts[i + 3].isdigit() and int(parts[i + 3]) == int(step):
+                return c
+    return None
+
+
 # ------------------------------------------------------------------ read models
+LABELS = {"held_out_replay": "Held-out replay", "live_inference": "Live GPU", "live_sim": "Live sim"}
+
+
 def _metric(e: ReplayEpisode) -> str | None:
     parts = []
     if e.joint_mae_deg is not None:
         parts.append(f"{e.joint_mae_deg:.2f}° joint error")
+    if e.steps is not None:
+        parts.append(f"{e.steps} steps")
     if e.inference_ms.get("mean") is not None:
         parts.append(f"{e.inference_ms['mean']:.0f} ms/frame")
     return " · ".join(parts) or None
 
 
 async def rollout_rows(ctx: Ctx, pid: str, versions: dict[str, str]) -> list[dict[str, Any]]:
-    """Viewer rows for every replayed episode that has a video. success is None: nothing was judged."""
+    """Viewer rows for every recorded episode that has a video. success is None for replays on recorded
+    demos (nothing was judged) and the simulator's verdict for live sim runs."""
     out = []
     for rp in await list_replays(ctx, pid):
-        live = rp.kind == "live_inference"
+        sim = rp.kind == "live_sim"
         policy = versions.get(rp.checkpoint_id or "") or rp.checkpoint_name or "policy"
         for e in rp.episodes:
             if not e.video_key:
                 continue
             out.append({"kind": "replay", "id": f"{rp.id}/ep{e.episode}", "replay_id": rp.id, "replay_kind": rp.kind,
-                        "label": f"{'Live GPU' if live else 'Held-out replay'} · ep {e.episode}",
-                        "success": None, "policy": policy, "metric": _metric(e), "joint_mae_deg": e.joint_mae_deg,
-                        "inference_ms": e.inference_ms.get("mean"), "episode": e.episode,
+                        "label": f"{LABELS[rp.kind]} · {'seed' if sim else 'ep'} {e.episode}",
+                        "success": e.success if sim else None, "seed": e.episode if sim else None,
+                        "policy": policy, "metric": _metric(e), "joint_mae_deg": e.joint_mae_deg,
+                        "inference_ms": e.inference_ms.get("mean"), "episode": e.episode, "steps": e.steps,
                         "instruction": e.instruction, "frames": e.frames, "partial": rp.status == "partial",
                         "note": rp.note, "video_url": await ctx.media_url(e.video_key), "cameras": [CAMERA],
                         "created_at": rp.created_at})
@@ -134,16 +155,20 @@ def summary(rps: list[PolicyReplay]) -> dict[str, Any] | None:
     if not rps:
         return None
     held = [r for r in rps if r.kind == "held_out_replay"]
-    live = [r for r in rps if r.kind == "live_inference"]
+    live = [r for r in rps if r.kind in ("live_inference", "live_sim")]
+    sims = [e for r in rps if r.kind == "live_sim" and r.status == "complete" for e in r.episodes]
     last = held[-1] if held else None
     ms = [e.inference_ms.get("mean") for r in live for e in r.episodes]
     return {"id": last.id if last else None, "episodes": len(last.episodes) if last else 0,
             "joint_mae_deg": last.joint_mae_deg if last else None, "live_sessions": len(live),
-            "inference_ms": mean_or_none(ms), "note": REPLAY_NOTE}
+            "inference_ms": mean_or_none(ms), "note": REPLAY_NOTE,
+            "live_sim": {"runs": len(sims), "successes": sum(bool(e.success) for e in sims)} if sims else None}
 
 
 def brief(rp: PolicyReplay) -> dict[str, Any]:
     """For get_project_state: enough for an agent to report it correctly."""
     return {"id": rp.id, "kind": rp.kind, "task": rp.task, "checkpoint_id": rp.checkpoint_id,
             "checkpoint": rp.checkpoint_name, "episodes": [e.episode for e in rp.episodes],
-            "joint_mae_deg": rp.joint_mae_deg, "status": rp.status, "note": rp.note}
+            "joint_mae_deg": rp.joint_mae_deg, "status": rp.status, "note": rp.note,
+            **({"success": rp.episodes[0].success, "steps": rp.episodes[0].steps}
+               if rp.kind == "live_sim" and rp.episodes else {})}
