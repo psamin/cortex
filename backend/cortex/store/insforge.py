@@ -19,6 +19,7 @@ import httpx
 
 from .base import Store
 from .local import MIGRATIONS
+from .s3 import S3Gateway
 
 log = logging.getLogger(__name__)
 PAGE = 1000  # rows per records request
@@ -103,9 +104,17 @@ class InsForgeStore(Store):
 class InsForgeBlobStore:
     name = "insforge storage (private bucket)"
 
-    def __init__(self, base_url: str, api_key: str, bucket: str, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(self, base_url: str, api_key: str, bucket: str, transport: httpx.AsyncBaseTransport | None = None,
+                 rest_max_bytes: int = 50 * 1024 * 1024, s3_keys: tuple[str, str] | None = None,
+                 s3_endpoint: str | None = None, s3_region: str | None = None,
+                 s3_transport: httpx.AsyncBaseTransport | None = None):
         self.c = _Client(base_url, api_key, transport)
         self.bucket = bucket
+        self.rest_max_bytes = rest_max_bytes
+        self._s3_keys, self._s3_endpoint, self._s3_region, self._s3_transport = s3_keys, s3_endpoint, s3_region, \
+            s3_transport
+        self.s3: S3Gateway | None = None
+        self.s3_problem = "no S3 access keys (INSFORGE_S3_ACCESS_KEY_ID / INSFORGE_S3_SECRET_ACCESS_KEY)"
 
     async def init(self) -> None:
         try:
@@ -113,6 +122,36 @@ class InsForgeBlobStore:
         except InsForgeError as e:
             if "exist" not in str(e).lower() and "409" not in str(e):
                 raise
+        if self._s3_keys:
+            await self._init_s3()
+
+    async def _init_s3(self) -> None:
+        """The S3 gateway's endpoint and region: .env overrides, else GET /api/storage/s3/config."""
+        endpoint, region = self._s3_endpoint, self._s3_region
+        if not (endpoint and region):
+            try:
+                cfg = (await self.c.req("GET", "/api/storage/s3/config")).json()
+                cfg = cfg.get("data", cfg) if isinstance(cfg, dict) else {}
+                endpoint = endpoint or cfg.get("endpoint") or cfg.get("endpointUrl")
+                region = region or cfg.get("region")
+            except (InsForgeError, ValueError) as e:
+                log.warning("InsForge S3 config unavailable: %s", e)
+        endpoint = endpoint or f"{self.c.base}/storage/v1/s3"
+        if not region:
+            self.s3_problem = "S3 region unknown: set INSFORGE_S3_REGION (Dashboard -> Storage -> Settings)"
+            log.warning("InsForge S3 gateway disabled: %s", self.s3_problem)
+            return
+        self.s3 = S3Gateway(endpoint, region, *self._s3_keys, transport=self._s3_transport)  # type: ignore[misc]
+
+    async def put_file(self, key: str, path: Path, content_type: str) -> str:
+        """REST up to the REST cap; larger files (ACT checkpoints) through the S3 gateway, streamed in parts."""
+        size = path.stat().st_size
+        if size <= self.rest_max_bytes:
+            return await self.put_bytes(key, path.read_bytes(), content_type)
+        if self.s3 is None:
+            raise InsForgeError(f"{key} is {size / 2**20:.0f} MB, above InsForge's REST upload cap of "
+                                f"{self.rest_max_bytes / 2**20:.0f} MB, and the S3 gateway is off: {self.s3_problem}")
+        return await self.s3.put_file(self.bucket, key, path, content_type)
 
     def _obj(self, key: str) -> str:
         return f"/api/storage/buckets/{self.bucket}/objects/{quote(key)}"

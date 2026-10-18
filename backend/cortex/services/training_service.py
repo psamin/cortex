@@ -273,8 +273,24 @@ async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | 
             tj.status = JobStatus.succeeded
             await _save(ctx, tj, f"checkpoint {ck.id} registered")
     ctx.changed(project_id, "checkpoints", ck.id)
-    await ctx.audit(actor, "register_checkpoint", project_id, {"path": str(p)}, "ok", f"{ck.id} ({ptype})")
+    stored = await _publish_checkpoint(ctx, p)
+    await ctx.audit(actor, "register_checkpoint", project_id, {"path": str(p)}, "ok", f"{ck.id} ({ptype}); {stored}")
     return ck
+
+
+async def _publish_checkpoint(ctx: Ctx, p: Path) -> str:
+    """Copy a checkpoint inside the data dir to durable storage (the S3 gateway takes the ~200 MB weights).
+    The local copy stays registered either way; a failed upload is reported, not fatal."""
+    if not p.resolve().is_relative_to(ctx.data_dir.resolve()):
+        return "kept at its own path (outside the data dir)"
+    try:
+        files = sorted(f for f in p.rglob("*") if f.is_file())
+        for f in files:
+            await ctx.publish_file(str(f.resolve().relative_to(ctx.data_dir.resolve()).as_posix()))
+        return f"{len(files)} files stored ({ctx.blobs.name})"
+    except Exception as e:
+        log.warning("checkpoint %s kept locally only: %s", p, e)
+        return f"kept locally only, upload failed: {e}"[:300]
 
 
 async def resume_pollers(ctx: Ctx) -> None:

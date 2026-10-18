@@ -50,9 +50,21 @@ when the provider is not configured. `GET /api/health` reports the active provid
     sponsor team or their Discord.
   - **Current route:** until the org is upgraded, Cortex uses the team's own `OPENROUTER_API_KEY`, and
     attempts are labelled with that route.
-- **Storage limits:** REST uploads cap at 200 MB per file (default 50 MB, buffered in server RAM). ACT
-  checkpoints (about 200 MB) are therefore kept locally for now; large files will need InsForge's
-  S3-compatible gateway. Free plans get 1 GB of storage and 5 GB/month of egress; Pro gets 100 GB and 250 GB.
+- **Storage limits:** REST uploads cap at 200 MB per file (default 50 MB, buffered in server RAM). Files
+  above `INSFORGE_REST_MAX_MB` (default 50) go through InsForge's S3-compatible gateway (`/storage/v1/s3`,
+  path-style, SigV4, multipart in 16 MiB parts, aborted on failure) in
+  [store/s3.py](../backend/cortex/store/s3.py). Registered ACT checkpoints (about 200 MB) are uploaded
+  this way.
+  - **Setup:** create project S3 access keys in the dashboard (Storage → Settings → S3 Configuration;
+    the secret is shown once) and set `INSFORGE_S3_ACCESS_KEY_ID` / `INSFORGE_S3_SECRET_ACCESS_KEY`. The
+    endpoint and region come from `GET /api/storage/s3/config`, or from `INSFORGE_S3_ENDPOINT` /
+    `INSFORGE_S3_REGION`.
+  - **Without keys:** large uploads fail with that instruction. A checkpoint still registers locally,
+    and the audit row records that it wasn't uploaded.
+  - **Status:** implemented, unverified. It's tested against AWS's SigV4 examples and a strict fake
+    gateway, but no live upload has been made yet, and the shape of `/api/storage/s3/config` is assumed
+    (`endpoint`, `region`).
+  - **Plans:** free plans get 1 GB of storage and 5 GB/month of egress; Pro gets 100 GB and 250 GB.
 
 ## Training on Futurama
 

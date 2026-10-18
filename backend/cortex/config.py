@@ -22,6 +22,14 @@ class Settings(BaseSettings):
     insforge_base_url: str | None = None
     insforge_api_key: str | None = None  # server-side admin/API key, never sent to the browser
     insforge_bucket: str = "cortex-assets"
+    # Files above the REST upload cap (ACT checkpoints) go through InsForge's S3 gateway with these
+    # project S3 access keys (Dashboard -> Storage -> Settings -> S3 Configuration). Endpoint and region
+    # default to GET /api/storage/s3/config.
+    insforge_rest_max_mb: int = 50  # InsForge's default max file size for REST uploads
+    insforge_s3_access_key_id: str | None = None
+    insforge_s3_secret_access_key: str | None = None
+    insforge_s3_endpoint: str | None = None  # e.g. https://<ref>.<region>.insforge.app/storage/v1/s3
+    insforge_s3_region: str | None = None
     vlm_model: str = "anthropic/claude-sonnet-5.5"
     agent_model: str = "anthropic/claude-sonnet-5.5"
 

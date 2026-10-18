@@ -66,7 +66,10 @@ class Ctx:
             return
         p = self.local(key)
         ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
-        await self.blobs.put_bytes(key, p.read_bytes(), ctype)
+        if hasattr(self.blobs, "put_file"):  # InsForge: REST, or the S3 gateway above the REST cap
+            await self.blobs.put_file(key, p, ctype)
+        else:
+            await self.blobs.put_bytes(key, p.read_bytes(), ctype)
 
     async def ensure_local(self, key: str) -> Path:
         p = self.local(key)
@@ -111,7 +114,11 @@ async def build_ctx(s: Settings) -> Ctx:
         from .store.insforge import InsForgeBlobStore, InsForgeStore
 
         store = InsForgeStore(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
-        blobs = InsForgeBlobStore(s.insforge_base_url, s.insforge_api_key, s.insforge_bucket)  # type: ignore[arg-type]
+        s3_keys = ((s.insforge_s3_access_key_id, s.insforge_s3_secret_access_key)
+                   if s.insforge_s3_access_key_id and s.insforge_s3_secret_access_key else None)
+        blobs = InsForgeBlobStore(s.insforge_base_url, s.insforge_api_key, s.insforge_bucket,  # type: ignore[arg-type]
+                                  rest_max_bytes=s.insforge_rest_max_mb * 1024 * 1024, s3_keys=s3_keys,
+                                  s3_endpoint=s.insforge_s3_endpoint, s3_region=s.insforge_s3_region)
     else:
         store = SqliteStore(s.data_dir / "cortex.db")
         blobs = LocalBlobStore(s.data_dir, f"{s.public_url}/files")
