@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Camera, FlaskConical, LayoutDashboard, MessagesSquare, ScanSearch, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Camera, FlaskConical, Joystick, LayoutDashboard, MessagesSquare, ScanSearch, type LucideIcon } from "lucide-react";
 import { ProjectEventsProvider } from "../api/events";
 import { ChatProvider, useChat } from "../chat/ChatProvider";
 import { cn } from "../lib/format";
@@ -58,6 +58,7 @@ const SECTIONS = [
   { path: "collect", label: "Collect", hint: "Record or import demonstrations by hand", icon: Camera },
   { path: "analyze", label: "Analyze", hint: "Quality checks and failure diagnoses", icon: ScanSearch },
   { path: "improve", label: "Improve", hint: "Datasets, training and evaluations", icon: FlaskConical },
+  { path: "robot", label: "Robot", hint: "Real SO-101: setup, calibration, teleop, policy runs", icon: Joystick },
 ] as const;
 
 /**
