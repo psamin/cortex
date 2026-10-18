@@ -9,7 +9,9 @@ autonomous mode, the project's standing approval covers it (services/autonomy.py
 
 from __future__ import annotations
 
+import asyncio
 import json
+import logging
 import re
 from collections.abc import AsyncIterator
 from typing import Any
@@ -22,7 +24,14 @@ from . import autonomy, autopilot
 from .narration import tool_line
 
 MAX_TURNS = 8
+MODEL_TIMEOUT_S = 60  # one model reply; past it the turn falls back or stops, it never hangs
 HISTORY: dict[str, list[dict[str, Any]]] = {}
+
+log = logging.getLogger(__name__)
+
+
+class ModelUnavailable(RuntimeError):
+    """The model route failed before doing anything, so the built-in planner answers this turn instead."""
 
 SYSTEM = """You are Cortex, an experiment orchestrator for robot learning on LeRobot (SO-101 arm, MuJoCo sim).
 Project: {project}
@@ -83,16 +92,37 @@ def _sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
-async def engine(ctx: Ctx) -> str:
-    """Which agent answers the studio chat: the user's Claude Code, a model route, or rules."""
+RULES_LABEL = "built-in planner"
+
+
+async def engine_info(ctx: Ctx) -> dict[str, Any]:
+    """Which agent answers the studio chat (the user's Claude Code, a model route, or the built-in planner),
+    its label, and `note`: what is missing for a better one, in plain words (None when nothing is)."""
     from . import claude_code_agent as cc
 
     want = ctx.settings.agent_engine
-    if want in ("auto", "claude_code") and cc.available() is None and await cc.mcp_up():
-        return "claude_code"
-    if want in ("auto", "model") and ctx.model:
-        return "model"
-    return "rules"
+    missing: list[str] = []
+
+    def using(label: str) -> str | None:
+        note = f"{' and '.join(missing)}: using {label}" if missing else None
+        return note[0].upper() + note[1:] if note else None
+
+    if want in ("auto", "claude_code"):
+        why = cc.available()
+        if why is None and not await cc.mcp_up():
+            why = "the Cortex MCP server is not running (start it with scripts/dev.sh)"
+        if why is None:
+            return {"engine": "claude_code", "label": "Claude Code (your agent)", "note": None}
+        missing.append(why)
+    if want in ("auto", "model"):
+        if ctx.model:
+            return {"engine": "model", "label": ctx.model.label, "note": using(ctx.model.label)}
+        missing.append("no model key is set")
+    return {"engine": "rules", "label": RULES_LABEL, "note": using(f"the {RULES_LABEL}")}
+
+
+async def engine(ctx: Ctx) -> str:
+    return (await engine_info(ctx))["engine"]
 
 
 async def load_log(ctx: Ctx, pid: str, tid: str | None = None) -> list[dict[str, Any]]:
@@ -161,7 +191,7 @@ async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: s
     before = await _counts(ctx, pid)
     text: list[str] = []
     last_result_at = time.time()
-    async for chunk in _chat(ctx, pid, message, tid, actor="cortex" if auto else "gui"):
+    async for chunk in _ends_with_done(_chat(ctx, pid, message, tid, actor="cortex" if auto else "gui")):
         ev, _, data = chunk.partition("\ndata: ")
         ev = ev.removeprefix("event: ")
         try:
@@ -172,6 +202,8 @@ async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: s
             text.append(d.get("delta", ""))
         elif ev == "todos":
             await _append_log(ctx, pid, {"kind": "todos", "items": d.get("items", [])}, tid)
+        elif ev == "notice":  # Cortex's own line, e.g. which engine answered and why
+            await _append_log(ctx, pid, d, tid)
         elif ev in ("tool_call", "tool_result", "approval_required"):
             if text:
                 await _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)}, tid)
@@ -197,6 +229,24 @@ async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: s
                     yield _sse("notice", row)
         elif ev == "done":
             await autonomy.turn_ended(ctx, pid, tid, last_result_at)
+
+
+async def _ends_with_done(chunks: AsyncIterator[str]) -> AsyncIterator[str]:
+    """Every turn ends with `done`, also when an engine raises, so the studio never waits on a dead stream."""
+    done = False
+    try:
+        async for chunk in chunks:
+            done = done or chunk.startswith("event: done")
+            yield chunk
+    except Exception as e:
+        log.exception("studio agent turn failed")
+        yield _sse("text", {"delta": f"\n\nThis turn failed ({type(e).__name__}: {str(e)[:200]}). "
+                                     "The backend log has the details."})
+        if not done:
+            yield _sse("done", {"is_error": True})
+        return
+    if not done:
+        yield _sse("done", {})
 
 
 CHANGE_LABELS = {"episodes": ("demo", "demos"), "dataset_versions": ("dataset version", "dataset versions"),
@@ -235,25 +285,48 @@ async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor:
             yield chunk
     # the agents hear what Cortex just built, so they work in that scene instead of rebuilding or using the cube
     prompt = message + (f"\n\n[Cortex built this project's sim scene from that message: {scene[0]}]" if scene else "")
-    eng = await engine(ctx)
+    info = await engine_info(ctx)
+    eng = info["engine"]
+    if info["note"] and not await _said(ctx, pid, tid, info["note"]):  # what is missing, once per chat
+        yield _sse("notice", autonomy.notice("engine", info["note"]))
     if eng == "claude_code":
         from . import claude_code_agent as cc
 
         text = []
-        async for chunk in cc.chat(ctx, pid, prompt, _sse, tid):
-            if chunk.startswith("event: text"):
-                text.append(json.loads(chunk.split("data: ", 1)[1])["delta"])
-            yield chunk
-        hist.append({"role": "assistant", "content": "".join(text)})
-        return
-    if ctx.model:
+        try:
+            async for chunk in cc.chat(ctx, pid, prompt, _sse, tid):
+                if chunk.startswith("event: text"):
+                    text.append(json.loads(chunk.split("data: ", 1)[1])["delta"])
+                yield chunk
+            hist.append({"role": "assistant", "content": "".join(text)})
+            return
+        except cc.Unavailable as e:  # it did nothing yet, so the next engine answers this turn
+            eng = "model" if ctx.model and ctx.settings.agent_engine == "auto" else "rules"
+            nxt = ctx.model.label if eng == "model" and ctx.model else f"the {RULES_LABEL}"
+            yield _sse("notice", autonomy.notice("engine", f"{_cap(str(e))}: {nxt} answered instead."))
+    if eng == "model":
         hist[-1]["content"] = prompt
-        async for chunk in _llm(ctx, pid, hist):
-            yield chunk
-    else:
+        try:
+            async for chunk in _llm(ctx, pid, hist):
+                yield chunk
+        except ModelUnavailable as e:
+            eng = "rules"
+            yield _sse("notice", autonomy.notice("engine", f"{_cap(str(e))}: the {RULES_LABEL} answered instead."))
+    if eng == "rules":
         async for chunk in _rules(ctx, pid, message, hist, scene[0] if scene else None):
             yield chunk
     yield _sse("done", {})
+
+
+def _cap(s: str) -> str:
+    return s[:1].upper() + s[1:]
+
+
+async def _said(ctx: Ctx, pid: str, tid: str | None, text: str) -> bool:
+    from . import chat_store
+
+    tid = tid or (await chat_store.current(ctx, pid))["id"]
+    return any(e.get("kind") == "notice" and e.get("text") == text for e in await chat_store.load(ctx, pid, tid))
 
 
 # ------------------------------------------------- a new task prompt becomes this project's own scene (#192)
@@ -346,17 +419,28 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
                            state=json.dumps({"episodes": st.episode_counts, "evaluations": st.evaluations,
                                              "next": [n.action for n in st.next_actions]}, default=str))
     msgs: list[dict[str, Any]] = [{"role": "system", "content": sysmsg}, *hist[-20:]]
-    async with httpx.AsyncClient(timeout=120) as http:
-        for _ in range(MAX_TURNS):
-            route = ctx.model
-            assert route is not None
+    route = ctx.model
+    assert route is not None
+    async with httpx.AsyncClient(timeout=httpx.Timeout(MODEL_TIMEOUT_S, connect=10)) as http:
+        for step in range(MAX_TURNS):
             yield _sse("status", {"state": "thinking", "text": "Thinking…"})
-            r = await http.post(route.chat_url, headers={"Authorization": f"Bearer {route.api_key}"}, json={
-                "model": route.agent_model, "messages": msgs, "tools": tool_specs(), "max_tokens": 1200})
-            if r.status_code >= 400:
-                yield _sse("text", {"delta": f"Model Gateway error {r.status_code}: {r.text[:200]}"})
+            try:
+                async with asyncio.timeout(MODEL_TIMEOUT_S):  # the whole reply, also when it trickles in
+                    r = await http.post(route.chat_url, headers={"Authorization": f"Bearer {route.api_key}"}, json={
+                        "model": route.agent_model, "messages": msgs, "tools": tool_specs(), "max_tokens": 1200})
+                if r.status_code >= 400:
+                    raise ModelUnavailable(f"{route.label} refused the request (HTTP {r.status_code})")
+                msg = r.json()["choices"][0]["message"]
+            except Exception as e:
+                why = (str(e) if isinstance(e, ModelUnavailable)
+                       else f"{route.label} did not answer within {MODEL_TIMEOUT_S:g} s"
+                       if isinstance(e, TimeoutError | httpx.TimeoutException)
+                       else f"cannot reach {route.label}" if isinstance(e, httpx.HTTPError)
+                       else f"{route.label} sent a reply Cortex could not read")
+                if step == 0:  # nothing happened yet: another engine can answer
+                    raise ModelUnavailable(why) from e
+                yield _sse("text", {"delta": f"\n\n{_cap(why)}, so this turn stops here."})
                 return
-            msg = r.json()["choices"][0]["message"]
             calls = msg.get("tool_calls") or []
             if msg.get("content"):
                 yield _sse("text", {"delta": msg["content"]})
@@ -439,8 +523,7 @@ async def _rules(ctx: Ctx, pid: str, message: str, hist: list[dict[str, Any]],
             text = "Here's what I'd do next: " + "; ".join(f"{n.action} ({n.reason})" for n in st.next_actions[:4])
     except Exception as e:
         text = f"That failed: {type(e).__name__}: {e}"
-    note = " (rule-based planner: configure a model endpoint to enable the LLM agent)"
-    yield _sse("text", {"delta": text + note})
+    yield _sse("text", {"delta": text})  # which engine answered, and why, is the engine notice (#192)
     hist.append({"role": "assistant", "content": text})
 
 
