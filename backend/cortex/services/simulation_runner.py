@@ -38,6 +38,24 @@ DEFAULT_BRANCHES = [
 ]
 
 
+INTERRUPTED = "interrupted by a backend restart"
+
+
+async def sweep_interrupted(ctx: Ctx) -> int:
+    """At startup: no evaluation job survives a restart, so any run or branch still queued/running was cut
+    off. Mark them failed instead of leaving them "running" forever (#125). Returns how many runs."""
+    n = 0
+    for status in (JobStatus.queued, JobStatus.running):
+        for b in await ctx.repo.list("simulation_branches", SimulationBranch, status=status):
+            b.status, b.error = JobStatus.failed, INTERRUPTED
+            await ctx.repo.save("simulation_branches", b, project_id=b.project_id)
+        for run in await ctx.repo.list("evaluation_runs", EvaluationRun, status=status):
+            run.status = JobStatus.failed
+            await ctx.repo.save("evaluation_runs", run)
+            n += 1
+    return n
+
+
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:
     if n == 0:
         return (0.0, 1.0)
@@ -99,10 +117,23 @@ async def launch_evaluation(ctx: Ctx, project: Project, req: LaunchEvaluationReq
                      "executor": executor, "env": ENVHUB_URI}, "ok", f"evaluation {run.id} started")
 
     async def run_all(job: Job) -> str:
-        results = await asyncio.gather(*(run_branch(ctx, job, run, b, policy_cfg, scene) for b in branches),
-                                       return_exceptions=True)
-        failed = [r for r in results if isinstance(r, Exception)]
-        run.status = JobStatus.failed if len(failed) == len(branches) else JobStatus.succeeded
+        try:
+            results = await asyncio.gather(*(run_branch(ctx, job, run, b, policy_cfg, scene) for b in branches),
+                                           return_exceptions=True)
+        except asyncio.CancelledError:  # stopped, or the backend is shutting down: never leave it "running"
+            run.status = JobStatus.failed if ctx.jobs.closing else JobStatus.cancelled
+            for b in branches:  # a branch cancelled before it started never reached its own handler
+                if b.status in (JobStatus.queued, JobStatus.running):
+                    b.status, b.error = run.status, INTERRUPTED if ctx.jobs.closing else "stopped by user"
+                    await ctx.repo.save("simulation_branches", b, project_id=project.id)
+            await ctx.repo.save("evaluation_runs", run)
+            ctx.changed(project.id, "evaluation_runs", run.id)
+            raise
+        failed = [r for r in results if isinstance(r, BaseException)]
+        if ctx.jobs.stop_requested(job.id) and any(b.status == JobStatus.cancelled for b in branches):
+            run.status = JobStatus.cancelled
+        else:
+            run.status = JobStatus.failed if len(failed) == len(branches) else JobStatus.succeeded
         await ctx.repo.save("evaluation_runs", run)
         ctx.changed(project.id, "evaluation_runs", run.id)
         if failed and len(failed) == len(branches):
@@ -151,8 +182,15 @@ async def run_branch(ctx: Ctx, job: Job, run: EvaluationRun, b: SimulationBranch
                                      failure_mode=e.get("failure_mode"), video_key=vk))
         b.result = summarize(eps, res.get("policy", ""), loop.time() - t0)
         b.status = JobStatus.succeeded
+    except asyncio.CancelledError:
+        b.status = JobStatus.failed if ctx.jobs.closing else JobStatus.cancelled
+        b.error = INTERRUPTED if ctx.jobs.closing else "stopped by user"
+        raise
     except Exception as e:
-        b.status, b.error = JobStatus.failed, f"{type(e).__name__}: {e}"[:500]
+        if ctx.jobs.stop_requested(job.id):  # the stop ended the worker before the task saw the cancel
+            b.status, b.error = JobStatus.cancelled, "stopped by user"
+        else:
+            b.status, b.error = JobStatus.failed, f"{type(e).__name__}: {e}"[:500]
         raise
     finally:
         await ctx.repo.save("simulation_branches", b, project_id=run.project_id)
