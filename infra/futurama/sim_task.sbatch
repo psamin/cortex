@@ -38,7 +38,8 @@ if [ "$MODE" = demos ]; then  # SHARDS recorders in parallel (rendering is the b
   for i in $(seq 0 $((N - 1))); do
     ex=(); [ "$i" = 0 ] && ex=(--examples "$T/examples")
     python -m cortex.sim.tasks.run demos "$TASK" "$SCR/shard$i" --episodes "${EPISODES:-200}" \
-      --size "${SIZE:-240x320}" --shard "$i" --shards "$N" "${ex[@]}" > "$SCR/shard$i.log" 2>&1 &
+      --size "${SIZE:-240x320}" --shard "$i" --shards "$N" --noise-deg "${NOISE_DEG:-2.0}" "${ex[@]}" \
+      > "$SCR/shard$i.log" 2>&1 &
     pids+=($!); roots+=("$SCR/shard$i")
   done
   fail=0

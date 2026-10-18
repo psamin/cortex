@@ -54,7 +54,7 @@ def test_demos_keep_only_successful_oracle_episodes(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "cortex.sim.tasks.fake", types.SimpleNamespace(Env=_Env, Oracle=_Oracle))
     root = tmp_path / "ds"
     run.demos(argparse.Namespace(task="fake", root=str(root), episodes=2, size="96x128", examples=None, n_examples=0,
-                                 shard=0, shards=1))
+                                 shard=0, shards=1, noise_deg=0.0))
     meta = json.loads((root / "meta" / "cortex_sim.json").read_text())
     assert meta["kept_seeds"] == [0, 2] and meta["failed_seeds"] == [1]
     info = json.loads((root / "meta" / "info.json").read_text())
@@ -69,9 +69,22 @@ def test_parallel_shards_merge_into_one_dataset(tmp_path, monkeypatch):
     for i in range(2):  # seeds 0, 2 (shard 0) and 1, 3 (shard 1); seed 1 fails
         roots.append(tmp_path / f"shard{i}")
         run.demos(argparse.Namespace(task="fake", root=str(roots[-1]), episodes=4, size="96x128", examples=None,
-                                     n_examples=0, shard=i, shards=2))
+                                     n_examples=0, shard=i, shards=2, noise_deg=0.0))
     out = tmp_path / "merged"
     run.merge(argparse.Namespace(task="fake", root=str(out), shards_roots=[str(r) for r in roots]))
     meta = json.loads((out / "meta" / "cortex_sim.json").read_text())
     assert meta["kept_seeds"] == [0, 2, 3, 5] and meta["failed_seeds"] == [1] and meta["shards"] == 2
     assert json.loads((out / "meta" / "info.json").read_text())["total_episodes"] == 4
+
+
+def test_noise_moves_the_executed_command_but_records_the_clean_one(monkeypatch):
+    configure_gl()
+    env, oracle = _Env(), _Oracle()
+    sent = []
+    real = env.step
+    monkeypatch.setattr(env, "step", lambda a, render=True: (sent.append(np.array(a)), real(a, render=render))[1])
+    ep = run.episode(env, oracle, 0, record=True, noise_deg=3.0)
+    recorded = np.stack([r[3] for r in ep["rows"]])
+    assert np.allclose(recorded, recorded[0])  # the expert's clean command every step
+    assert np.abs(np.stack(sent)[:, :5] - recorded[:, :5]).max() > 0.5  # what ran was nudged
+    assert np.allclose(np.stack(sent)[:, 5], recorded[:, 5])  # the gripper is never nudged
