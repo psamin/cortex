@@ -21,6 +21,12 @@ const server = new MCPServer({
     "propose training (human-approved) and evaluate policies in simulation.",
   // Verifies the HMAC-signed state that intake forms (input_required) carry between rounds.
   requestState: intakeRequestState,
+  // Branding for clients and Manufact's publish checks; files live in public/ (same mark as the studio favicon).
+  icons: [
+    { src: "icon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
+    { src: "icon.png", mimeType: "image/png", sizes: ["512x512"] },
+  ],
+  websiteUrl: "https://github.com/psamin/speculativespeculativeagentaction/tree/main/mcp",
   instructions: [
     "Cortex trains robot manipulation policies (LeRobot ACT or SmolVLA) from demonstrations recorded in simulation.",
     "",
