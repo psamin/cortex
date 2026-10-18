@@ -66,8 +66,8 @@ type Job = { id: string; kind: string; project_id: string; status: "queued"|"run
 ## Agent
 | Method | Path | Body | Returns |
 |---|---|---|---|
-| POST | `/projects/{pid}/agent` | `{message: string}` | **SSE**: `event: text` (`{delta}`), `event: tool_call` (`{tool, args}`), `event: tool_result` (`{tool, summary, ref_ids}`), `event: approval_required` (`{kind, ref_id, summary}`), `event: done` |
-| GET | `/projects/{pid}/agent/history` | | `{role, content, tool?}[]` |
+| POST | `/projects/{pid}/agent` | `{message: string, patch?: object}` | **SSE**, see "Chat events" below. `patch` is a one-click intake answer (a question option's or a feasibility suggestion's patch); it is applied with `update_intake` before the turn is planned. 404 for an unknown project. |
+| GET | `/projects/{pid}/agent/history` | | `{role: "user" \| "assistant", content}` and `{role: "event", event, data}` rows, in order (inline images dropped; cards keep their media `url`) |
 
 ## Added after v1
 
@@ -118,3 +118,38 @@ Error bodies carry a `code`:
 - 503 `{detail, code: "planner_unavailable"}`.
 
 `StartAgentCollectionRequest.task` optionally overrides the planner's task text. Oracle collections are recorded with `mode: "privileged"`.
+
+## Chat events (`POST /projects/{pid}/agent`)
+
+The studio chat streams one turn as SSE frames. Projects with an intake use the guided planner
+(`services/guide.py`) when no model is configured; with a model, the LLM gets the same plan in its
+system prompt and the same cards are emitted for its tool results. Classic projects keep the old
+intent planner.
+
+| Event | Data | Meaning |
+|---|---|---|
+| `text` | `{delta}` | Assistant prose |
+| `tool_call` | `{tool, args}` | A registry tool the assistant is calling |
+| `tool_result` | `{tool, summary, ref_ids}` | Its result |
+| `step` | `{step, index, label, steps}` | Pipeline position: `intake`, `simulate`, `collect`, `train`, `evaluate` |
+| `card` | one of the card objects below | Rich message |
+| `approval_required` | `{kind: "training" \| "evaluation", ref_id, summary, args}` | Needs a human click; the studio calls `POST /training/{id}/approve` + `/launch`, or `POST /projects/{pid}/evaluations` |
+| `done` | `{}` | End of the turn |
+
+Cards (`card.type`):
+
+| Type | Fields |
+|---|---|
+| `question` | `path, prompt, why, question_type, options: [{label, patch}], allow_text` |
+| `image` | `label` (e.g. `FIG.02 SCENE · TOP CAMERA`), `camera, url, key, scene, image_jpeg_base64?` |
+| `feasibility` | `ok, summary, jaw_opening_m, objects: [{name, ok, grasp, payload, tall, grasp_mode}], places: [{name, kind, ok, grasp_err_mm, carry_err_mm}], suggestions: [{label, patch}]` |
+| `job` | `job_id, kind, title, job` (a `Job` snapshot; live updates arrive as `event: job` on `/projects/{pid}/events`) |
+| `training_manual` | `training_job_id, backend, command, checkpoint_hint, smoke_available, smoke_reason, smoke_steps` (no GPU cluster: run `command`, then send the checkpoint path as a chat message to register it) |
+| `results` | `evaluation_id, policy, checkpoint_id, checkpoint_step, smoke, branches: [{name, n, successes, success_rate, ci95}]` |
+| `actions` | `actions: [{label, message}]` (quick replies sent as chat messages) |
+
+Free-text replies to an open intake question are mapped onto it (option names, an option number,
+"yes"/"confirm", sizes like `4 cm` and masses like `50 g`, catalogue object names); anything else
+re-asks with the options. "Run the CPU smoke test" starts a labelled 20-step `lerobot-train
+--policy.device=cpu` run (job kind `train_smoke`); its checkpoint carries `metrics.cpu_smoke_run = 1`
+and is never attached to the GPU training job.
