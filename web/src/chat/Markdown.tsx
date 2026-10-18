@@ -18,7 +18,7 @@ export function Markdown({ text }: { text: string }) {
       while (i < lines.length && !lines[i].trim().startsWith("```")) body.push(lines[i++]);
       i++;
       blocks.push(
-        <pre key={key++} className="overflow-x-auto rounded-md bg-well px-3 py-2 font-mono text-xs leading-relaxed text-ink-2 scroll-thin">
+        <pre key={key++} className="overflow-x-auto rounded-sm border border-line bg-well px-3 py-2 font-mono text-xs leading-relaxed text-ink-2 scroll-thin">
           {body.join("\n")}
         </pre>,
       );
@@ -52,7 +52,7 @@ export function Markdown({ text }: { text: string }) {
     const h = line.match(/^#{1,6}\s+(.*)$/);
     if (h) {
       blocks.push(
-        <p key={key++} className="pt-1 font-semibold text-ink">
+        <p key={key++} className="pt-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink">
           {inline(h[1])}
         </p>,
       );
@@ -76,17 +76,17 @@ function inline(s: string): ReactNode[] {
   while ((m = re.exec(s))) {
     if (m.index > last) out.push(s.slice(last, m.index));
     const t = m[0];
-    if (t.startsWith("**")) out.push(<strong key={k++} className="font-semibold text-ink">{t.slice(2, -2)}</strong>);
+    if (t.startsWith("**")) out.push(<strong key={k++} className="font-medium text-ink">{t.slice(2, -2)}</strong>);
     else if (t.startsWith("`"))
       out.push(
-        <code key={k++} className="rounded bg-rail px-1 py-px font-mono text-[0.85em] text-ink-2">
+        <code key={k++} className="rounded-sm border border-line bg-well px-1 py-px font-mono text-[0.85em] text-ink-2">
           {t.slice(1, -1)}
         </code>,
       );
     else {
       const label = t.slice(1, t.indexOf("]"));
       out.push(
-        <a key={k++} href={m[2]} target="_blank" rel="noreferrer" className="text-servo underline underline-offset-2">
+        <a key={k++} href={m[2]} target="_blank" rel="noreferrer" className="border-b border-ink-3 text-ink hover:border-ink">
           {label}
         </a>,
       );

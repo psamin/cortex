@@ -1,6 +1,6 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, FileArchive, Paperclip, RotateCcw, Square, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, Paperclip, RotateCcw, Square, X } from "lucide-react";
 import { useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
 import { cn, evidenceValue } from "../lib/format";
@@ -8,6 +8,8 @@ import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards
 import { useChat } from "./ChatProvider";
 import { ImportRow, ImportSheet, useImporter } from "./Imports";
 import { Markdown } from "./Markdown";
+import { IsoIcon } from "../sketch";
+import { toolIcon } from "./toolIcon";
 import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
 
 const SUGGESTIONS = [
@@ -90,28 +92,30 @@ export function Conversation({ pid }: { pid: string }) {
       }}
     >
       {dragging && (
-        <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl bg-bench/90 text-center shadow-[inset_0_0_0_2px_rgb(var(--servo)/.6)] backdrop-blur-sm">
-          <FileArchive className="h-8 w-8 text-servo" />
-          <p className="text-base font-medium text-ink">Drop a LeRobot dataset to import demos</p>
+        <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-3 rounded border border-dashed border-servo bg-bench/95 text-center">
+          <IsoIcon name="dataset" size={40} accent />
+          <p className="kn-display text-[26px] text-ink">Drop a LeRobot dataset to import demos</p>
           <p className="text-xs text-ink-3">.zip or .tar.gz of the dataset folder, up to 2 GB</p>
         </div>
       )}
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-4">
-        <span className="text-sm font-semibold">Agent</span>
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5">
+        <span className="kn-label kn-label-rule text-ink">
+          <span>Agent</span>
+        </span>
         <div className="ml-auto">
           {confirmReset ? (
             <span className="flex items-center gap-1 text-xs text-ink-2">
               Start over?
-              <button type="button" className="rounded px-1.5 py-0.5 text-ink hover:bg-rail" onClick={() => (setConfirmReset(false), void chat.reset())}>
+              <button type="button" className="rounded-full px-2 py-0.5 text-ink hover:bg-rail" onClick={() => (setConfirmReset(false), void chat.reset())}>
                 Yes
               </button>
-              <button type="button" className="rounded px-1.5 py-0.5 hover:bg-rail" onClick={() => setConfirmReset(false)}>
+              <button type="button" className="rounded-full px-2 py-0.5 hover:bg-rail" onClick={() => setConfirmReset(false)}>
                 No
               </button>
             </span>
           ) : (
-            <button type="button" onClick={() => setConfirmReset(true)} disabled={chat.items.length === 0} className="inline-flex items-center gap-1.5 rounded-md px-2 py-1 text-xs text-ink-3 hover:bg-rail hover:text-ink disabled:opacity-40">
-              <RotateCcw className="h-3.5 w-3.5" /> New chat
+            <button type="button" onClick={() => setConfirmReset(true)} disabled={chat.items.length === 0} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink disabled:opacity-40">
+              <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">New chat</span>
             </button>
           )}
         </div>
@@ -129,22 +133,40 @@ export function Conversation({ pid }: { pid: string }) {
           }}
           className="h-full overflow-y-auto overscroll-contain scroll-thin"
         >
-          <div ref={content} className="mx-auto max-w-[680px] space-y-4 px-5 py-6">
+          <div ref={content} className="mx-auto max-w-[680px] space-y-5 px-5 py-7">
             {chat.loading && (
               <div className="space-y-3">
-                <div className="skeleton ml-auto h-10 w-2/3 rounded-2xl" />
-                <div className="skeleton h-16 w-full rounded-xl" />
+                <div className="skeleton h-6 w-2/3 rounded-sm" />
+                <div className="skeleton h-16 w-full rounded-sm" />
               </div>
             )}
             {!!chat.loadError && <p className="text-sm text-fault">Couldn't load the conversation. Is the backend running?</p>}
             {empty && (
               <div className="pt-6">
-                <p className="text-xl font-semibold tracking-[-0.015em]">What should we do next?</p>
-                <p className="mt-1.5 text-sm text-ink-3">The agent collects demonstrations, trains, tests, and improves the policy. It asks before anything costs money or needs a GPU.</p>
+                <div className="kn-label kn-label-rule">
+                  <span>
+                    <span className="text-ink">FIG.01</span>&nbsp;&nbsp;Agent · Ready
+                  </span>
+                </div>
+                <p className="kn-display mt-5 text-[36px]">
+                  What should we
+                  <br />
+                  <span className="kn-second">do next?</span>
+                </p>
+                <p className="mt-4 max-w-[30rem] text-sm leading-6 text-ink-2">The agent collects demonstrations, trains, tests, and improves the policy. It asks before anything costs money or needs a GPU.</p>
               </div>
             )}
-            {blocks.map((b) => (
-              <BlockView key={b.key} b={b} pid={pid} />
+            {blocks.map((b, i) => (
+              <Fragment key={b.key}>
+                {isAgentBlock(b) && !(i > 0 && isAgentBlock(blocks[i - 1])) && (
+                  <div className="kn-label kn-label-rule -mb-2">
+                    <span>
+                      <span className="text-ink">Agent</span>&nbsp;&nbsp;Response
+                    </span>
+                  </div>
+                )}
+                <BlockView b={b} pid={pid} />
+              </Fragment>
             ))}
             {chat.busy && !lastRunning && <Thinking startedAt={chat.turnStartedAt} />}
           </div>
@@ -157,7 +179,7 @@ export function Conversation({ pid }: { pid: string }) {
               setUnseen(false);
               toBottom(true);
             }}
-            className="enter absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-plate px-3 py-1.5 text-xs text-ink shadow-[0_0_0_1px_var(--line-strong),0_8px_20px_-8px_rgba(0,0,0,.5)] hover:bg-rail"
+            className="enter absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full border border-line-strong bg-plate px-3 py-1.5 text-xs text-ink hover:border-ink"
           >
             <ArrowDown className="h-3.5 w-3.5" />
             {unseen ? "New activity" : "Jump to latest"}
@@ -172,8 +194,9 @@ export function Conversation({ pid }: { pid: string }) {
           {empty && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">
               {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" onClick={() => chat.send(s)} className="rounded-full bg-plate px-3 py-1.5 text-xs text-ink-2 shadow-[0_0_0_1px_var(--line)] transition-colors hover:text-ink hover:shadow-[0_0_0_1px_var(--line-strong)]">
+                <button key={s} type="button" onClick={() => chat.send(s)} className="group inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-plate px-3.5 py-1.5 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink">
                   {s}
+                  <span aria-hidden className="text-ink-4 transition-transform group-hover:translate-x-0.5 group-hover:text-ink">→</span>
                 </button>
               ))}
             </div>
@@ -200,6 +223,11 @@ export function Conversation({ pid }: { pid: string }) {
   );
 }
 
+/** True for blocks the agent produced (its text and tool rows), so one header covers a whole turn. */
+function isAgentBlock(b: Block) {
+  return b.type === "tools" || (b.item.kind !== "user" && b.item.kind !== "meta");
+}
+
 function BlockView({ b, pid }: { b: Block; pid: string }) {
   if (b.type === "tools")
     return (
@@ -213,8 +241,9 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
   switch (it.kind) {
     case "user":
       return (
-        <div className="enter flex justify-end">
-          <div className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-md bg-rail px-4 py-2.5 text-[15px] leading-relaxed text-ink shadow-[0_0_0_1px_var(--line)]">{it.text}</div>
+        <div className="enter border-l border-ink pl-4">
+          <div className="kn-label mb-1.5">You</div>
+          <div className="whitespace-pre-wrap text-[16px] leading-relaxed text-ink">{it.text}</div>
         </div>
       );
     case "assistant":
@@ -231,34 +260,39 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
       return <ImportRow it={it} pid={pid} />;
     case "meta":
       return (
-        <div className="flex items-center gap-2 text-[11px] text-ink-4" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
-          <span className="h-px flex-1 bg-[var(--line-soft)]" />
+        <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
+          <span className="h-px flex-1 bg-[var(--line)]" />
           {it.isError ? "Turn ended with an error" : `Done${it.durationMs ? ` in ${Math.round(it.durationMs / 1000)}s` : ""}`}
-          <span className="h-px flex-1 bg-[var(--line-soft)]" />
+          <span className="h-px flex-1 bg-[var(--line)]" />
         </div>
       );
     case "error":
-      return <div className="rounded-xl bg-fault/5 px-4 py-2.5 text-sm text-fault shadow-[0_0_0_1px_rgb(var(--fault)/.25)]">{it.text}</div>;
+      return (
+        <div className="flex items-start gap-2.5 rounded border border-fault/35 bg-plate px-4 py-2.5 text-sm text-fault">
+          <IsoIcon name="warning" size={18} className="mt-px" />
+          <span className="min-w-0 flex-1">{it.text}</span>
+        </div>
+      );
   }
 }
 
 function StatusIcon({ status }: { status: "running" | "ok" | "error" | "cancelled" }) {
-  if (status === "running") return <CircleDashed className="h-4 w-4 animate-spin text-servo" />;
+  if (status === "running") return <CircleDashed className="h-3.5 w-3.5 animate-spin text-servo" />;
   if (status === "cancelled")
     return (
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-rail text-ink-3">
-        <Ban className="h-2.5 w-2.5" />
+      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-ink-3 text-ink-3">
+        <Ban className="h-2 w-2" />
       </span>
     );
   if (status === "error")
     return (
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-fault/15 text-fault">
-        <X className="h-2.5 w-2.5" />
+      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-fault text-fault">
+        <X className="h-2 w-2" />
       </span>
     );
   return (
-    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-pass/15 text-pass">
-      <Check className="h-2.5 w-2.5" />
+    <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full border border-pass text-pass">
+      <Check className="h-2 w-2" strokeWidth={3} />
     </span>
   );
 }
@@ -271,9 +305,10 @@ function ToolGroup({ tools }: { tools: ToolItem[] }) {
   const calls = tools.reduce((n, t) => n + t.count, 0);
   const labels = [...new Set(tools.map((t) => toolLabel(t.tool, t.args)))];
   return (
-    <div className="enter">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="group flex w-full items-center gap-2.5 rounded-lg py-1 text-left" aria-expanded={open}>
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+    <div className="enter sk-depth relative rounded border border-line-strong bg-plate">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="group flex w-full items-center gap-2.5 px-3 py-2 text-left" aria-expanded={open}>
+        <IsoIcon name={toolIcon((running ?? tools[tools.length - 1]).tool)} size={20} accent={!!running} />
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
           <StatusIcon status={running ? "running" : failed ? "error" : "ok"} />
         </span>
         <span className={cn("shrink-0 text-sm", running ? "text-ink" : "text-ink-2")}>
@@ -283,9 +318,9 @@ function ToolGroup({ tools }: { tools: ToolItem[] }) {
         <ChevronRight className={cn("ml-auto h-3.5 w-3.5 shrink-0 text-ink-4 transition-transform group-hover:text-ink-3", open && "rotate-90")} />
       </button>
       {open && (
-        <div className="ml-[10px] mt-1 border-l border-line pl-4">
+        <div className="space-y-1.5 border-t border-line px-3 py-2.5">
           {tools.map((t) => (
-            <ToolRow key={t.id} it={t} />
+            <ToolRow key={t.id} it={t} nested />
           ))}
         </div>
       )}
@@ -301,19 +336,20 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
   const status = it.status === "succeeded" ? "ok" : it.status === "cancelled" ? "cancelled" : "error";
   if (it.superseded) return null; // a later run of the same kind succeeded: the old failure is history
   return (
-    <div className="enter flex items-start gap-2.5 py-1">
+    <div className="enter sk-depth relative flex items-start gap-2.5 rounded border border-line-strong bg-plate px-3 py-2.5">
+      <IsoIcon name={toolIcon(it.jobKind)} size={20} />
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
         <StatusIcon status={status} />
       </span>
       <div className="min-w-0 flex-1">
         <p className={cn("text-sm leading-snug", status === "error" ? "text-fault" : "text-ink-2")}>{it.text}</p>
         {it.detail && (
-          <button type="button" onClick={() => setShowDetail((o) => !o)} className="mt-0.5 text-xs text-ink-3 hover:text-ink-2">
+          <button type="button" onClick={() => setShowDetail((o) => !o)} className="mt-0.5 border-b border-line-strong text-xs text-ink-3 hover:border-ink hover:text-ink">
             {showDetail ? "Hide details" : "Details"}
           </button>
         )}
         {it.detail && showDetail && (
-          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-rail px-2 py-1.5 font-mono text-[11px] text-ink-3">{it.detail}</pre>
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-line bg-well px-2 py-1.5 font-mono text-[11px] text-ink-3">{it.detail}</pre>
         )}
         {it.refIds.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
@@ -321,7 +357,7 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
               const to = refRoute(pid, r);
               const label = `Open ${REF_NOUN[prefixOf(r)] ?? r}`;
               return to ? (
-                <Link key={r} to={to} className="text-xs text-servo hover:underline" title={r}>
+                <Link key={r} to={to} className="border-b border-line-strong text-xs text-ink hover:border-ink" title={r}>
                   {label}
                 </Link>
               ) : (
@@ -333,7 +369,7 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
           </div>
         )}
       </div>
-      <span className="shrink-0 pt-0.5 text-[10px] uppercase tracking-wide text-ink-4" title="Written by Cortex when the job finished">
+      <span className="shrink-0 pt-0.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3" title="Written by Cortex when the job finished">
         {it.jobKind.replace(/_/g, " ")}
       </span>
     </div>
@@ -341,32 +377,33 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
 }
 
 /** A tool call as a human status row: label, state, collapsed details (never raw JSON). */
-function ToolRow({ it }: { it: ToolItem }) {
+function ToolRow({ it, nested }: { it: ToolItem; nested?: boolean }) {
   const [open, setOpen] = useState(false);
   const args = Object.entries(it.args).filter(([k]) => k !== "project_id");
   const hasDetails = !!it.summary || args.length > 0;
   return (
-    <div className="enter">
-      <button type="button" onClick={() => hasDetails && setOpen((o) => !o)} className={cn("group flex w-full items-center gap-2.5 rounded-lg py-1 text-left", hasDetails && "cursor-pointer")}>
-        <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+    <div className={cn("enter", !nested && "sk-depth relative rounded border border-line-strong bg-plate")}>
+      <button type="button" onClick={() => hasDetails && setOpen((o) => !o)} className={cn("group flex w-full items-center gap-2.5 text-left", nested ? "py-0.5" : "px-3 py-2", hasDetails && "cursor-pointer")}>
+        <IsoIcon name={toolIcon(it.tool)} size={nested ? 16 : 20} accent={it.status === "running"} />
+        <span className="flex h-4 w-4 shrink-0 items-center justify-center">
           <StatusIcon status={it.status} />
         </span>
         <span className={cn("text-sm", it.status === "running" ? "text-ink" : "text-ink-2")}>
           {toolLabel(it.tool, it.args)}
           {it.status === "running" ? "…" : ""}
         </span>
-        {it.count > 1 && <span className="num font-mono text-[11px] text-ink-4">×{it.count}</span>}
+        {it.count > 1 && <span className="num font-mono text-[11px] text-ink-3">×{it.count}</span>}
         {!open && it.summary && it.status !== "running" && <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{it.summary}</span>}
         {hasDetails && <ChevronRight className={cn("ml-auto h-3.5 w-3.5 shrink-0 text-ink-4 transition-transform group-hover:text-ink-3", open && "rotate-90")} />}
       </button>
       {open && (
-        <div className="ml-[30px] mt-1 space-y-1 rounded-lg bg-plate px-3 py-2 text-xs shadow-[0_0_0_1px_var(--line)]">
+        <div className={cn("space-y-1.5 text-xs", nested ? "ml-[50px] mt-1 border-l border-line pl-3" : "border-t border-line px-3 py-2.5")}>
           {it.summary && <p className="text-ink-2">{it.summary}</p>}
           {args.length > 0 && (
-            <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5">
+            <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
               {args.map(([k, v]) => (
                 <div key={k} className="contents">
-                  <dt className="text-ink-3">{k.replace(/_/g, " ")}</dt>
+                  <dt className="font-mono text-[10px] uppercase tracking-[0.12em] text-ink-3">{k.replace(/_/g, " ")}</dt>
                   <dd className="truncate text-ink-2">{friendly(v)}</dd>
                 </div>
               ))}
@@ -397,10 +434,10 @@ function Thinking({ startedAt }: { startedAt: number | null }) {
   }, []);
   const s = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
   return (
-    <div className="flex items-center gap-2.5 py-1 text-sm text-ink-3">
+    <div className="flex items-center gap-3 py-1 font-mono text-[10.5px] uppercase tracking-[0.16em] text-ink-3">
       <span className="flex gap-1">
         {[0, 1, 2].map((i) => (
-          <span key={i} className="h-1.5 w-1.5 rounded-full bg-ink-3 live-dot" style={{ animationDelay: `${i * 0.18}s` }} />
+          <span key={i} className="h-1 w-1 bg-servo live-dot" style={{ animationDelay: `${i * 0.18}s` }} />
         ))}
       </span>
       Thinking{s >= 3 ? ` · ${s}s` : ""}
@@ -420,7 +457,7 @@ function PendingApproval({ pid }: { pid: string }) {
       {open ? (
         <div className="space-y-1.5">
           <div className="flex justify-end">
-            <button type="button" onClick={() => setOpen(false)} className="rounded px-1.5 text-xs text-ink-3 hover:bg-rail hover:text-ink">
+            <button type="button" onClick={() => setOpen(false)} className="border-b border-line-strong text-xs text-ink-3 hover:border-ink hover:text-ink">
               Collapse
             </button>
           </div>
@@ -430,14 +467,15 @@ function PendingApproval({ pid }: { pid: string }) {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          className="flex w-full items-center gap-2.5 rounded-xl bg-servo/[.07] px-3.5 py-2.5 text-left text-sm shadow-[0_0_0_1px_rgb(var(--servo)/.4)] hover:bg-servo/[.1]"
+          className="sk-depth sk-hover flex w-full items-center gap-2.5 rounded border border-servo/60 bg-plate px-3.5 py-2.5 text-left text-sm"
         >
-          <span className="h-2 w-2 shrink-0 rounded-full bg-servo live-dot" />
+          <IsoIcon name="approve" size={20} accent />
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-servo live-dot" />
           <span className="min-w-0 flex-1 truncate text-ink">
             Waiting for you: start {tj.policy_type.toUpperCase()} training ({tj.estimate.paid ? "paid" : "no charge"})
             {proposed.length > 1 ? ` · ${proposed.length} jobs` : ""}
           </span>
-          <span className="shrink-0 text-xs font-medium text-servo">Review</span>
+          <span className="shrink-0 border-b border-servo font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-servo">Review →</span>
         </button>
       )}
     </div>
@@ -477,7 +515,7 @@ function Composer({
         e.preventDefault();
         submit();
       }}
-      className="flex items-end gap-1.5 rounded-2xl bg-plate p-2 shadow-[0_0_0_1px_var(--line-strong),0_8px_24px_-12px_rgba(0,0,0,.35)] focus-within:shadow-[0_0_0_1px_rgb(var(--servo)/.6),0_8px_24px_-12px_rgba(0,0,0,.35)]"
+      className="sk-depth relative flex items-end gap-1.5 rounded border border-line-strong bg-plate p-2 transition-colors focus-within:border-ink"
     >
       <input
         ref={fileInput}
@@ -490,11 +528,11 @@ function Composer({
           e.target.value = "";
         }}
       />
-      <button type="button" onClick={() => fileInput.current?.click()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-3 hover:bg-rail hover:text-ink" aria-label="Attach demonstrations" title="Attach a LeRobot dataset (.zip or .tar.gz)">
-        <Paperclip className="h-4 w-4" />
+      <button type="button" onClick={() => fileInput.current?.click()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-ink-3 hover:bg-rail hover:text-ink" aria-label="Attach demonstrations" title="Attach a LeRobot dataset (.zip or .tar.gz)">
+        <Paperclip className="h-4 w-4" strokeWidth={1.5} />
       </button>
-      <button type="button" onClick={onHub} className="flex h-9 shrink-0 items-center gap-1 rounded-xl px-2 text-xs text-ink-3 hover:bg-rail hover:text-ink" aria-label="Import from Hugging Face" title="Import demonstrations from a Hugging Face dataset">
-        <Download className="h-4 w-4" /> Hub
+      <button type="button" onClick={onHub} className="flex h-9 shrink-0 items-center gap-1 rounded-full px-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-3 hover:bg-rail hover:text-ink" aria-label="Import from Hugging Face" title="Import demonstrations from a Hugging Face dataset">
+        <Download className="h-4 w-4" strokeWidth={1.5} /> Hub
       </button>
       <textarea
         ref={ref}
@@ -512,11 +550,11 @@ function Composer({
         aria-label="Message the agent"
       />
       {busy && !text.trim() ? (
-        <button type="button" onClick={onStop} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rail text-ink hover:bg-rail/70" aria-label="Stop">
-          <Square className="h-3.5 w-3.5 fill-current" />
+        <button type="button" onClick={onStop} className="sk-pill sk-pill-secondary flex h-9 w-11 shrink-0 items-center justify-center" aria-label="Stop">
+          <Square className="h-3 w-3 fill-current" />
         </button>
       ) : (
-        <button type="submit" disabled={!text.trim()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-servo text-servo-ink transition-transform active:scale-95 disabled:opacity-35" aria-label="Send">
+        <button type="submit" disabled={!text.trim()} className="sk-pill sk-pill-primary flex h-9 w-11 shrink-0 items-center justify-center disabled:opacity-35" aria-label="Send">
           <ArrowUp className="h-4 w-4" />
         </button>
       )}

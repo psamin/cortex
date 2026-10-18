@@ -3,18 +3,11 @@ import { Link } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpRight,
-  BarChart3,
   Check,
   CircleDashed,
-  Database,
-  Dumbbell,
-  Gauge,
-  ListOrdered,
   Play,
-  ScanSearch,
   ShieldCheck,
   Sparkles,
-  Wallet,
   X,
 } from "lucide-react";
 import { api, resolveMediaUrl } from "../api/client";
@@ -35,6 +28,7 @@ import { agentLabel, isAgent, isImported, type TrainingJob } from "../api/types"
 import { Skeleton, InlineError } from "../components/ui";
 import { refRoute } from "../components/refs";
 import { cn, num, pct, usd } from "../lib/format";
+import { IsoIcon } from "../sketch";
 import { useChat } from "./ChatProvider";
 import { useViewerFocus } from "./focus";
 import { AUG_NOTE, datasetBreakdown } from "../lib/augment";
@@ -66,41 +60,40 @@ export function CardShell({
   return (
     <div
       className={cn(
-        "enter overflow-hidden rounded-xl bg-plate",
-        tone === "approval" ? "shadow-[0_0_0_1px_rgb(var(--servo)/.45)]" : "shadow-[0_0_0_1px_var(--line)]",
-        large && "rounded-2xl",
+        "enter sk-depth relative rounded bg-plate border",
+        tone === "approval" ? "border-servo/60" : "border-line-strong",
       )}
     >
       <div className={cn("flex items-center gap-2.5", large ? "px-5 pt-4" : "px-4 pt-3")}>
-        <span className={cn("flex shrink-0 items-center justify-center rounded-lg", large ? "h-8 w-8" : "h-7 w-7", tone === "approval" ? "bg-servo/15 text-servo" : "bg-rail text-ink-2")}>
+        <span className={cn("flex shrink-0 items-center justify-center", large ? "h-8 w-8" : "h-7 w-7", tone === "approval" ? "text-servo" : "text-ink-2")}>
           {icon}
         </span>
         <div className="min-w-0 flex-1">
-          <div className={cn("truncate font-semibold text-ink", large ? "text-base" : "text-sm")}>{title}</div>
-          {meta && <div className="truncate text-xs text-ink-3">{meta}</div>}
+          <div className={cn("truncate font-medium text-ink", large ? "text-[15px]" : "text-sm")}>{title}</div>
+          {meta && <div className={cn("mt-0.5 truncate font-mono text-[10px] uppercase tracking-[0.14em]", tone === "approval" ? "text-servo" : "text-ink-3")}>{meta}</div>}
         </div>
         {status}
         {to && (
-          <Link to={to} className="rounded-md p-1 text-ink-4 hover:bg-rail hover:text-ink-2" title="Open details" aria-label="Open details">
+          <Link to={to} className="rounded-full p-1 text-ink-3 hover:bg-rail hover:text-ink" title="Open details" aria-label="Open details">
             <ArrowUpRight className="h-4 w-4" />
           </Link>
         )}
       </div>
-      <div className={cn(large ? "px-5 pb-5 pt-3" : "px-4 pb-3.5 pt-2.5")}>{children}</div>
+      <div className={cn(large ? "px-5 pb-5 pt-3" : "px-4 pb-4 pt-3")}>{children}</div>
     </div>
   );
 }
 
 function Pill({ tone, children }: { tone: "live" | "ok" | "bad" | "muted" | "wait"; children: ReactNode }) {
   const cls = {
-    live: "bg-servo/12 text-servo",
-    ok: "bg-pass/12 text-pass",
-    bad: "bg-fault/12 text-fault",
-    muted: "bg-rail text-ink-3",
-    wait: "bg-caution/12 text-caution",
+    live: "border-servo/50 text-servo",
+    ok: "border-pass/40 text-pass",
+    bad: "border-fault/40 text-fault",
+    muted: "border-line-strong text-ink-3",
+    wait: "border-caution/45 text-caution",
   }[tone];
   return (
-    <span className={cn("inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium", cls)}>
+    <span className={cn("inline-flex h-6 shrink-0 items-center gap-1.5 rounded-full border px-2.5 font-mono text-[10px] font-medium uppercase tracking-[0.12em]", cls)}>
       {tone === "live" && <span className="h-1.5 w-1.5 rounded-full bg-current live-dot" />}
       {children}
     </span>
@@ -109,7 +102,7 @@ function Pill({ tone, children }: { tone: "live" | "ok" | "bad" | "muted" | "wai
 
 function Loading({ large }: { large?: boolean }) {
   return (
-    <div className={cn("space-y-2 rounded-xl p-4 shadow-[0_0_0_1px_var(--line)]", large && "p-5")}>
+    <div className={cn("space-y-2 rounded border border-line p-4", large && "p-5")}>
       <Skeleton className="h-4 w-40" />
       <Skeleton className="h-10 w-full" />
     </div>
@@ -117,7 +110,7 @@ function Loading({ large }: { large?: boolean }) {
 }
 
 function Missing({ what }: { what: string }) {
-  return <div className="rounded-xl px-4 py-3 text-xs text-ink-3 shadow-[0_0_0_1px_var(--line)]">Couldn't load {what}.</div>;
+  return <div className="rounded border border-line px-4 py-3 text-xs text-ink-3">Couldn't load {what}.</div>;
 }
 
 // ------------------------------------------------------------------ dispatch
@@ -188,7 +181,7 @@ function DemoRow({ pid, refId, text, ids, live }: { pid: string; refId: string; 
   const viewer = useViewerFocus();
   const to = refRoute(pid, refId);
   return (
-    <div className="enter flex items-center gap-2.5 rounded-lg bg-plate px-3 py-2 shadow-[0_0_0_1px_var(--line)]">
+    <div className="enter flex items-center gap-2.5 sk-depth relative rounded border border-line-strong bg-plate px-3 py-2">
       {live ? <CircleDashed className="h-4 w-4 shrink-0 animate-spin text-servo" /> : <Play className="h-4 w-4 shrink-0 text-ink-3" />}
       <span className="min-w-0 flex-1 truncate text-sm text-ink-2" title={text}>
         {text}
@@ -221,7 +214,7 @@ function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: b
       pid={pid}
       refId={id}
       large={large}
-      icon={<BarChart3 className="h-4 w-4" />}
+      icon={<IsoIcon name="evaluate" size={22} />}
       title="Test in 3 conditions"
       meta={label}
       status={running ? <Pill tone="live">testing</Pill> : run.status === "succeeded" ? <Pill tone="ok">done</Pill> : <Pill tone="muted">{run.status}</Pill>}
@@ -244,11 +237,11 @@ function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: b
                   <span className="text-xs text-ink-3">{b.status === "running" || b.status === "queued" ? "running…" : b.error ? "failed" : "no result"}</span>
                 )}
               </div>
-              <div className={cn("relative overflow-hidden rounded-full bg-rail", large ? "h-3" : "h-2")}>
+              <div className={cn("relative overflow-hidden bg-[var(--line)]", large ? "h-2" : "h-1.5")}>
                 {r ? (
                   <>
                     <div className="absolute inset-y-0 bg-ink-4/40" style={{ left: `${r.ci95[0] * 100}%`, width: `${(r.ci95[1] - r.ci95[0]) * 100}%` }} title="95% confidence interval" />
-                    <div className={cn("absolute inset-y-0 left-0 rounded-full", r.success_rate >= 0.8 ? "bg-pass" : r.success_rate >= 0.5 ? "bg-servo" : "bg-fault")} style={{ width: `${r.success_rate * 100}%`, opacity: 0.9 }} />
+                    <div className={cn("absolute inset-y-0 left-0", r.success_rate >= 0.8 ? "bg-pass" : r.success_rate >= 0.5 ? "bg-servo" : "bg-fault")} style={{ width: `${r.success_rate * 100}%`, opacity: 0.9 }} />
                   </>
                 ) : (
                   <div className="skeleton absolute inset-0" />
@@ -272,7 +265,7 @@ function DatasetCard({ pid, id, large }: { pid: string; id: string; large?: bool
   if (!d) return <Missing what="this dataset" />;
   const b = datasetBreakdown(d, new Map((episodes.data ?? []).map((e) => [e.id, e])));
   return (
-    <CardShell pid={pid} refId={id} large={large} icon={<Database className="h-4 w-4" />} title={`Dataset ${d.name}`} meta={`LeRobot format · ${d.num_frames.toLocaleString()} frames`} status={<Pill tone="ok">built</Pill>}>
+    <CardShell pid={pid} refId={id} large={large} icon={<IsoIcon name="dataset" size={22} />} title={`Dataset ${d.name}`} meta={`LeRobot format · ${d.num_frames.toLocaleString()} frames`} status={<Pill tone="ok">built</Pill>}>
       <p className="text-sm text-ink-2">{b.text}</p>
       {b.hasAug && <p className="mt-1 text-xs text-ink-3">{AUG_NOTE}</p>}
     </CardShell>
@@ -291,7 +284,7 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
       pid={pid}
       refId={id}
       large={large}
-      icon={<Dumbbell className="h-4 w-4" />}
+      icon={<IsoIcon name="train" size={22} />}
       title={`${t.policy_type.toUpperCase()} training`}
       meta={trainingWhat(t)}
       status={
@@ -346,7 +339,7 @@ function AnalysisCard({ pid, id, large }: { pid: string; id: string; large?: boo
   if (!q.data) return <Missing what="this analysis" />;
   const a = q.data;
   return (
-    <CardShell pid={pid} refId={id} large={large} icon={<ScanSearch className="h-4 w-4" />} title="Demo quality check" meta={`${a.episode_count} demos checked`} status={a.status === "running" ? <Pill tone="live">checking</Pill> : <Pill tone="ok">done</Pill>}>
+    <CardShell pid={pid} refId={id} large={large} icon={<IsoIcon name="check" size={22} />} title="Demo quality check" meta={`${a.episode_count} demos checked`} status={a.status === "running" ? <Pill tone="live">checking</Pill> : <Pill tone="ok">done</Pill>}>
       {a.summary && <p className="text-sm leading-relaxed text-ink-2">{a.summary}</p>}
       {flags.length > 0 ? (
         <ul className="mt-2 space-y-1">
@@ -374,7 +367,7 @@ function RecommendationsCard({ pid, ids, large }: { pid: string; ids: string[]; 
   const list = (picked.length ? picked : all).sort((a, b) => b.score - a.score).slice(0, 3);
   if (!list.length) return <Missing what="recommendations" />;
   return (
-    <CardShell pid={pid} refId={list[0].id} large={large} icon={<ListOrdered className="h-4 w-4" />} title="What to do next" meta="ranked by expected gain">
+    <CardShell pid={pid} refId={list[0].id} large={large} icon={<IsoIcon name="improve" size={22} />} title="What to do next" meta="ranked by expected gain">
       <ol className="space-y-2">
         {list.map((r, i) => (
           <li key={r.id} className="flex items-start gap-2.5">
@@ -416,13 +409,13 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
     <CardShell
       pid={pid}
       large={large}
-      icon={active ? <CircleDashed className="h-4 w-4 animate-spin" /> : <Gauge className="h-4 w-4" />}
+      icon={active ? <CircleDashed className="h-4 w-4 animate-spin" /> : <IsoIcon name="gpu" size={22} />}
       title={j.message || j.kind.replace(/_/g, " ")}
       meta={j.kind.replace(/_/g, " ")}
       status={active ? <Pill tone="live">{pct(j.progress)}</Pill> : j.status === "succeeded" ? <Pill tone="ok">done</Pill> : <Pill tone="bad">{j.status}</Pill>}
     >
-      <div className="h-1.5 overflow-hidden rounded-full bg-rail">
-        <div className="h-full rounded-full bg-servo transition-[width] duration-500 ease-out" style={{ width: `${j.progress * 100}%` }} />
+      <div className="h-1 overflow-hidden bg-[var(--line)]">
+        <div className="h-full bg-servo transition-[width] duration-500 ease-out" style={{ width: `${j.progress * 100}%` }} />
       </div>
       {j.error && <InlineError error={j.error} detail={j.error_detail} className="mt-1.5" />}
     </CardShell>
@@ -446,17 +439,17 @@ export function EpisodeVideo({ id, className }: { id: string; className?: string
   const m = useEpisodeMedia(id);
   const video = resolveMediaUrl(m.data?.video_url);
   const thumb = resolveMediaUrl(m.data?.thumb_url);
-  if (m.isLoading) return <Skeleton className={cn("aspect-[4/3] w-full rounded-lg", className)} />;
-  if (video) return <video key={video} src={video} poster={thumb ?? undefined} controls autoPlay muted loop playsInline className={cn("aspect-[4/3] w-full rounded-lg bg-well object-contain", className)} />;
-  if (thumb) return <img src={thumb} alt="Demo" className={cn("aspect-[4/3] w-full rounded-lg bg-well object-contain", className)} />;
-  return <div className={cn("flex aspect-[4/3] w-full items-center justify-center rounded-lg bg-well text-xs text-ink-4", className)}>No video for this demo</div>;
+  if (m.isLoading) return <Skeleton className={cn("aspect-[4/3] w-full rounded-sm", className)} />;
+  if (video) return <video key={video} src={video} poster={thumb ?? undefined} controls autoPlay muted loop playsInline className={cn("aspect-[4/3] w-full rounded-sm bg-well object-contain", className)} />;
+  if (thumb) return <img src={thumb} alt="Demo" className={cn("aspect-[4/3] w-full rounded-sm bg-well object-contain", className)} />;
+  return <div className={cn("flex aspect-[4/3] w-full items-center justify-center rounded-sm bg-well text-xs text-ink-4", className)}>No video for this demo</div>;
 }
 
 export function EpisodeThumb({ id, active, ok, onClick }: { id: string; active?: boolean; ok?: boolean | null; onClick?: () => void }) {
   const m = useEpisodeMedia(id);
   const thumb = resolveMediaUrl(m.data?.thumb_url);
   return (
-    <button type="button" onClick={onClick} className={cn("relative aspect-[4/3] overflow-hidden rounded-md bg-well", active ? "ring-2 ring-servo" : "hover:opacity-90")}>
+    <button type="button" onClick={onClick} className={cn("relative aspect-[4/3] overflow-hidden rounded-sm border bg-well", active ? "border-servo ring-1 ring-servo" : "border-line hover:border-ink")}>
       {thumb ? <img src={thumb} alt="" loading="lazy" className="h-full w-full object-cover" /> : <span className="skeleton absolute inset-0" />}
       {ok !== undefined && ok !== null && (
         <span className={cn("absolute right-1 top-1 flex h-4 w-4 items-center justify-center rounded-full", ok ? "bg-pass text-white" : "bg-fault text-white")}>
@@ -485,15 +478,15 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
   });
   if (skipped)
     return (
-      <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-ink-3 shadow-[0_0_0_1px_var(--line)]">
+      <div className="flex items-center gap-2 rounded border border-line px-4 py-2.5 text-sm text-ink-3">
         Training not started.
-        <button type="button" className="text-ink-2 underline underline-offset-2 hover:text-ink" onClick={() => setSkipped(false)}>
+        <button type="button" className="border-b border-line-strong text-ink-2 hover:border-ink hover:text-ink" onClick={() => setSkipped(false)}>
           Review again
         </button>
       </div>
     );
   return (
-    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<Dumbbell className="h-4 w-4" />} title="Start training?" meta="Needs your OK before anything runs">
+    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta="Needs your OK before anything runs">
       <p className="text-sm leading-relaxed text-ink-2">
         Train an <span className="font-medium text-ink">{tj.policy_type.toUpperCase()}</span> policy on dataset{" "}
         <span className="font-mono text-[13px] text-ink">{tj.dataset_version_id}</span>
@@ -511,11 +504,11 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
           type="button"
           disabled={m.isPending}
           onClick={() => m.mutate()}
-          className="inline-flex h-9 items-center gap-2 rounded-lg bg-servo px-4 text-sm font-medium text-servo-ink transition-transform active:scale-[0.97] disabled:opacity-60"
+          className="sk-pill sk-pill-primary inline-flex h-9 items-center gap-2 px-5 text-[13px] font-medium disabled:opacity-60"
         >
           {m.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} Approve & start
         </button>
-        <button type="button" onClick={() => setSkipped(true)} className="h-9 rounded-lg px-3 text-sm text-ink-2 hover:bg-rail">
+        <button type="button" onClick={() => setSkipped(true)} className="mx-2 h-9 text-[13px] text-ink-2 hover:text-ink">
           Not now
         </button>
       </div>
@@ -547,15 +540,15 @@ export function ApprovalItem({ pid, kind, refId, summary, args }: { pid: string;
   if (kind === "evaluation") {
     if (skipped) return null;
     return (
-      <CardShell pid={pid} tone="approval" icon={<BarChart3 className="h-4 w-4" />} title="Run the 3-condition test?" meta="Needs your OK before anything runs">
+      <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Run the 3-condition test?" meta="Needs your OK before anything runs">
         <p className="text-sm leading-relaxed text-ink-2">{summary || "Evaluate the policy in simulation: baseline, shifted object and changed lighting."}</p>
         <p className="mt-1 text-xs text-ink-3">Runs locally in simulation · no charge</p>
         <div className="mt-3.5 flex items-center gap-2">
-          <button type="button" disabled={evalM.isPending || evalM.isSuccess} onClick={() => evalM.mutate()} className="inline-flex h-9 items-center gap-2 rounded-lg bg-servo px-4 text-sm font-medium text-servo-ink active:scale-[0.97] disabled:opacity-60">
+          <button type="button" disabled={evalM.isPending || evalM.isSuccess} onClick={() => evalM.mutate()} className="sk-pill sk-pill-primary inline-flex h-9 items-center gap-2 px-5 text-[13px] font-medium disabled:opacity-60">
             {evalM.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {evalM.isSuccess ? "Started" : "Approve & start"}
           </button>
           {!evalM.isSuccess && (
-            <button type="button" onClick={() => setSkipped(true)} className="h-9 rounded-lg px-3 text-sm text-ink-2 hover:bg-rail">
+            <button type="button" onClick={() => setSkipped(true)} className="mx-2 h-9 text-[13px] text-ink-2 hover:text-ink">
               Not now
             </button>
           )}
@@ -570,10 +563,10 @@ export function ApprovalItem({ pid, kind, refId, summary, args }: { pid: string;
   const tj =
     training.data?.find((t) => t.id === refId) ??
     [...(training.data ?? [])].filter((t) => t.status === "proposed").sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
-  if (!tj) return <div className="rounded-xl px-4 py-2.5 text-sm text-ink-3 shadow-[0_0_0_1px_var(--line)]">{summary || "An approval was requested"}. Nothing is waiting now.</div>;
+  if (!tj) return <div className="rounded border border-line px-4 py-2.5 text-sm text-ink-3">{summary || "An approval was requested"}. Nothing is waiting now.</div>;
   if (tj.status !== "proposed")
     return (
-      <div className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm text-ink-2 shadow-[0_0_0_1px_var(--line)]">
+      <div className="flex items-center gap-2 rounded border border-line px-4 py-2.5 text-sm text-ink-2">
         <Check className="h-4 w-4 text-pass" /> Training {tj.status === "approved" ? "approved" : tj.status}
         {tj.approved_by ? ` by ${tj.approved_by}` : ""}
       </div>
@@ -595,7 +588,7 @@ export function BudgetCard({ pid, message }: { pid: string; message: string }) {
     },
   });
   return (
-    <CardShell pid={pid} tone="approval" icon={<Wallet className="h-4 w-4" />} title={`Raise planner budget to $${target}?`} meta="The agent's model budget for this project is used up">
+    <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title={`Raise planner budget to $${target}?`} meta="The agent's model budget for this project is used up">
       <p className="text-sm text-ink-2">{message}</p>
       {b.data && (
         <p className="mt-1 text-xs text-ink-3">
@@ -603,7 +596,7 @@ export function BudgetCard({ pid, message }: { pid: string; message: string }) {
         </p>
       )}
       <div className="mt-3.5 flex items-center gap-2">
-        <button type="button" disabled={m.isPending || m.isSuccess} onClick={() => m.mutate()} className="inline-flex h-9 items-center gap-2 rounded-lg bg-servo px-4 text-sm font-medium text-servo-ink active:scale-[0.97] disabled:opacity-60">
+        <button type="button" disabled={m.isPending || m.isSuccess} onClick={() => m.mutate()} className="sk-pill sk-pill-primary inline-flex h-9 items-center gap-2 px-5 text-[13px] font-medium disabled:opacity-60">
           {m.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {m.isSuccess ? "Raised" : `Raise to $${target}`}
         </button>
       </div>
