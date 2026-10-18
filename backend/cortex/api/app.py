@@ -286,7 +286,9 @@ def _render_png(region: str, lighting: str, seed: int) -> bytes:
 
 @app.get("/api/projects/{pid}/sim/frame")
 async def sim_frame(pid: str, cube_region: str = "center", lighting: str = "normal", seed: int = 0):
-    png = await asyncio.to_thread(_render_png, cube_region, lighting, seed)
+    from ..services import intake_service
+
+    png = await intake_service.on_gl(_render_png, cube_region, lighting, seed)  # GL contexts are thread-bound
     return Response(png, media_type="image/png", headers={"Cache-Control": "no-store"})
 
 

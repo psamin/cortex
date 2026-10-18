@@ -94,3 +94,18 @@ def test_patch_during_build_is_not_lost(client):
     s = tool(client, "get_intake_status", project_id=pid)
     assert s["spec"]["objects"][0]["mass_kg"] == 0.02  # the patch survived the build
     assert s["scene_built"]  # either order: the build saw the patch, or it is marked stale
+
+
+def test_scene_env_cache_is_bounded(client):
+    from cortex.services import intake_service
+
+    pid = tool(client, "start_intake", prompt="pick up the cube")["project_id"]
+    tool(client, "update_intake", project_id=pid, patch={
+        "objects": [{"name": "cube", "confirm": True}], "zones": [{"name": "a", "center": [0.22, 0.12]}],
+        "task": {"place": ["a"]}})
+    for light in ("dim", "normal", "bright"):
+        tool(client, "update_intake", project_id=pid, patch={"environment": {"lighting": light}})
+        tool(client, "build_simulation", project_id=pid)
+    assert len(intake_service._envs) <= intake_service.MAX_ENVS
+    r = client.get(f"/api/projects/{pid}/sim/frame")  # legacy preview, now on the GL thread
+    assert r.status_code == 200 and r.headers["content-type"] == "image/png"
