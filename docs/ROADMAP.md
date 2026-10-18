@@ -29,7 +29,7 @@ status here.
 
 - **Robot sessions:** the user's own agent drives the arm through validated tools (#14). MCP robot tools return camera images (#21). This covers the session half of P5.
 - **Batch collection** with Claude Code as the planner (#24), and **demo import** from the Hub or an upload (#33, #48).
-- **Real SO-101 track** (#25): the driver (#36), setup and arming (#37), calibration (#39), and the control loop with deadman, watchdog thread and table floor (#58). This covers P7 and P9c.
+- **Real SO-101 track** (#25): the driver (#36), setup and arming (#37), calibration (#39), and the control loop with deadman, watchdog thread and table floor (#58), and teleop recording runs from the studio with the deadman relayed and recordings imported as demos (#65). This covers P7 and P9c; policy runs on the real arm are next.
 
 ## Post-MVP: hardware track (separate modules; the MVP never imports them)
 
@@ -50,4 +50,7 @@ comments (the `Claim:` convention on #20 and the owning issue) remain the source
 | Package | Branch | Driver | Files touched |
 |---|---|---|---|
 | #52 redesign (Kinetic) | `52-landing`, then `52-*` | Claude Code, driven by @AneeshD04 | `web/src/landing/**`, `web/src/robotics/**`, small route edits in `web/src/App.tsx` and `layout/AppShell.tsx`, visual-only edits in `web/src/**` |
+| #15 studio pass (S5 part 2) and Robot page (S6) | `15-*`, `25-robot-panel` | Claude Code, driven by @psamin | `web/src/pages/**`, `web/src/chat/**`, `web/src/layout/ProjectLayout.tsx`, `[new] web/src/pages/Robot.tsx`, one route in `web/src/App.tsx`; not `AppShell.tsx`, `index.css`, Tailwind, `main.tsx`, `index.html` or package files |
+| #25 policy runs on the real arm | `25-policy-runs` | Claude Code, driven by @psamin | `backend/cortex/hardware/arm_worker.py`, `backend/cortex/services/hardware_service.py`, `backend/cortex/api/app.py`, tests |
+| #26 Setup panel (infra choices UI) | `26-setup-panel` | Claude Code, driven by @psamin | `[new] web/src/pages/Setup.tsx` (or a chat-header sheet), `web/src/api/*` |
 | P5/P6: sessions and collection on intake scenes | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py` and `backend/cortex/services/robot_session_service.py`, coordinated on #16 |
