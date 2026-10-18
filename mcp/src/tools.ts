@@ -53,7 +53,11 @@ const TOOLS: Def[] = [
     description:
       "Start a robot-learning project from a plain-language task (SO-101 arm, MuJoCo tabletop sim). " +
       "Returns the project id, a task spec with measurable success criteria, and an initial demonstration plan " +
-      "(condition cells with target counts). Use the returned project_id for every other cortex_* tool.",
+      "(condition cells with target counts). Use the returned project_id for every other cortex_* tool.\n" +
+      "USE WHEN: you want an empty project and will record scripted-expert demos yourself (cortex_record_demonstrations).\n" +
+      "USE INSTEAD: cortex_create_policy_project for the fast path (creates the project and starts collection in one call); " +
+      "cortex_start_intake for a custom scene (the user's own objects, zones or obstacles).\n" +
+      "NEXT: cortex_record_demonstrations or cortex_start_agent_collection.",
     inputSchema: z.object({
       task_prompt: z.string().describe("What the robot should learn, in plain language, e.g. 'pick up the cube and place it in the bowl'"),
       mode: z.enum(["sim", "real"]).optional().describe(
@@ -254,7 +258,11 @@ const TOOLS: Def[] = [
       "demonstration collection, where Cortex's agent planner (our self-hosted Qwen3-VL, or GPT-6 Astra) plans from rendered camera images and a validated IK controller executes " +
       "in MuJoCo. Only simulator-verified successes become LeRobot demonstrations. Returns project_id, collection_id and job_id. " +
       "Paid planner spend is capped by the server's standing budget; you can lower it but never raise it. If the planner is not " +
-      "configured, collection_not_started explains why (Cortex never substitutes another model).",
+      "configured, collection_not_started explains why (Cortex never substitutes another model).\n" +
+      "USE WHEN: this is the default way to start. It is the fast path for the built-in tabletop pick-and-place scene (SO-101, simulation only).\n" +
+      "USE INSTEAD: cortex_start_intake when the user describes their own objects, zones or obstacles; cortex_create_project " +
+      "for an empty project without agent collection.\n" +
+      "NEXT: cortex_get_collection_progress with the collection_id, then cortex_train_from_agent_demonstrations.",
     inputSchema: z.object({
       task_prompt: z.string().describe("e.g. 'Train an SO-101 policy to pick up a cube and place it in a bowl'"),
       num_demos: z.number().int().min(1).max(50).optional().describe("Autonomous attempts to run (default 20)"),
@@ -499,7 +507,10 @@ const TOOLS: Def[] = [
       "Start teaching a task by describing your setup. Creates a draft project and returns typed questions about the arm, " +
       "cameras, objects, place zones, surroundings and task. Every question carries a ready-to-send `patch` for " +
       "cortex_update_intake, so you can accept defaults or edit them. Objects named in the prompt (e.g. 'water bottle', " +
-      "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them.",
+      "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them.\n" +
+      "USE WHEN: the user describes a custom scene (their own objects, place zones, cameras or obstacles). SO-101 arm, simulated only.\n" +
+      "USE INSTEAD: cortex_create_policy_project for the built-in tabletop pick-and-place scene (the fast path).\n" +
+      "NEXT: cortex_update_intake until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
       prompt: z.string().optional().describe("The task in plain language, e.g. 'pick up the small water bottle and put it on the coaster'"),
       mode: z.enum(["sim", "real"]).optional().describe("'sim' (default; the MVP runs everything in physics sim) or 'real'"),
@@ -513,7 +524,8 @@ const TOOLS: Def[] = [
       "Answer intake questions by merging a partial spec into the project. Lists of objects, zones, cameras and " +
       "environment.obstacles merge by `name` ({name, _delete: true} removes one; {name, confirm: true} confirms an object's " +
       "catalogue values). Units: metres and kilograms; table frame with x away from the arm base, y to its left. Unknown " +
-      "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.",
+      "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
+      "NEXT: call again until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
       project_id: projectId,
       patch: z.record(z.string(), z.unknown()).describe(
@@ -536,7 +548,9 @@ const TOOLS: Def[] = [
       "Build the MuJoCo scene from the completed intake, then check feasibility against the arm model: jaw opening " +
       "vs object width, holding torque vs actuator limits, and IK reach to every start and zone. Infeasible items " +
       "come back with alternatives (a smaller object, the nearest reachable spot). Returns a top-camera preview image. " +
-      "Takes 10-60 s.",
+      "Takes 10-60 s.\n" +
+      "NEXT: check the scene with cortex_capture_frame, fix any infeasible items with cortex_update_intake, then collect demos " +
+      "with cortex_start_agent_collection.",
     inputSchema: z.object({ project_id: projectId }),
     annotations: WRITE,
   },
