@@ -30,6 +30,8 @@ import type {
   NextAction,
   PolicyType,
   HardwareConfig,
+  Infra,
+  InfraChoice,
   HardwareProcess,
   HardwareRun,
   HardwareStatus,
@@ -134,6 +136,9 @@ export const api = {
   job: (id: string) => get<Job>(`/jobs/${id}`),
   /** Resolve a storage key (e.g. EpisodeResult.video_key) to a browser URL. */
   media: (key: string) => get<{ url: string }>(`/media?key=${encodeURIComponent(key)}`),
+
+  infra: (pid: string) => get<Infra>(`/projects/${pid}/infra`),
+  saveInfra: (pid: string, choice: Partial<InfraChoice>) => put<Infra>(`/projects/${pid}/infra`, choice),
 
   // real SO-101 (local studio only; refusals are 403 {detail, code: "hardware_not_ready"})
   hardware: () => get<HardwareStatus>("/hardware"),
