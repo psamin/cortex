@@ -10,8 +10,13 @@ import pytest
 
 from cortex.models import Condition
 from cortex.rl import SandboxBudget, SandboxEnv, Weakness, propose
-from cortex.rl.sandbox_env import DART_LEGS, DART_PHASES, dart_perturb, widen
-from cortex.sim.pick_place_skill import Target
+from cortex.rl.sandbox_env import DART_LEGS, DART_PHASES, act_labelled, dart_perturb, episode_return, widen
+from cortex.rl.skill import TunedSkill
+from cortex.sim.env_factory import SCENE_MAX_STEPS
+from cortex.sim.expert import MAX_DEG_PER_STEP
+from cortex.sim.pick_place_skill import PickPlaceSkill, Target
+from cortex.workers.rl_worker import step_limit
+from cortex.workers.sim_worker import CUBE_REST_Z, failure_mode, rest_height
 
 BACKEND = Path(__file__).resolve().parents[1]
 
@@ -50,6 +55,100 @@ def test_dart_perturbs_pick_place_skill_targets_by_phase():
     dart_perturb(sk, np.random.default_rng(1))
     out = list(sk.moves)
     assert [bool(np.any(t.q != 0)) for t in out] == [t.phase in DART_PHASES for t in out]
+
+
+def test_scene_sandboxes_get_the_scene_step_limit():  # #152 item 22
+    assert step_limit(None, {}) == 300 and step_limit(None, {"max_steps": 240}) == 240
+    assert step_limit({"info": {}}, {"max_steps": 300}) == SCENE_MAX_STEPS
+    assert step_limit({"info": {}, "max_steps": 3000}, {}) == 3000
+
+
+def test_lift_is_measured_from_the_resting_height():  # #152 item 23
+    class Tall:
+        obj_h = 0.12  # a 12 cm bottle rests with its centre at 6 cm
+
+    rest = rest_height(Tall())
+    assert rest == pytest.approx(0.06) and rest_height(object()) == CUBE_REST_Z
+    w = {"success": 1.0, "lifted": 1.0, "held_at_carry": 1.0}
+    standing = {"success": False, "max_cube_z": 0.065, "final_cube_box_dist": 0.2, "rest_z": rest}
+    assert episode_return(standing, w)[1]["lifted"] == 0 and episode_return(standing, w)[1]["held_at_carry"] == 0
+    assert failure_mode(False, 0.065, 300, 300, 0.2, rest) == "grasp_failed"  # it never left the table
+    lifted = {**standing, "max_cube_z": rest + 0.05}
+    assert episode_return(lifted, w)[1] == {"success": 0.0, "lifted": 1.0, "held_at_carry": 1.0, "place_dist": pytest.approx(1 / 3)}
+    assert failure_mode(False, rest + 0.05, 300, 300, 0.2, rest) == "dropped_before_target"
+    # the cube task is unchanged: rest 1.5 cm, lifted above 4.5 cm, carry above 6 cm, grasp failed below 3 cm
+    cube = {"success": False, "max_cube_z": 0.05, "final_cube_box_dist": 0.2}
+    assert episode_return(cube, w)[1]["lifted"] == 1 and episode_return(cube, w)[1]["held_at_carry"] == 0
+    assert failure_mode(False, 0.029, 300, 300, 0.2) == "grasp_failed"
+    assert failure_mode(False, 0.031, 300, 300, 0.01) == "released_outside_target"
+
+
+def tuned_skill(n=8):
+    sk = TunedSkill.__new__(TunedSkill)  # the real ScriptedExpert.act stepping, without a simulator
+    sk.waypoints = [(np.r_[np.full(5, 10.0 * (i + 1)), 40.0], 2) for i in range(n)]
+    sk.cmd, sk.i, sk.hold = np.zeros(6), 0, 0
+    return sk
+
+
+def test_dart_demos_are_labelled_with_the_clean_command():  # #152 item 26
+    clean, noisy = tuned_skill(), tuned_skill()
+    dart_perturb(noisy, np.random.default_rng(3), sigma_deg=6.0)
+    differs = 0
+    for _ in range(400):
+        if noisy.done:
+            break
+        i, prev = noisy.i, noisy.cmd.copy()
+        executed, label = act_labelled(noisy)
+        target = clean.waypoints[i][0]  # the unperturbed leg
+        expect = prev + np.r_[np.clip(target[:5] - prev[:5], -MAX_DEG_PER_STEP, MAX_DEG_PER_STEP),
+                              np.clip(target[5] - prev[5], -8, 8)]
+        assert label == pytest.approx(expect)
+        assert np.abs(target - label).max() <= np.abs(target - prev).max() + 1e-9  # towards the clean path
+        differs += not np.allclose(executed, label)
+    assert differs > 0  # the noise is executed, never recorded as the label
+    plain = tuned_skill()
+    for _ in range(50):
+        executed, label = act_labelled(plain)  # no perturbation: the label is what runs
+        assert np.array_equal(executed, label)
+
+
+def test_dart_labels_for_the_intake_pick_place_skill():
+    class World:
+        def __init__(self, sk):
+            self.sk = sk
+
+        def joint_state(self):
+            return self.sk.cmd  # the arm tracks its command exactly
+
+    def skill():
+        sk = PickPlaceSkill.__new__(PickPlaceSkill)
+        sk.env = type("Env", (), {})()
+        sk.env.world = World(sk)
+        sk.moves = iter([Target(np.full(5, 20.0 * (k + 1)), 40.0, rate=2.0, settle=1, phase=p)
+                         for k, p in enumerate(("transit", "approach", "carry"))])
+        sk.cmd, sk.cur, sk.finished, sk.failed = np.zeros(6), None, False, None
+        sk.steps_on, sk.settled, sk.max_steps, sk.phase = 0, 0, 400, "start"
+        return sk
+
+    sk = skill()
+    dart_perturb(sk, np.random.default_rng(0), sigma_deg=5.0)
+    seen = 0
+    phases = ["transit", "approach", "carry"]
+    differs = 0
+    while not sk.done and seen < 500:
+        if sk.cur is None:
+            sk._next()
+            if sk.cur is None:
+                break
+        phase, prev, tgt = sk.phase, sk.cmd.copy(), sk.cur
+        clean = np.r_[np.full(5, 20.0 * (phases.index(phase) + 1)), 40.0]
+        assert np.allclose(tgt.clean_q, clean[:5])
+        executed, label = act_labelled(sk)
+        expect = prev + np.r_[np.clip(clean[:5] - prev[:5], -2.0, 2.0), np.clip(clean[5] - prev[5], -8, 8)]
+        assert label == pytest.approx(expect)  # the clean target, at the leg's own rate
+        differs += phase in DART_PHASES and not np.allclose(executed, label)
+        seen += 1
+    assert seen > 0 and differs > 0
 
 
 def tiny_sandbox():

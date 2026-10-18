@@ -936,6 +936,67 @@ TOOLS.update({t.name: t for t in [
          "what it has on held-out seeds, and reports why it stopped.", RLArgs.Stop, t_rl_stop),
 ]})
 
+# RL 4/5: closing the loop (docs/RL_DESIGN.md section 7)
+class RLRoundArgs:
+    class Close(BaseModel):
+        project_id: str
+        sandbox_id: str = Field(description="a finished sandbox (rl_...) with a measured held-out result")
+        episodes_per_condition: int | None = Field(None, ge=5, le=200, description="matched held-out seeds per "
+                                                   "condition in the re-evaluation; default: the n of the "
+                                                   "evaluation the weakness came from")
+        wait_s: int = Field(0, ge=0, le=300, description="keep advancing for up to this long while a dataset build "
+                                                         "or the re-evaluation runs")
+
+    class List(BaseModel):
+        project_id: str
+
+
+async def t_rl_close(ctx, a, actor):
+    from . import rl_service
+
+    p = await get_project(ctx, a.project_id)
+    rnd = await rl_service.close_round(ctx, p, a.sandbox_id, actor, a.episodes_per_condition)
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + a.wait_s
+    while rnd.status in ("dataset_building", "reevaluating") and loop.time() < deadline:
+        await asyncio.sleep(2)
+        rnd = await rl_service.close_round(ctx, p, a.sandbox_id, actor, a.episodes_per_condition)
+    view = rl_service.round_view(rnd)
+    w = view["waiting_on"]
+    out = {"summary": f"round {rnd.id} ({rnd.weakness_key}): {rnd.status}. {rnd.note}"
+                      + (f" Waiting on {w['what']}; call close_rl_round again to continue." if w else ""),
+           "ref_ids": [i for i in (rnd.id, rnd.dataset_version_id, rnd.training_job_id, rnd.evaluation_before,
+                                   rnd.evaluation_after) if i], "round": view}
+    if rnd.status == "retrain_proposed":
+        out["requires_approval"] = True  # training is only proposed; a human approves it
+    return out
+
+
+async def t_rl_rounds(ctx, a, actor):
+    from ..rl.proposals import transfer_fit
+    from . import rl_service
+
+    rows = await rl_service.rounds(ctx, a.project_id)
+    fit = transfer_fit(await rl_service.history(ctx, a.project_id))
+    done = [r for r in rows if r.status == "realised"]
+    return {"summary": f"{len(rows)} RL rounds, {len(done)} realised; transfer curve {fit['source']} "
+                       f"(t = {fit['t_mean']:.2f}, {fit['rounds_used']} rounds)",
+            "ref_ids": [r.id for r in rows], "rounds": [rl_service.round_view(r) for r in rows], "transfer": fit}
+
+
+TOOLS.update({t.name: t for t in [
+    Tool("close_rl_round", "Close the loop for a finished RL sandbox, one step per call (call again to continue): "
+         "its successful demos (provenance rl_sandbox:<id>, quality-gated) go into a new version of the latest "
+         "dataset, capped so targeted demos stay at most 40% of the train split; then a retrain is PROPOSED (a human "
+         "approves it); once its checkpoint exists, the old and new checkpoints are re-evaluated on every condition "
+         "on matched held-out seeds (McNemar per condition, regressions flagged), the predicted vs realised uplift "
+         "is logged and the transfer curve refitted (learned after 3 realised rounds, prior before).",
+         RLRoundArgs.Close, t_rl_close),
+    Tool("get_rl_rounds", "A project's RL rounds: status, predicted (estimate) vs realised (measured) uplift on the "
+         "weak condition, the paired per-condition comparison with regressions, and the current transfer curve.",
+         RLRoundArgs.List, t_rl_rounds),
+]})
+
 # MCP Apps views (#119): snapshots for in-chat views and the human-only approval path.
 from . import mcp_views  # noqa: E402
 

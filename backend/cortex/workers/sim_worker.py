@@ -70,12 +70,24 @@ def write_mp4(frames: list[np.ndarray], path: Path, fps: int = FPS) -> None:
             out.mux(pkt)
 
 
-def failure_mode(success: bool, max_z: float, steps: int, max_steps: int, final_dist: float) -> str | None:
-    """Measured from simulator telemetry (not a model guess)."""
+CUBE_REST_Z = 0.015  # the upstream cube's centre height at rest (PickPlaceEnv.reset)
+GRASP_LIFT_M = 0.015  # the object centre must rise this far above its resting height, or the grasp failed
+
+
+def rest_height(env: PickPlaceEnv) -> float:
+    """The task object's centre height at rest: h/2 for an intake object (``SceneEnv.obj_h``), else the cube's.
+    Lift is measured relative to it, so a tall object standing still never counts as lifted (#152)."""
+    h = getattr(env, "obj_h", None)
+    return float(h) / 2 if h else CUBE_REST_Z
+
+
+def failure_mode(success: bool, max_z: float, steps: int, max_steps: int, final_dist: float,
+                 rest_z: float = CUBE_REST_Z) -> str | None:
+    """Measured from simulator telemetry (not a model guess). ``rest_z``: the object's resting centre height."""
     if success:
         return None
-    if max_z < 0.03:
-        return "grasp_failed"  # cube never left the table
+    if max_z - rest_z < GRASP_LIFT_M:
+        return "grasp_failed"  # the object never left the table
     if final_dist > 0.06:
         return "dropped_before_target"
     return "released_outside_target"
@@ -125,7 +137,7 @@ def rollout(env: PickPlaceEnv, policy, obs: dict[str, Any], seed: int, max_steps
     return {
         "seed": seed, "success": bool(success), "reward": float(reward), "steps": steps,
         "max_cube_z": env.max_cube_z, "final_cube_box_dist": final_dist,
-        "failure_mode": failure_mode(success, env.max_cube_z, steps, max_steps, final_dist),
+        "failure_mode": failure_mode(success, env.max_cube_z, steps, max_steps, final_dist, rest_height(env)),
         "wall_s": time.time() - t0, "buf": buf, "video": video,
     }
 

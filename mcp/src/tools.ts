@@ -722,6 +722,34 @@ const TOOLS: Def[] = [
     annotations: WRITE,
   },
   {
+    name: "close_rl_round",
+    title: "Close RL round",
+    description:
+      "Close the loop for a finished RL sandbox, one step per call (call again to continue). Its successful demos " +
+      "(provenance rl_sandbox:<id>, quality-gated) go into a new version of the project's latest dataset, capped so " +
+      "targeted demos stay at most 40% of the train split. Then a retrain is PROPOSED: a human approves it in the " +
+      "Cortex studio, never the agent. Once its checkpoint exists, the old and new checkpoints are re-evaluated on " +
+      "every condition on matched held-out seeds (McNemar per condition, regressions flagged), predicted vs realised " +
+      "uplift is logged, and the transfer curve is refitted (learned after 3 realised rounds, prior before). " +
+      "Returns the round with waiting_on (a job, a human approval, or the evaluations).",
+    inputSchema: z.object({
+      project_id: projectId,
+      sandbox_id: z.string().describe("A finished sandbox (rl_...) with a measured held-out result"),
+      episodes_per_condition: z.number().int().min(5).max(200).optional().describe("Matched held-out seeds per condition in the re-evaluation; default: the n of the evaluation the weakness came from"),
+      wait_s: z.number().int().min(0).max(300).optional().describe("Keep advancing for up to this many seconds while a dataset build or the re-evaluation runs (default 0). Many MCP clients time out a call after about 60 s, so prefer <= 45 and call again."),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "get_rl_rounds",
+    title: "Get RL rounds",
+    description:
+      "A project's RL rounds: status, predicted (estimate) vs realised (measured) uplift on the weak condition, the " +
+      "paired per-condition comparison with regressions, and the current transfer curve with its source.",
+    inputSchema: z.object({ project_id: projectId }),
+    annotations: READ,
+  },
+  {
     name: "get_session_link",
     title: "Get session link",
     description:

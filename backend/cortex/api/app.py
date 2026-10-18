@@ -1077,6 +1077,29 @@ async def rl_live(sid: str):
     return Response(path.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
+class RLCloseReq(BaseModel):
+    episodes_per_condition: int | None = None
+
+
+@app.post("/api/rl/sandboxes/{sid}/close")
+async def rl_close(sid: str, req: RLCloseReq, request: Request):
+    """Advance a finished sandbox's round one step (demos -> dataset version -> proposed retrain -> paired re-eval)."""
+    from ..services import rl_service
+    sb = await rl_service.get(ctx(), sid)
+    rnd = await rl_service.close_round(ctx(), await orch.get_project(ctx(), sb.project_id), sid, actor(request),
+                                       req.episodes_per_condition)
+    return rl_service.round_view(rnd)
+
+
+@app.get("/api/projects/{pid}/rl/rounds")
+async def rl_rounds(pid: str):
+    from ..rl.proposals import transfer_fit
+    from ..services import rl_service
+    rows = await rl_service.rounds(ctx(), pid)
+    return {"rounds": [rl_service.round_view(r) for r in rows],
+            "transfer": transfer_fit(await rl_service.history(ctx(), pid))}
+
+
 # ------------------------------------------------------------------ agent observability (#105)
 from .agents import router as agents_router  # noqa: E402
 
