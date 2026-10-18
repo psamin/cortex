@@ -166,9 +166,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
         with LOCK:
-            for jpg, _step, _ms, _ok in serve_sim.stream(p, seed):
+            for jpg, step, ms, ok in serve_sim.stream(p, seed):
+                head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
+                        f"X-Frame: {step}/{p['env'].max_steps}\r\nX-Inference-Ms: {ms:.2f}\r\n"
+                        f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
+                        f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
                 try:
-                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+                    self.wfile.write(head + jpg + b"\r\n")
                 except (BrokenPipeError, ConnectionResetError):
                     return
 
