@@ -692,7 +692,14 @@ export interface PlannerBudget {
 
 // ---------------------------------------------------------------- viewer / pipeline (new endpoints; may 404)
 export interface RemoteRollout {
-  kind: "demo" | "eval" | "attempt";
+  /** replay: a trained policy run open loop on a held-out recorded demo (joint error, never success) */
+  kind: "demo" | "eval" | "attempt" | "replay";
+  replay_kind?: "held_out_replay" | "live_inference";
+  /** replays: "0.12° joint error · 41 ms/frame" */
+  metric?: string | null;
+  partial?: boolean;
+  /** replays: frames the policy acted on */
+  frames?: number | null;
   /** failed attempts: why it failed (may be technical) */
   failure?: string | null;
   id: string;
@@ -731,6 +738,8 @@ export interface Iteration {
   training: { id: string; status: string; backend: string; policy_type?: string; gpu_hours_est?: number; loss_curve: [number, number][]; error?: string | null } | null;
   evaluation: { id: string; branches: IterationBranch[] } | null;
   next: { reason: string; conditions: Condition[]; collection_id: string | null } | null;
+  /** open-loop replays of this checkpoint on held-out recorded demos: joint error, not a success rate */
+  replay?: { id: string | null; episodes: number; joint_mae_deg: number | null; live_sessions: number; inference_ms: number | null; note: string } | null;
 }
 
 // ---------------------------------------------------------------- real SO-101 (local studio only)

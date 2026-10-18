@@ -20,18 +20,19 @@ const ORIGIN_LABEL: Record<RolloutOrigin, string> = {
   imported: "Human imported",
   teleop: "Real teleop",
   eval: "Evaluations",
+  replay: "Policy replays",
   attempt: "Failed attempts",
 };
-const ORIGIN_ORDER: RolloutOrigin[] = ["agent", "oracle", "imported", "teleop", "eval", "attempt"];
+const ORIGIN_ORDER: RolloutOrigin[] = ["agent", "oracle", "imported", "teleop", "eval", "replay", "attempt"];
 
-/** ✓ / ✗ failure / "not judged" */
-const mark = (r: Rollout) => (r.success === null ? "not judged" : r.success ? "✓" : `✗${r.failureMode ? ` ${r.failureMode.replace(/_/g, " ")}` : ""}`);
+/** ✓ / ✗ failure / what was measured instead (replays: joint error) / "not judged" */
+const mark = (r: Rollout) => (r.success === null ? r.metric ?? "not judged" : r.success ? "✓" : `✗${r.failureMode ? ` ${r.failureMode.replace(/_/g, " ")}` : ""}`);
 
 /** "#27 · Claude Code · cube center, bright light · ✓" */
 function chipText(r: Rollout): string {
-  const num = r.kind === "demo" ? r.label.replace(/^Demo\s*/, "") : r.kind === "attempt" ? "Attempt" : r.who;
+  const num = r.kind === "demo" ? r.label.replace(/^Demo\s*/, "") : r.kind === "attempt" ? "Attempt" : r.kind === "replay" ? r.label : r.who;
   const who =
-    r.origin === "agent" ? r.who.replace(/ agent$/, "") : r.origin === "oracle" ? "Oracle" : r.origin === "imported" ? "Human (imported)" : r.origin === "teleop" ? "Human (teleop)" : r.origin === "attempt" ? r.who.replace(/ agent$/, "") : "";
+    r.kind === "replay" ? (r.policy ? `policy ${r.policy}` : "") : r.origin === "agent" ? r.who.replace(/ agent$/, "") : r.origin === "oracle" ? "Oracle" : r.origin === "imported" ? "Human (imported)" : r.origin === "teleop" ? "Human (teleop)" : r.origin === "attempt" ? r.who.replace(/ agent$/, "") : "";
   const where = r.imported ? shortSource(r.source) : r.condition ? conditionWords(r.condition) : "";
   return [num, who, where, mark(r)].filter(Boolean).join(" · ");
 }
@@ -224,7 +225,7 @@ export function Viewer({
         <div className="relative border-t border-line bg-bench">
           <p className="flex items-center gap-1.5 px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
             Newest first · ✓ sim-verified · ✗ failed
-            <InfoTip>✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict</InfoTip>
+            <InfoTip>✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict · policy replays: a trained policy run open loop on held-out real demos, scored by joint error against the human (the arm did not move, so no success is judged)</InfoTip>
           </p>
           <div className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 pt-1.5 scroll-thin">
             {filtered.slice(0, 80).map((r) => (
@@ -509,7 +510,7 @@ function Hud({
           ].filter(Boolean).join(" · ")}
           {" · "}
           <span className={rollout.success === null ? "text-ink-3" : rollout.success ? "text-pass" : "text-fault"}>
-            {rollout.success === null ? "not judged" : rollout.success ? "✓ success" : `✗ ${rollout.failureMode ? rollout.failureMode.replace(/_/g, " ") : "failed"}`}
+            {rollout.success === null ? rollout.metric ?? "not judged" : rollout.success ? "✓ success" : `✗ ${rollout.failureMode ? rollout.failureMode.replace(/_/g, " ") : "failed"}`}
           </span>
         </p>
       )}
