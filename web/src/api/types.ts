@@ -694,10 +694,11 @@ export interface PlannerBudget {
 
 // ---------------------------------------------------------------- viewer / pipeline (new endpoints; may 404)
 export interface RemoteRollout {
-  /** replay: a trained policy run open loop on a held-out recorded demo (joint error, never success) */
+  /** replay: a trained policy run open loop on a held-out recorded demo (joint error, never success),
+   *  or (replay_kind live_sim) one live closed-loop sim run, whose success the simulator judged */
   kind: "demo" | "eval" | "attempt" | "replay";
-  replay_kind?: "held_out_replay" | "live_inference";
-  /** replays: "0.12° joint error · 41 ms/frame" */
+  replay_kind?: "held_out_replay" | "live_inference" | "live_sim";
+  /** replays: "0.12° joint error · 41 ms/frame"; live sim: "212 steps · 18 ms/frame" */
   metric?: string | null;
   partial?: boolean;
   /** replays: frames the policy acted on */

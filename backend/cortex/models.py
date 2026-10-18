@@ -470,9 +470,10 @@ class LaunchEvaluationRequest(BaseModel):
 
 
 class ReplayEpisode(BaseModel):
-    """One held-out recorded episode a policy was run on, frame by frame, without moving an arm."""
+    """One episode a policy was run on: a held-out recorded demo (open loop, the arm never moves), or for
+    live_sim one closed-loop MuJoCo run on an unseen seed."""
 
-    episode: int  # episode index in the source dataset; never trained on
+    episode: int  # episode index in the source dataset (never trained on); live_sim: the seed
     instruction: str = ""
     frames: int  # frames the policy acted on
     total_frames: int | None = None  # the episode's length when known (a live session can stop early)
@@ -481,19 +482,26 @@ class ReplayEpisode(BaseModel):
     inference_ms: dict[str, float] = {}  # live sessions: mean, p50, p95 and max per frame on the GPU
     video_key: str | None = None
     trace_key: str | None = None  # live sessions: per-frame JSON (inference ms, joint error)
+    success: bool | None = None  # live_sim only: the simulator's verdict at the end of the run
+    steps: int | None = None  # live_sim only: control steps run
 
 
 REPLAY_NOTE = "open-loop replay on held-out real demos: joint error vs the human, not a success rate"
+LIVE_SIM_NOTE = "closed-loop run in MuJoCo on the GPU, on an unseen layout; success judged by the simulator"
 
 
 class PolicyReplay(BaseModel):
-    """A trained policy run open loop on held-out recorded demos. It sees the recorded camera images and
-    arm state, and its joint targets are compared with what the human did. That measures imitation, not
-    task success: the arm never moves, so no success rate is claimed."""
+    """A trained policy's run recorded outside the evaluation harness.
+
+    held_out_replay / live_inference: run open loop on held-out recorded demos. It sees the recorded camera
+    images and arm state, and its joint targets are compared with what the human did. That measures
+    imitation, not task success: the arm never moves, so no success rate is claimed.
+    live_sim: one closed-loop MuJoCo run streamed to the studio; the simulator judges success. A single
+    run, so it is kept out of evaluation success rates."""
 
     id: str = Field(default_factory=lambda: new_id("rp"))
     project_id: str
-    kind: Literal["held_out_replay", "live_inference"]
+    kind: Literal["held_out_replay", "live_inference", "live_sim"]
     status: Literal["complete", "partial"] = "complete"  # partial: a live session the viewer left early
     checkpoint_id: str | None = None  # the registered checkpoint, when it is registered in this project
     checkpoint_name: str = ""  # as named where it ran, e.g. jenga_010000

@@ -32,6 +32,26 @@ def _stream(n: int, total: int | None = None, headers: bool = True) -> bytes:
     return b"".join(_part(i, total or n, _jpeg(10 + i), headers) for i in range(n))
 
 
+def _sim_stream(n: int, succeed_at: int, seed: int = 7) -> bytes:
+    """serve_policy.py's /sim/<task>/<seed> parts: step/max_steps, inference ms, the simulator's verdict."""
+    out = b""
+    for i in range(n):
+        jpg = _jpeg(10 + i)
+        out += (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\nX-Frame: {i}/600\r\n"
+                f"X-Inference-Ms: 20\r\nX-Success: {int(i >= succeed_at)}\r\nX-Seed: {seed}\r\n"
+                f"X-Policy: act@030000\r\nX-Instruction: push%20the%20block\r\n\r\n").encode() + jpg + b"\r\n"
+    return out
+
+
+def test_a_sim_stream_gives_the_verdict_steps_and_policy():
+    rec = StreamRecorder()
+    rec.feed(_sim_stream(45, succeed_at=30))
+    assert rec.success is True and rec.last_index == 44 and rec.total == 600 and rec.policy == "act@030000"
+    assert not rec.complete  # ends by itself on success, before max_steps: complete only once the proxy says so
+    rec.finished = True
+    assert rec.complete
+
+
 @pytest.mark.parametrize("chunk", [7, 1000, 10**6])
 def test_frames_and_measurements_are_split_out_whatever_the_chunking(chunk):
     data, rec = _stream(40), StreamRecorder()
@@ -62,7 +82,8 @@ def test_a_session_the_viewer_left_is_partial():
 def upstream():
     """A stand-in for serve_policy.py: policies.json and one held-out episode's MJPEG stream."""
     info = {"gpu": "NVIDIA H200", "policies": {"jenga": {"checkpoint": "jenga_010000", "stage": "jenga",
-                                                         "held_out": [58]}}}
+                                                         "held_out": [58]}},
+            "sim": {"jenga": {"variant": "act", "step": "030000", "success_rate": 0.9, "instruction": "push"}}}
 
     class H(BaseHTTPRequestHandler):
         def log_message(self, *a):
@@ -79,7 +100,7 @@ def upstream():
             self.send_response(200)
             self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
             self.end_headers()
-            self.wfile.write(_stream(40))
+            self.wfile.write(_sim_stream(45, succeed_at=30) if self.path.startswith("/sim/") else _stream(40))
 
     srv = ThreadingHTTPServer(("127.0.0.1", 0), H)
     threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -137,3 +158,40 @@ def test_a_task_without_a_project_is_streamed_but_not_saved(client):
     c, mapping = client
     mapping.write_text("{}")
     assert c.get("/api/live-policy/stream/jenga/58").status_code == 200
+
+
+def _replays(c, pid):
+    rows = []
+    for _ in range(100):  # saved in the background after the stream ends
+        rows = c.get(f"/api/projects/{pid}/replays").json()
+        if rows:
+            break
+        time.sleep(0.1)
+    return rows
+
+
+def test_a_live_sim_run_is_saved_with_the_simulators_verdict(client):
+    from cortex.api import app as app_mod
+    from cortex.models import Checkpoint
+
+    c, mapping = client
+    pid = c.post("/api/projects", json={"task_prompt": "Push a block out of a Jenga tower (sim)"}).json()["id"]
+    mapping.write_text(json.dumps({"sim_jenga": pid}))
+    ck = Checkpoint(project_id=pid, training_job_id=None, policy_type="act", step=30000,
+                    path="futurama:~/cortex-sim/jenga/runs/act/checkpoints/030000/pretrained_model")
+    c.portal.call(app_mod.CTX.repo.save, "checkpoints", ck)
+    r = c.get("/api/live-policy/sim/jenga/7")
+    assert r.status_code == 200 and r.content.count(b"--frame") == 45
+
+    rows = _replays(c, pid)
+    assert len(rows) == 1
+    rp, ep = rows[0], rows[0]["episodes"][0]
+    assert rp["kind"] == "live_sim" and rp["status"] == "complete" and rp["checkpoint_id"] == ck.id
+    assert rp["checkpoint_name"] == "act@030000" and "judged by the simulator" in rp["note"]
+    assert ep["episode"] == 7 and ep["success"] is True and ep["steps"] == 45 and ep["inference_ms"]["mean"] == 20
+    assert ep["joint_mae_deg"] is None and ep["video_key"].endswith("seed7.mp4")
+    row = [x for x in c.get(f"/api/projects/{pid}/rollouts").json() if x["kind"] == "replay"][0]
+    assert row["replay_kind"] == "live_sim" and row["success"] is True and row["seed"] == 7
+    assert row["label"] == "Live sim · seed 7" and row["metric"] == "45 steps · 20 ms/frame"
+    st = c.get(f"/api/projects/{pid}/state").json()
+    assert st["evaluations"] == [] and st["replays"][0]["success"] is True  # one run is not an evaluation
