@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -50,6 +51,8 @@ class Ctx:
     model: ModelRoute | None = None
     vlm_source: str = "disabled"
     gateway_error: str | None = None  # why the InsForge Model Gateway gave no key (e.g. plan restriction)
+    # signed media URLs, reused until close to expiry so polling doesn't reload every <video>
+    signed_urls: dict[str, tuple[str, float]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
 
     # ------------------------------------------------------------ files
@@ -72,10 +75,14 @@ class Ctx:
             p.write_bytes(await self.blobs.get_bytes(key))
         return p
 
-    async def media_url(self, key: str) -> str:
+    async def media_url(self, key: str, ttl_s: int = 3600) -> str:
         if not isinstance(self.blobs, LocalBlobStore):
-            url = await self.blobs.url(key)
+            hit = self.signed_urls.get(key)
+            if hit and hit[1] - time.time() > 600:  # same URL until 10 minutes before it expires
+                return hit[0]
+            url = await self.blobs.url(key, ttl_s)
             if url:
+                self.signed_urls[key] = (url, time.time() + ttl_s)
                 return url
         return f"{self.settings.public_url}/files/{key}"
 
