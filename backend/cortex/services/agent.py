@@ -342,9 +342,11 @@ def _wants_scene(project, message: str) -> bool:
     from ..intake import catalogue
 
     named = set(catalogue.mentioned(message))
-    if project.intake is None:
+    # compare with the scene that was built, not the intake: a turn stopped after start_intake leaves an intake
+    # naming the objects without a scene, and the same prompt again must still build it
+    if not project.scene:
         return bool(named - {"cube"})
-    return bool(named - {catalogue.lookup(o.name.replace("_", " ")) for o in project.intake.objects})
+    return bool(named - {catalogue.lookup(o.replace("_", " ")) for o in project.scene["objects"]})
 
 
 def _merge_patch(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:

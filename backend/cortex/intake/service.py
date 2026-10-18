@@ -23,7 +23,7 @@ from typing import Any
 from pydantic import ValidationError
 
 from . import catalogue
-from .spec import SO101_JOINTS, IntakeSpec, IntakeStatus, Question
+from .spec import SO101_JOINTS, TEXT, IntakeSpec, IntakeStatus, Question
 
 KEYED_LISTS = {"objects", "zones", "cameras", "environment.obstacles"}
 MAX_PATCH_CHARS = 20_000
@@ -38,7 +38,8 @@ class IntakeError(ValueError):
 
 
 def start(prompt: str = "", mode: str = "sim") -> IntakeSpec:
-    spec = IntakeSpec(prompt=prompt.strip(), mode=mode)  # type: ignore[arg-type]
+    # the spec keeps the first TEXT characters; objects are seeded from the whole prompt (a long one failed the intake)
+    spec = IntakeSpec(prompt=prompt.strip()[:TEXT], mode=mode)  # type: ignore[arg-type]
     for key in catalogue.mentioned(prompt):
         obj = catalogue.from_catalogue(key, key)
         if obj is not None:
