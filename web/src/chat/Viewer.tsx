@@ -9,7 +9,7 @@ import { conditionWords } from "../components/Workcell";
 import { cn } from "../lib/format";
 import { DashedOrbit, SketchScene } from "../sketch";
 import { InfoTip } from "../components/ui";
-import { useRolloutVideo, useRollouts, type Camera, type CameraInfo, type Rollout, type RolloutOrigin } from "./rollouts";
+import { useRolloutVideo, useRollouts, type Camera, type Rollout, type RolloutOrigin } from "./rollouts";
 
 export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
 
@@ -187,7 +187,7 @@ export function Viewer({
         )}
       </div>
 
-      <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
+      <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} />
 
       {/* stage */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
@@ -444,7 +444,6 @@ function Hud({
   activity,
   liveJob,
   rollout,
-  cam,
 }: {
   aug?: { n: number; tip: string };
   goal: string;
@@ -452,7 +451,6 @@ function Hud({
   activity: { label: string; busy: boolean } | null;
   liveJob?: Job;
   rollout: Rollout | null;
-  cam: CameraInfo | null;
 }) {
   return (
     <div className="relative flex items-start justify-between gap-6 px-6 pt-4">
@@ -508,11 +506,6 @@ function Hud({
               .filter(Boolean)
               .join(" · ") || "—"}
           </Readout>
-          {cam && (
-            <Readout k="Cam" title={cam.detail}>
-              {cam.label}
-            </Readout>
-          )}
         </dl>
       )}
     </div>

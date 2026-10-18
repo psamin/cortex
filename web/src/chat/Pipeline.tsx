@@ -211,7 +211,7 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
         value={policy ? pct(policy.rate) : "—"}
         sub={policy && ci ? `${policy.k}/${policy.n} · 95% CI ${pct(ci[0])}–${pct(ci[1])}` : oracle.n ? `oracle: ${pct(oracle.k / oracle.n)}` : "no learned policy yet"}
       />
-      <Tile label="Demonstrations" value={episodes.data ? accepted.length : "—"} sub="accepted" />
+      <Tile label="Demos accepted" value={episodes.data ? accepted.length : "—"} />
       <Tile label="Iteration" value={iteration ?? "—"} sub={pendingIt ? pendingIt.policy_version : version ? `policy ${version}` : "none yet"} />
       <Tile label="Eval episodes" value={evals.data ? evalN : "—"} sub={`${(evals.data ?? []).length} evaluations`} />
       <Tile label="Training loss" value={loss ? loss[loss.length - 1][1].toFixed(3) : "—"} sub={loss ? `step ${loss[loss.length - 1][0].toLocaleString()}` : "not trained"}>
@@ -226,7 +226,7 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
         )}
       </Tile>
       <Tile
-        label="Avg demo length"
+        label="Demo length"
         value={simLen !== null ? `${simLen.toFixed(1)}s` : recLen !== null ? `${recLen.toFixed(1)}s` : "—"}
         sub={simLen !== null ? (recLen !== null ? `simulated · imported ${recLen.toFixed(1)}s recorded` : "simulated time") : recLen !== null ? "recorded time (imported)" : "no demos yet"}
       />
@@ -262,7 +262,7 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
           {/futurama/i.test(trainingProvider) ? " · needs Futurama GPU (GT VPN)" : health.data?.training?.fallback ? " · no GPU connected" : ""}
         </p>
         {proposed > 0 && <p className="mt-1 text-xs text-caution">{proposed} training job{proposed === 1 ? "" : "s"} to approve in chat</p>}
-        <FailureBars failures={failures} maxF={maxF} empty="No failures." />
+        {failures.length > 0 && <FailureBars failures={failures} maxF={maxF} empty="No failures." />}
       </div>
     );
   }
