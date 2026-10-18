@@ -12,6 +12,34 @@ const server = new MCPServer({
   description:
     "Cortex robot-learning studio: create projects, record simulated demonstrations, analyze failures, build datasets, " +
     "propose training (human-approved) and evaluate policies in simulation.",
+  instructions: [
+    "Cortex trains robot manipulation policies (LeRobot ACT or SmolVLA) from demonstrations recorded in simulation.",
+    "",
+    "SCOPE: one arm only, the SO-101 (SO-ARM101). Agents work in simulation only (MuJoCo).",
+    "No other arms, grippers or robots are supported, and there is no automatic sim-to-real transfer. The robot_* tools",
+    "drive a simulated arm, not hardware. Training and anything that runs on real hardware needs a human to click",
+    "approve in the Cortex studio.",
+    "",
+    "GOLDEN PATH (use these tools in this order unless the user asks for something else):",
+    "1. cortex_create_policy_project: creates the project and starts autonomous demonstration collection. This is the fast",
+    "   path for the built-in tabletop pick-and-place scene (red cube into a box). For a custom scene (the user's own objects, zones or",
+    "   obstacles), use cortex_start_intake -> cortex_update_intake (answer the questions) -> cortex_build_simulation",
+    "   instead, then collect with cortex_start_agent_collection.",
+    "2. cortex_get_collection_progress: poll with the collection_id until the collection is done.",
+    "3. cortex_train_from_agent_demonstrations: builds the dataset version AND proposes ACT training in one call.",
+    "   (Custom path: cortex_create_dataset_version -> cortex_propose_training_job. propose_training_job needs a",
+    "   dataset_version_id, so never skip the dataset step.)",
+    "4. STOP. Show the human the proposed job and its cost estimate, and ask them to approve it in the Cortex studio.",
+    "   Never invent an approval_token.",
+    "5. cortex_launch_training_job: only after the human confirms they approved it.",
+    "6. cortex_get_project_state: poll until training_jobs[].checkpoint_ids has a checkpoint (ck_...).",
+    "7. cortex_evaluate_learned_policy: evaluate that checkpoint in simulation (poll cortex_get_job).",
+    "8. cortex_improve_policy: targets the weakest measured condition, collects more demos and proposes retraining.",
+    "   Retraining needs approval again (back to step 4).",
+    "",
+    "Background jobs return a job_id. Poll them with cortex_get_job. Use cortex_get_next_actions when you are unsure",
+    "what comes next. Report only measured simulator results; VLM failure clusters are hypotheses.",
+  ].join("\n"),
 });
 
 registerTools(server);
