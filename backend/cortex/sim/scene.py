@@ -6,6 +6,8 @@ The upstream env takes a ``scene`` path, so Cortex never forks it. We copy its
   * add each ObjectSpec as a free body ``obj_<name>`` (box / cylinder / sphere primitive);
   * add each PlaceZone as a flat, non-colliding marker ``zone_<name>`` (the target the
     verifier checks against) and each obstacle as a static geom ``obs_<name>``;
+  * add each conveyor as a static bed ``belt_<name>`` (``sim/belt.py``; SceneEnv drives it), with the
+    objects that start ``on`` it resting on its top;
   * resize and recolour the table, set the instruction text, and place the overhead
     camera at a calibrated pose when the intake has one;
   * park the upstream cubes and box out of sight. The env requires those bodies to exist,
@@ -23,7 +25,8 @@ import xml.etree.ElementTree as ET  # nosec B405 - our own pinned file
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from ..intake.spec import IntakeSpec, ObjectSpec
+from ..intake.spec import Conveyor, IntakeSpec, ObjectSpec
+from .belt import Belt
 from .grasp import SIDE_MIN_RADIUS, grasp_mode
 from .so101 import envhub_module
 
@@ -45,6 +48,11 @@ class SceneInfo:
     shapes: dict[str, str] = field(default_factory=dict)  # object name -> box | cylinder | sphere
     digest: str = ""
     notes: list[str] = field(default_factory=list)
+    conveyors: dict[str, dict] = field(default_factory=dict)  # name -> start, end, width, height, speed_mps
+    on: dict[str, str] = field(default_factory=dict)  # object name -> the conveyor it starts on
+
+    def belts(self) -> dict[str, Belt]:
+        return {n: belt(Conveyor(name=n, **c)) for n, c in self.conveyors.items()}
 
 
     def to_dict(self, data_dir: Path) -> dict:
@@ -61,6 +69,20 @@ class SceneInfo:
         d["zones"] = {k: (tuple(c), tuple(h)) for k, (c, h) in d["zones"].items()}
         d["starts"] = {k: tuple(v) for k, v in d["starts"].items()}
         return cls(path=p if p.is_absolute() else data_dir / p, **d)
+
+
+def belt(c: Conveyor) -> Belt:
+    return Belt(c.name, start=tuple(c.start), end=tuple(c.end), width=c.width, height=c.height,  # type: ignore[arg-type]
+                speed=c.speed_mps)
+
+
+def belt_start(spec: IntakeSpec, o: ObjectSpec) -> tuple[float, float]:
+    """An object on a conveyor without a start sits on the belt's centre line, just inside its upstream end."""
+    c = next(c for c in spec.environment.conveyors if c.name == o.on)
+    b = belt(c)
+    reach = (max(o.size[:2]) if o.shape == "box" else o.size[0]) / 2 + 0.02
+    x, y = b.point(min(reach, b.length / 2))
+    return (round(float(x), 4), round(float(y), 4))
 
 
 def body_name(obj: str) -> str:
@@ -85,6 +107,9 @@ def default_starts(spec: IntakeSpec) -> dict[str, tuple[float, float]]:
     for o in spec.objects:
         if o.start:
             out[o.name] = tuple(o.start)  # type: ignore[assignment]
+            continue
+        if o.on:
+            out[o.name] = belt_start(spec, o)
             continue
         cands = far if grasp_mode(o.height) == "side" else near
         assert all((c[0] ** 2 + c[1] ** 2) ** 0.5 >= SIDE_MIN_RADIUS - 0.005 for c in far)
@@ -126,9 +151,13 @@ def build_scene(spec: IntakeSpec, out_dir: Path) -> SceneInfo:
             b.set("pos", f"0.9 1.2 {PARK_Z}")
 
     starts = default_starts(spec)
+    for c in env.conveyors:
+        belt(c).add_bed(wb)
+    heights = {c.name: c.height for c in env.conveyors}
     for o in spec.objects:
         x, y = starts[o.name]
-        body = ET.SubElement(wb, "body", name=body_name(o.name), pos=f"{x:.4f} {y:.4f} {o.height / 2 + 0.0005:.4f}")
+        z = heights.get(o.on or "", 0.0) + o.height / 2 + 0.0005
+        body = ET.SubElement(wb, "body", name=body_name(o.name), pos=f"{x:.4f} {y:.4f} {z:.4f}")
         ET.SubElement(body, "freejoint", name=f"{body_name(o.name)}_free")
         ET.SubElement(body, "geom", name=f"{body_name(o.name)}_geom", type=o.shape, size=mj_size(o),
                       mass=f"{o.mass_kg:.4f}", rgba=" ".join(f"{c:.3f}" for c in o.rgba), condim="4",
@@ -154,7 +183,8 @@ def build_scene(spec: IntakeSpec, out_dir: Path) -> SceneInfo:
                 notes.append("overhead camera placed at the calibrated pose")
 
     xml = ET.tostring(mj, encoding="unicode")
-    digest = hashlib.sha256((xml + json.dumps(starts, sort_keys=True)).encode()).hexdigest()[:12]
+    speeds = json.dumps({c.name: c.speed_mps for c in env.conveyors}, sort_keys=True) if env.conveyors else ""
+    digest = hashlib.sha256((xml + json.dumps(starts, sort_keys=True) + speeds).encode()).hexdigest()[:12]
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"scene_{digest}.xml"
     path.write_text(xml)
@@ -163,7 +193,9 @@ def build_scene(spec: IntakeSpec, out_dir: Path) -> SceneInfo:
                      starts=starts, heights={o.name: o.height for o in spec.objects},
                      shapes={o.name: o.shape for o in spec.objects},
                      pick=spec.task.pick, place=list(spec.task.place), lighting=env.lighting,
-                     digest=digest, notes=notes)
+                     digest=digest, notes=notes,
+                     conveyors={c.name: c.model_dump(mode="json", exclude={"name"}) for c in env.conveyors},
+                     on={o.name: o.on for o in spec.objects if o.on})
 
 
 def instruction(spec: IntakeSpec) -> str:

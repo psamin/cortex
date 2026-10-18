@@ -582,6 +582,7 @@ const TOOLS: Def[] = [
       "their corrections with cortex_update_intake. " +
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
       "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface.\n" +
+      "Moving conveyors and assembly lines are supported: describe the belt in environment.conveyors and put the object `on` it.\n" +
       "USE WHEN: starting any task (SO-101 arm, simulated only).\n" +
       "USE INSTEAD: cortex_create_policy_project when the human wants the default scene and to start collecting in one call.\n" +
       "NEXT: cortex_update_intake until no required questions remain, then cortex_build_simulation, then compare " +
@@ -612,6 +613,7 @@ const TOOLS: Def[] = [
       "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. " +
       "An object's start position is objects[].start = [x, y] in metres (if omitted Cortex auto-places it and build_simulation reports where in `starts`); set it when the user says where the object is. Unknown " +
       "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
+      "Moving conveyors: environment.conveyors is a list of {name, start: [x, y], end: [x, y] (the direction of travel), width (m), height (belt top above the table, m), speed_mps (m/s)}, merged by `name`; an object with `on: '<conveyor>'` starts on that belt and rides it (a missed object falls off the end). The feasibility report from cortex_build_simulation gives the reachable intercept window along the belt.\n" +
       "NEXT: call again until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
       project_id: projectId,

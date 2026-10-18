@@ -88,10 +88,21 @@ class Presenter:
         self.cam.close()
 
 
+def practice_layouts(args: argparse.Namespace) -> list[int] | None:
+    """The practice layouts to record / evaluate: an explicit seed list (--layout-seeds 0,2,5), the first N
+    (--layouts N), or None for fresh layouts every episode."""
+    if getattr(args, "layout_seeds", ""):
+        return [int(x) for x in str(args.layout_seeds).replace("+", ",").split(",") if x.strip()]
+    return list(range(args.layouts)) if getattr(args, "layouts", 0) else None
+
+
 def episode(env, policy, seed: int, record: bool, presenter: Presenter | None = None,
-            noise_deg: float = 0.0) -> dict[str, Any]:
+            noise_deg: float = 0.0, noise_seed: int | None = None) -> dict[str, Any]:
+    """``seed`` sets the layout; ``noise_seed`` (default: the same) sets the exploration noise, so one practice
+    layout can be recorded many times with different recoveries."""
     obs = env.reset(seed)
-    nudge = Nudge(np.random.default_rng(seed + 7919), noise_deg) if noise_deg > 0 else None
+    nudge = Nudge(np.random.default_rng((seed if noise_seed is None else noise_seed) + 7919), noise_deg) \
+        if noise_deg > 0 else None
     policy.reset(env, obs, seed)
     render = record or presenter is not None or getattr(policy, "needs_pixels", True)
     rows: list[tuple] = []
@@ -131,6 +142,7 @@ def demos(args: argparse.Namespace) -> None:
     ex_dir = Path(args.examples) if args.examples else None
     if ex_dir:
         ex_dir.mkdir(parents=True, exist_ok=True)
+    practice = practice_layouts(args)
     kept, failed, seed = [], [], args.shard
     want = -(-args.episodes // args.shards)  # this shard's share, rounded up
     presenter = None
@@ -139,8 +151,9 @@ def demos(args: argparse.Namespace) -> None:
         presenter = Presenter(env)
     while len(kept) < want and seed < args.episodes * 2:
         example = presenter is not None and len(kept) < args.n_examples  # example videos show the clean expert
-        ep = episode(env, oracle, seed, record=True, presenter=presenter if example else None,
-                     noise_deg=0.0 if example else args.noise_deg)
+        layout = practice[seed % len(practice)] if practice else seed  # practice layouts: few layouts, many recordings
+        ep = episode(env, oracle, layout, record=True, presenter=presenter if example else None,
+                     noise_deg=0.0 if example else args.noise_deg, noise_seed=seed)
         if ep["success"]:
             for front, wrist, state, action in ep["rows"]:
                 ds.add_frame({"observation.images.front": front, "observation.images.wrist": wrist,
@@ -156,7 +169,7 @@ def demos(args: argparse.Namespace) -> None:
     ds.finalize()
     (root / "meta" / "cortex_sim.json").write_text(json.dumps({
         "task": args.task, "instruction": env.instruction, "size": args.size, "noise_deg": args.noise_deg,
-        "kept_seeds": kept,
+        "layouts": len(practice) if practice else None, "layout_seeds": practice, "kept_seeds": kept,
         "failed_seeds": failed, "oracle_success_rate": len(kept) / max(1, len(kept) + len(failed))}, indent=1))
     if presenter:
         presenter.close()
@@ -179,7 +192,8 @@ def merge(args: argparse.Namespace) -> None:
     kept = sorted(s for m in metas for s in m["kept_seeds"])
     failed = sorted(s for m in metas for s in m["failed_seeds"])
     (Path(args.root) / "meta" / "cortex_sim.json").write_text(json.dumps({
-        **{k: metas[0].get(k) for k in ("task", "instruction", "size", "noise_deg")}, "kept_seeds": kept,
+        **{k: metas[0].get(k) for k in ("task", "instruction", "size", "noise_deg", "layouts", "layout_seeds")},
+        "kept_seeds": kept,
         "failed_seeds": failed,
         "oracle_success_rate": len(kept) / max(1, len(kept) + len(failed)), "shards": len(roots)}, indent=1))
     print(json.dumps({"merged_episodes": len(kept), "failed": len(failed)}), flush=True)
@@ -195,10 +209,11 @@ def evaluate(args: argparse.Namespace) -> None:
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     env.reset(EVAL_SEED0)
-    presenter = Presenter(env)
+    practice = practice_layouts(args)
+    presenter = Presenter(env) if args.videos > 0 else None  # the presentation renderer only when videos are wanted
     results = []
     for i in range(args.episodes):
-        seed = EVAL_SEED0 + i
+        seed = practice[i % len(practice)] if practice else EVAL_SEED0 + i  # practice layouts, or unseen ones
         ep = episode(env, policy, seed, record=False, presenter=presenter if i < args.videos else None)
         ep.pop("rows")
         video = ep.pop("video")
@@ -210,9 +225,12 @@ def evaluate(args: argparse.Namespace) -> None:
     rate = sum(r["success"] for r in results) / len(results)
     (out / "metrics.json").write_text(json.dumps({
         "task": args.task, "checkpoint": str(args.checkpoint), "policy": policy.name, "episodes": len(results),
-        "success_rate": rate, "seeds": f"{EVAL_SEED0}..{EVAL_SEED0 + args.episodes - 1}", "results": results}, indent=1))
+        "success_rate": rate, "layouts": len(practice) if practice else None, "layout_seeds": practice,
+        "seeds": f"practice layouts {practice}" if practice else f"{EVAL_SEED0}..{EVAL_SEED0 + args.episodes - 1}",
+        "results": results}, indent=1))
     print(json.dumps({"success_rate": rate}), flush=True)
-    presenter.close()
+    if presenter:
+        presenter.close()
     env.close()
 
 
@@ -228,6 +246,8 @@ def main() -> None:
     d.add_argument("--examples")
     d.add_argument("--n-examples", type=int, default=3)
     d.add_argument("--noise-deg", type=float, default=0.0, help="DART exploration noise on the executed arm command")
+    d.add_argument("--layouts", type=int, default=0, help="record only layouts 0..N-1 (repeated with different noise)")
+    d.add_argument("--layout-seeds", default="", help="record only these layouts, e.g. 0,2,5 (or 0+2+5)")
     d.add_argument("--shard", type=int, default=0)
     d.add_argument("--shards", type=int, default=1)
     m = sub.add_parser("merge")
@@ -241,6 +261,8 @@ def main() -> None:
     e.add_argument("--episodes", type=int, default=50)
     e.add_argument("--size", default="240x320")
     e.add_argument("--videos", type=int, default=4)
+    e.add_argument("--layouts", type=int, default=0, help="evaluate on the practice layouts 0..N-1 instead of unseen ones")
+    e.add_argument("--layout-seeds", default="", help="evaluate on these practice layouts, e.g. 0,2,5 (or 0+2+5)")
     e.add_argument("--device", default="cuda")
     e.add_argument("--cameras", help="policy=env camera names, e.g. camera1=front,camera2=wrist")
     args = p.parse_args()

@@ -1,7 +1,7 @@
 import { BRAND } from "../landing/brand";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Outlet, useMatch } from "react-router-dom";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { describeProvider } from "../components/HealthPills";
 import { useEngine, useHealth, useProjects } from "../api/hooks";
@@ -69,7 +69,7 @@ function HealthSummary() {
   return (
     <span
       className={cn("inline-flex h-7 items-center gap-1.5 px-2.5 text-ink-3", statusLabel)}
-      title={fallbacks ? subs.filter(([, d]) => d.fallback).map(([k, d]) => `${k}: ${d.name}`).join("\n") : undefined}
+      title={fallbacks ? subs.filter(([, d]) => d.fallback).map(([k, d]) => `${k}: ${d.name}`).join("\n") : "All services connected"}
     >
       <span className={cn("h-1.5 w-1.5 rounded-full", fallbacks ? "bg-caution" : "bg-pass")} />
       <span className="hidden whitespace-nowrap sm:inline">{fallbacks ? `${fallbacks} local fallback${fallbacks === 1 ? "" : "s"}` : "All services connected"}</span>
@@ -111,6 +111,7 @@ export function AppShell() {
   const project = pid ? projects.data?.find((p) => p.id === pid) : undefined;
   const onStudioHome = !!useMatch("/studio");
   const onAgents = !!useMatch("/studio/agents");
+  const onSkills = !!useMatch("/studio/skills/*");
 
   return (
     <div className="flex h-full flex-col">
@@ -131,16 +132,25 @@ export function AppShell() {
         )}
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           {pid && engine.data && (
-            <span className={cn("hidden h-7 items-center gap-1.5 px-2 text-ink-3 md:inline-flex", statusLabel)} title={engine.data.note ?? (engine.data.model ? `model ${engine.data.model}` : "agent engine")}>
+            <span className={cn("hidden h-7 items-center gap-1.5 whitespace-nowrap px-2 text-ink-3 xl:inline-flex", statusLabel)} title={engine.data.note ?? (engine.data.model ? `model ${engine.data.model}` : "agent engine")}>
               <span className={cn("h-1.5 w-1.5 rounded-full", engine.data.engine === "rules" || engine.data.note ? "bg-caution" : "bg-pass")} />
               {engine.data.label}
             </span>
           )}
           <Link
             to="/studio"
-            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onAgents ? "text-ink-2" : "text-ink")}
+            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onAgents || onSkills ? "text-ink-2" : "text-ink")}
           >
             Studio
+          </Link>
+          <Link
+            to="/studio/skills"
+            className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] hover:text-ink", onSkills ? "bg-rail text-ink" : "text-ink-2")}
+            title="Every policy you've trained, ready to run live"
+            aria-label="Physical Skills"
+          >
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
+            <span className="hidden sm:inline">Physical Skills</span>
           </Link>
           <Link
             to="/studio/agents"
@@ -154,7 +164,7 @@ export function AppShell() {
           {!onStudioHome && (
             <Link
               to="/studio"
-              className="sk-pill sk-pill-primary hidden h-8 items-center px-4 text-[12.5px] font-medium sm:inline-flex"
+              className="sk-pill sk-pill-primary hidden h-8 items-center whitespace-nowrap px-4 text-[12.5px] font-medium sm:inline-flex"
             >
               New project
             </Link>

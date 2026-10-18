@@ -24,6 +24,11 @@ at `POST http://localhost:8000/api/tools/<name>`. Claude Code shows the tools as
   reachable from MCP.
 - **Tasks:** pick-and-place of the objects you describe (boxes, cylinders such as water bottles,
   spheres), into the zones you describe, on a table layout you describe.
+- **Moving conveyors (assembly lines):** describe each belt in `environment.conveyors` as
+  `{name, start, end, width, height, speed_mps}`. `start` to `end` is the direction of travel, `height` is
+  the belt top above the table, and units are metres and m/s. Give an object `on: "<conveyor>"` and it
+  rides the belt; if it's missed, it falls off the end. The feasibility report shows the stretch of belt
+  where the arm can reach the object. MuJoCo simulates the belt, so you don't need Isaac Lab.
 
 ## The path (call the tools in this order)
 

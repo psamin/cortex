@@ -20,12 +20,12 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 try:
-    FONT = ImageFont.load_default(size=24)  # readable on a projector at 1280x960
+    FONT = ImageFont.load_default(size=15)  # readable on a projector at 640x480
 except TypeError:  # Pillow < 10.1
     FONT = ImageFont.load_default()
 
 TITLES = {"jenga": "Jenga: extract the marked block", "screwdriver": "Factory: unscrew a screw with a screwdriver",
-          "unscrew": "Factory: unscrew the bolt", "palletize": "Factory: unload boxes from the forklift",
+          "unscrew": "Factory: unscrew the bolt", "unscrew_black": "Factory: unscrew the bolt (policy 2)", "palletize": "Factory: unload boxes from the forklift",
           "suture": "Suture: pass the needle through the eyelets"}
 CAMERAS = {"smolvla": {"camera1": "front", "camera2": "wrist"}}  # smolvla_base's camera names -> the sim's
 
@@ -47,7 +47,8 @@ def best_checkpoints(sim_dir: Path) -> dict[str, dict[str, Any]]:
         if not (ck / "config.json").exists():
             continue
         cand = {"task": task, "variant": variant, "step": int(step), "checkpoint": str(ck),
-                "success_rate": r["success_rate"], "eval_episodes": r["episodes"], "eval_seeds": r["seeds"]}
+                "success_rate": r["success_rate"], "eval_episodes": r["episodes"], "eval_seeds": r["seeds"],
+                "layouts": r.get("layouts"), "layout_seeds": r.get("layout_seeds")}
         if task in unscored or (cand["success_rate"], cand["step"]) > (best[task]["success_rate"], best[task]["step"]):
             best[task] = cand
             unscored.discard(task)
@@ -60,13 +61,43 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
 
     out = {}
     for task, info in best_checkpoints(sim_dir).items():
+        meta = sim_dir / task / "dataset" / "meta" / "cortex_sim.json"  # practice layouts it was trained on, if any
+        m = json.loads(meta.read_text()) if meta.exists() else {}
+        info["layouts"] = info.get("layouts") or m.get("layouts")
+        info["layout_seeds"] = info.get("layout_seeds") or m.get("layout_seeds")
         env, _ = make(task, 240, 320)
         policy = LeRobotPolicy(info["checkpoint"], device="cuda", task=env.instruction,
                                cameras=CAMERAS.get(info["variant"]))
-        out[task] = {**info, "env": env, "policy": policy, "instruction": env.instruction}
-        score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} unseen layouts"
+        out[task] = {**info, "task": task, "policy": policy, "instruction": env.instruction, "max_steps": env.max_steps}
+        env.close()  # the worker thread builds its own (EGL contexts belong to their thread)
+        where = f"{info['layouts']} practice layouts" if info.get("layouts") else "unseen layouts"
+        score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} runs over {where}"
                  if info["success_rate"] is not None else "score pending")
         print(f"[serve] sim {task}: {info['variant']} step {info['step']}, {score}", flush=True)
+    return out
+
+
+def visible_seed(task: str, env, seed: int) -> int:
+    """For the live demo, the bolt in its brightest trained finish (brass) so people can see it. Brass is one of
+    the finishes the policy was trained on, so this stays in distribution: no retraining. Picks the first seed
+    from the requested one whose layout has a brass bolt (deterministic)."""
+    if task != "unscrew":
+        return seed
+    for s in range(seed, seed + 60):
+        env.reset(s)
+        if getattr(env, "finish", "") == "brass":
+            return s
+    return seed
+
+
+def _inset(img: np.ndarray, wrist: np.ndarray) -> np.ndarray:
+    """The policy's wrist camera in the bottom-right corner of the live view."""
+    out = img.copy()
+    h, w = out.shape[0] // 4, out.shape[1] // 4
+    small = np.asarray(Image.fromarray(wrist).resize((w, h)))
+    y, x = out.shape[0] - h - 10, out.shape[1] - w - 10
+    out[y - 2:y + h + 2, x - 2:x + w + 2] = 235
+    out[y:y + h, x:x + w] = small
     return out
 
 
@@ -74,39 +105,59 @@ def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> 
     im = Image.fromarray(img)
     d = ImageDraw.Draw(im)
     w = max(d.textlength(t, font=FONT) for t, _ in lines) + 32
-    d.rectangle([16, 16, 16 + w, 28 + 32 * len(lines)], fill=(14, 14, 14))
+    d.rectangle([8, 8, 8 + w, 16 + 20 * len(lines)], fill=(14, 14, 14))
     for i, (t, color) in enumerate(lines):
-        d.text((32, 26 + 32 * i), t, fill=color, font=FONT)
+        d.text((16, 12 + 20 * i), t, fill=color, font=FONT)
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=85)
+    im.save(buf, format="JPEG", quality=72)
     return buf.getvalue()
 
 
-def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
-    """(jpeg, step, inference ms, success) per control step, at real time, until done or out of steps."""
+def _episode(p: dict[str, Any], env, seed: int, cancel, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
+    """(jpeg, step, inference ms, success) per shown frame, at real time, until done, out of steps or cancelled.
+    Runs on the worker thread with the env that thread built."""
     import torch
-    from cortex.sim.tasks.run import SETTLE, Presenter
+    from cortex.sim.tasks.run import SETTLE
 
-    env, policy = p["env"], p["policy"]
+    policy = p["policy"]
+    if p.get("layout_seeds"):
+        seed = p["layout_seeds"][seed % len(p["layout_seeds"])]  # a practice layout it was trained on
+    elif p.get("layouts"):
+        seed = seed % p["layouts"]  # a practice layout it was trained on (demo reliability over generalization)
+    else:
+        seed = visible_seed(p["task"], env, seed)
     obs = env.reset(seed)
     policy.reset(env, obs, seed)
-    presenter = Presenter(env)
+    # The live view is the policy's own front camera (already rendered every step), scaled up, with its wrist camera
+    # inset. A second MuJoCo renderer in this process drew garbage under headless EGL (mujoco.Renderer does not
+    # re-select its GL context after the env's renderer runs), so the live view adds no renderer of its own.
     held = 0
     try:
         for step in range(env.max_steps):
+            if cancel.is_set():
+                return
             t0 = time.perf_counter()
             action = policy.act(obs)
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             ms = (time.perf_counter() - t0) * 1000
-            frame = presenter.frame(obs)
+            if step % 2:  # 15 fps of video is plenty and halves the bandwidth; the policy still runs every step
+                obs, _, success, _, _ = env.step(action)
+                held = held + 1 if success else 0
+                if held >= 3 * SETTLE:
+                    break
+                time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
+                continue
+            front = Image.fromarray(obs["pixels"]["front"]).resize((640, 480), Image.BILINEAR)
+            frame = _inset(np.asarray(front), obs["pixels"]["wrist"])
             obs, _, success, _, _ = env.step(action)
             held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
             status = ("Task complete (verified by the simulator)", (110, 220, 130)) if success else (
                 "Running", (200, 200, 200))
             jpg = _overlay(frame, [
                 (TITLES.get(p["task"], p["task"]), (240, 240, 240)),
-                (f"{p['variant'].upper()} trained only in sim  ·  unseen layout (seed {seed})", (160, 200, 255)),
+                (f"{p['variant'].upper()} trained only in sim  ·  "
+                 + (f"practice layout {seed}" if p.get("layouts") else f"unseen layout (seed {seed})"), (160, 200, 255)),
                 (f"step {step}  ·  inference {ms:5.1f} ms on GPU", (160, 200, 255)),
                 status])
             yield jpg, step, ms, success
@@ -114,4 +165,59 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                 break
             time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
     finally:
-        presenter.close()
+        pass
+
+# ---------------------------------------------------------------- one thread owns MuJoCo / OpenGL
+#
+# MuJoCo's EGL contexts are bound to the thread that made them, and building or freeing one on a request thread
+# while another run is ending aborted the server. So one long-lived worker thread builds every sim once, runs
+# every episode, and hands JPEG frames to the request thread through a queue. A new run cancels the current one.
+
+import queue
+import threading
+
+_JOBS: queue.Queue[tuple] = queue.Queue()
+_CURRENT: dict[str, Any] = {"cancel": None}
+_ENVS: dict[str, Any] = {}
+
+
+def _worker(policies: dict[str, dict[str, Any]]) -> None:
+    from cortex.sim.tasks import make
+
+    for task in policies:  # built here, on the thread that will render them
+        _ENVS[task], _ = make(task, 240, 320)
+    while True:
+        task, seed, out, cancel = _JOBS.get()
+        p = policies[task]
+        try:
+            for item in _episode(p, _ENVS[task], seed, cancel):
+                while not cancel.is_set():  # never block forever on a viewer that left
+                    try:
+                        out.put(item, timeout=1)
+                        break
+                    except queue.Full:
+                        continue
+                if cancel.is_set():
+                    break
+        except Exception as e:  # noqa: BLE001 - report it to the viewer, keep the worker alive
+            print(f"[serve] sim {task} run failed: {type(e).__name__}: {e}", flush=True)
+        try:
+            out.put(None, timeout=1)
+        except queue.Full:
+            pass
+
+
+def start_worker(policies: dict[str, dict[str, Any]]) -> None:
+    threading.Thread(target=_worker, args=(policies,), daemon=True, name="sim-worker").start()
+
+
+def submit(task: str, seed: int) -> tuple[queue.Queue, threading.Event]:
+    """Queue a run; the run before it (if any) is cancelled. Returns (frames, cancel)."""
+    if _CURRENT["cancel"] is not None:
+        _CURRENT["cancel"].set()
+    out: queue.Queue = queue.Queue(maxsize=60)
+    cancel = threading.Event()
+    _CURRENT["cancel"] = cancel
+    _JOBS.put((task, seed, out, cancel))
+    return out, cancel
+

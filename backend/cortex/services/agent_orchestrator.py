@@ -771,7 +771,11 @@ class IntakeArgs:
                                                   "by name. Sizes in metres: box = [x, y, z] full extents, "
                                                   "cylinder = [diameter, height] (not radius), sphere = "
                                                   "[diameter]. Positions: +x away from the arm base, +y to "
-                                                  "its left, z up from the table.")
+                                                  "its left, z up from the table. Moving conveyors: "
+                                                  "environment.conveyors [{name, start, end, width, height, "
+                                                  "speed_mps}] (metres, m/s; start to end is the direction of "
+                                                  "travel; height is the belt top), merged by name; an object "
+                                                  "with on: '<conveyor>' starts on that belt and rides it.")
 
     class Frame(BaseModel):
         project_id: str

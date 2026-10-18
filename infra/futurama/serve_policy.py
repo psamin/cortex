@@ -38,6 +38,13 @@ CAMS = {"jenga": ["main", "secondary_0", "secondary_1"], "conveyor": ["top", "wr
 STAGE = {"jenga": "jenga", "conveyor": "conveyor", "suture": "needle"}
 JOINTS = ["pan", "lift", "elbow", "wrist flex", "wrist roll", "gripper"]
 LOCK = threading.Lock()  # one GPU, one stream at a time
+# The newest stream wins: a new request bumps the generation, the running stream sees it on its next frame,
+# stops and releases the lock (abandoned streams used to hold it until their episode ended).
+GEN = {"n": 0}
+
+
+def _newer(mine: int) -> bool:
+    return GEN["n"] != mine
 
 job_dir, data_root, port = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
 POLICIES = {}
@@ -66,6 +73,7 @@ if len(sys.argv) > 4 and Path(sys.argv[4]).is_dir():
     import serve_sim
 
     SIM = serve_sim.load(Path(sys.argv[4]))
+    serve_sim.start_worker(SIM)
 
 
 def act(p: dict, obs: dict, task_text: str) -> tuple[np.ndarray, float]:
@@ -145,9 +153,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
         ds = LeRobotDataset(f"local/{p['stage']}", root=data_root / p["stage"], episodes=[ep])
+        GEN["n"] += 1
+        mine = GEN["n"]
         with LOCK:
+            if _newer(mine):
+                return
             p["policy"].reset()
             for i in range(len(ds)):
+                if _newer(mine):
+                    return
                 t0 = time.perf_counter()
                 item = ds[i]
                 obs = {k: v for k, v in item.items() if k.startswith("observation.")}
@@ -165,16 +179,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
-        with LOCK:
-            for jpg, step, ms, ok in serve_sim.stream(p, seed):
-                head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
-                        f"X-Frame: {step}/{p['env'].max_steps}\r\nX-Inference-Ms: {ms:.2f}\r\n"
-                        f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
-                        f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
-                try:
-                    self.wfile.write(head + jpg + b"\r\n")
-                except (BrokenPipeError, ConnectionResetError):
-                    return
+        frames, cancel = serve_sim.submit(p["task"], seed)  # runs on the sim worker thread; cancels any older run
+        while True:
+            try:
+                item = frames.get(timeout=120)
+            except Exception:  # noqa: BLE001 - nothing for 2 minutes: give up on this run
+                cancel.set()
+                return
+            if item is None:
+                return
+            jpg, step, ms, ok = item
+            head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
+                    f"X-Frame: {step}/{p['max_steps']}\r\nX-Inference-Ms: {ms:.2f}\r\n"
+                    f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
+                    f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
+            try:
+                self.wfile.write(head + jpg + b"\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                cancel.set()
+                return
 
     def do_POST(self):
         if self.path != "/act":

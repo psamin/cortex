@@ -852,7 +852,7 @@ export interface LivePolicyStatus {
   gpu?: string;
   policies?: Record<string, { checkpoint: string; stage: string; held_out: number[] }>;
   /** sim-trained policies, run closed loop in MuJoCo on the GPU (best evaluated checkpoint per task) */
-  sim?: Record<string, { variant: string; step: number; success_rate: number | null; eval_episodes: number; eval_seeds: string; instruction: string }>;
+  sim?: Record<string, { variant: string; step: number; success_rate: number | null; eval_episodes: number; eval_seeds: string; instruction: string; layouts?: number | null }>;
   /** the project holding each served task (<task>, or sim_<task>), from infra/futurama/projects.json */
   projects?: Record<string, string>;
 }
@@ -895,4 +895,80 @@ export interface RLSandboxView {
   result?: { base_success: number; base_ci95: [number, number]; tuned_success: number; tuned_ci95: [number, number]; p_value?: number | null; demo_episode_ids: string[]; stop_reason?: string } | null;
   live_frame?: string;
   job_id?: string | null;
+}
+
+// ------------------------------------------------------------------ Physical Skills (#276)
+/** What a skill's score measured. joint_error is imitation on held-out real demos, never a success rate. */
+export interface SkillScore {
+  kind: "sim_success" | "pending" | "joint_error" | "none";
+  value: number | null;
+  n: number | null;
+  successes?: number;
+  ci95?: [number, number] | null;
+  layouts?: number | null;
+  label: string;
+  detail: string;
+}
+
+/** How to run a skill on the live GPU server: a held-out real demo (real) or a new sim layout (sim). */
+export interface SkillRun {
+  kind: "real" | "sim" | null;
+  task: string | null;
+  episodes: number[];
+  live_now: boolean;
+  note: string | null;
+}
+
+export interface SkillPastRun {
+  id: string;
+  kind: "live_inference" | "live_sim";
+  label: string;
+  when: string;
+  partial: boolean;
+  success: boolean | null;
+  joint_mae_deg: number | null;
+  steps: number | null;
+  inference_ms: number | null;
+  gpu: string | null;
+  video_url: string | null;
+  note: string;
+}
+
+export interface SkillEvidence {
+  label: string;
+  success?: boolean;
+  steps?: number;
+  joint_mae_deg?: number | null;
+  video_url: string | null;
+}
+
+/** One trained policy, from GET /api/skills. */
+export interface PhysicalSkill {
+  id: string;
+  name: string;
+  task: string | null;
+  data: "sim" | "real";
+  instruction: string;
+  robot: string;
+  project_id: string | null;
+  project_name: string | null;
+  policy_type: string;
+  policy: string;
+  variant: string;
+  steps: number | null;
+  /** sim policies trained and scored on a few practice layouts (not unseen ones); null otherwise */
+  layouts: number | null;
+  trained_where: string | null;
+  trained_at: string | null;
+  weights: string;
+  checkpoint_id: string | null;
+  checkpoint: string;
+  training_job_id: string | null;
+  dataset_version_id: string | null;
+  slurm_job: string | null;
+  score: SkillScore;
+  run: SkillRun;
+  runs: SkillPastRun[];
+  evidence: SkillEvidence[];
+  thumbnail_url: string | null;
 }

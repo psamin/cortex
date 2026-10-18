@@ -697,6 +697,19 @@ async def hardware_disarm(request: Request):
     return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
 
 
+@app.get("/api/skills")
+async def skills():
+    """Physical Skills (#276): every trained policy across projects, its measured score and how to run it live."""
+    from ..services import skills_service
+    return await skills_service.list_skills(ctx())
+
+
+@app.get("/api/skills/{sid}")
+async def skill(sid: str):
+    from ..services import skills_service
+    return await skills_service.get_skill(ctx(), sid)
+
+
 @app.get("/api/live-policy")
 async def live_policy_status():
     from ..services import live_policy_service as lp

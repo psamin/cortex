@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleDashed, Cpu, Square } from "lucide-react";
+import { Check, CircleDashed, Cpu, Square, VideoOff } from "lucide-react";
 import { ApiError, api } from "../api/client";
 import { cn } from "../lib/format";
 import { initialPick, SIM_TITLE, type Pick } from "./livePick";
@@ -23,7 +23,6 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
   const stop = useMutation({ mutationFn: api.stopLivePolicy, onSettled: refresh });
   const [pick, setPick] = useState<Pick | null>(null);
   const s = st.data;
-  const policies = Object.entries(s?.policies ?? {});
   const err = (start.error ?? stop.error) as ApiError | null;
 
   // a GPU is only ever requested by an explicit click (#221): the cluster is shared and access can be revoked
@@ -83,20 +82,18 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
             {SIM_TITLE[task] ?? task} · sim
           </button>
         ))}
-        {policies.map(([task, p]) =>
-          p.held_out.map((ep) => (
-            <button key={`${task}-${ep}`} type="button" onClick={() => setPick({ kind: "replay", task, ep })}
-              title={`${p.checkpoint} on held-out real episode ${ep}`}
-              className={cn("h-6 rounded-full border px-2.5", cur?.kind === "replay" && cur.task === task && cur.ep === ep ? "border-ink bg-ink text-bench" : "border-line-strong text-ink-3 hover:text-ink")}>
-              {task} · real ep {ep}
-            </button>
-          )),
-        )}
         <button type="button" onClick={() => stop.mutate()} disabled={stop.isPending}
-          className="ml-auto inline-flex h-6 items-center gap-1 rounded-full border border-line-strong px-2.5 text-ink-3 hover:text-ink">
-          <Square className="h-3 w-3" /> Stop GPU
+          title="Ends the live session and gives the GPU back to the cluster (the next run needs a new GPU)"
+          className="ml-auto inline-flex h-6 items-center gap-1.5 rounded-full border border-line-strong px-2.5 text-ink-3 hover:text-ink disabled:opacity-70">
+          {stop.isPending ? <CircleDashed className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          {stop.isPending ? "Stopping… releasing the GPU" : "Stop & release GPU"}
         </button>
       </div>
+      {stop.isPending && (
+        <p className="px-4 pt-2 text-xs text-ink-3">
+          Stopping the live session and handing the GPU back to the cluster. This takes a few seconds.
+        </p>
+      )}
       {!pick && first.note && <p className="px-4 pt-2 text-xs text-ink-3">{first.note}</p>}
       {curSim && cur?.kind === "sim" && (
         <div className="flex items-center gap-3 px-4 pt-2 text-xs text-ink-2">
@@ -108,12 +105,36 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
         </div>
       )}
       <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-        {cur && (
-          <img key={cur.kind === "sim" ? `${cur.task}-${cur.seed}` : `${cur.task}-${cur.ep}`}
-            src={cur.kind === "sim" ? api.livePolicySimUrl(cur.task, cur.seed) : api.livePolicyStreamUrl(cur.task, cur.ep)}
-            alt={`${cur.task} policy running live on the GPU`} className="block max-h-full w-auto max-w-full border border-line-strong object-contain" />
-        )}
+        {cur && <LiveFrame key={cur.kind === "sim" ? `${cur.task}-${cur.seed}` : `${cur.task}-${cur.ep}`}
+          src={cur.kind === "sim" ? api.livePolicySimUrl(cur.task, cur.seed) : api.livePolicyStreamUrl(cur.task, cur.ep)}
+          label={`${cur.task} policy running live on the GPU`} />}
       </div>
+    </div>
+  );
+}
+
+
+/** The live stream, with a "loading onto the GPU" state until the first frame and a clear failure state. */
+export function LiveFrame({ src, label }: { src: string; label: string }) {
+  const [state, setState] = useState<"loading" | "live" | "failed">("loading");
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      <img src={src} alt={label} onLoad={() => setState("live")} onError={() => setState("failed")}
+        className={cn("block max-h-full w-auto max-w-full border border-line-strong object-contain", state !== "live" && "invisible")} />
+      {state === "loading" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-ink-2">
+          <CircleDashed className="h-6 w-6 animate-spin text-ink-3" />
+          <span>Loading the policy onto the GPU and starting the run…</span>
+          <span className="text-ink-3">The first frame takes a few seconds; then it plays in real time.</span>
+        </div>
+      )}
+      {state === "failed" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-ink-2">
+          <VideoOff className="h-6 w-6 text-fault" />
+          <span>Couldn't display this run: the GPU server may have stopped, or another run took over.</span>
+          <span className="text-ink-3">Pick the policy again to retry.</span>
+        </div>
+      )}
     </div>
   );
 }

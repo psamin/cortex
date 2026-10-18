@@ -1,11 +1,11 @@
-import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, History, Info, Paperclip, Plus, Square, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, Info, PanelLeftClose, PanelLeftOpen, Paperclip, Square, SquarePen, X } from "lucide-react";
 import { api } from "../api/client";
 import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
-import { InfoTip, Segmented } from "../components/ui";
+import { Segmented } from "../components/ui";
 import { cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
@@ -128,28 +128,30 @@ export function Conversation({ pid }: { pid: string }) {
           <p className="text-xs text-ink-3">.zip or .tar.gz · up to 2 GB</p>
         </div>
       )}
-      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5">
+      {/* one row that fits the narrowest chat column (380px): view left, mode and icon actions right;
+          "Agent log" reads "Log" when the bar is too narrow for both labels */}
+      <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line pl-5 pr-2 [container-type:inline-size]">
         <Segmented
-          size="sm"
+          size="xs"
           ariaLabel="View"
           value={mode}
           onChange={setMode}
           options={[
             { value: "chat", label: "Chat" },
-            { value: "log", label: "Agent log" },
+            { value: "log", label: <><span className="sr-only [@container(min-width:380px)]:not-sr-only">Agent </span>log</> },
           ]}
         />
-        {mode === "chat" && <ModeSwitch pid={pid} />}
-        <div className="ml-auto flex items-center gap-3">
+        <div className="ml-auto flex shrink-0 items-center">
+          {mode === "chat" && (
+            <>
+              <ModeSwitch pid={pid} />
+              <span aria-hidden className="mx-1 h-4 w-px bg-[var(--line-strong)]" />
+            </>
+          )}
           <HistoryToggle />
-          <button
-            type="button"
-            onClick={() => nav("/studio")}
-            title="Train something new: a new project with its own demos, datasets and policies (this chat stays in History)"
-            className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink"
-          >
-            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">New task</span>
-          </button>
+          <IconAction label="New task" hint="Something new to train gets its own project" onClick={() => nav("/studio")}>
+            <SquarePen className="h-4 w-4" strokeWidth={1.5} />
+          </IconAction>
         </div>
       </div>
 
@@ -618,11 +620,70 @@ function Composer({
   );
 }
 
+/** One plain sentence per mode, shown by the info button next to the switch. */
 const MODE_HINT = {
-  autonomous:
-    "Autonomous: the agent keeps going on its own: sim demos, datasets, training inside your standing approval, evaluations, the next round. Still needs you for real robot motion and for spend over your caps (paid GPUs, more GPU-hours, a used-up planner budget).",
-  manual: "Manual: one step per message, and training waits for your approval.",
+  autonomous: "The agent runs the whole loop in simulation on its own, and asks you before moving a real robot or spending past your limits.",
+  manual: "The agent does one step per message, and training waits for your approval.",
 } as const;
+
+/** Tooltip under its `group` button (the caller says when it shows), right-aligned so it stays in the column. */
+function Tip({ id, children, className }: { id?: string; children: React.ReactNode; className: string }) {
+  return (
+    <span
+      id={id}
+      role="tooltip"
+      className={cn("pointer-events-none absolute right-0 top-full z-50 mt-1.5 hidden rounded-sm border border-line-strong bg-plate px-2.5 py-1.5 text-left font-normal", className)}
+    >
+      {children}
+    </span>
+  );
+}
+
+/** An icon-only button of the chat bar, named for screen readers and explained on hover/focus. */
+function IconAction({ label, hint, onClick, expanded, children }: { label: string; hint: string; onClick: () => void; expanded?: boolean; children: React.ReactNode }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      aria-expanded={expanded}
+      className={cn("group relative flex h-7 w-7 items-center justify-center rounded transition-colors hover:bg-rail hover:text-ink", expanded ? "text-ink" : "text-ink-3")}
+    >
+      {children}
+      <Tip className="whitespace-nowrap group-hover:block group-focus-visible:block">
+        <span className="block font-mono text-[10.5px] uppercase tracking-[0.14em] text-ink">{label}</span>
+        <span className="block text-[11px] text-ink-3">{hint}</span>
+      </Tip>
+    </button>
+  );
+}
+
+/** The info button beside the mode switch: what each mode does, one sentence each. */
+function ModeHelp({ mode }: { mode: "autonomous" | "manual" }) {
+  const id = useId();
+  // shows on hover, and stays open after a click or tap until focus moves on
+  return (
+    <button
+      type="button"
+      aria-label="About the modes"
+      aria-describedby={id}
+      className="group relative ml-0.5 flex h-6 w-6 items-center justify-center rounded-full text-ink-3 transition-colors hover:text-ink focus:text-ink"
+    >
+      <Info className="h-3.5 w-3.5" strokeWidth={1.5} />
+      <Tip id={id} className="w-64 space-y-2 p-3 group-hover:block group-focus:block">
+        {(["autonomous", "manual"] as const).map((m) => (
+          <span key={m} className="block">
+            <span className={cn("block font-mono text-[10.5px] uppercase tracking-[0.14em]", m === mode ? "text-ink" : "text-ink-3")}>
+              {m === "autonomous" ? "Autonomous" : "Manual"}
+              {m === mode && <span className="ml-1.5 text-servo">· on</span>}
+            </span>
+            <span className="mt-0.5 block text-xs leading-snug text-ink-2">{MODE_HINT[m]}</span>
+          </span>
+        ))}
+      </Tip>
+    </button>
+  );
+}
 
 /** Autonomous (default) or Manual, saved per project. */
 function ModeSwitch({ pid }: { pid: string }) {
@@ -638,9 +699,9 @@ function ModeSwitch({ pid }: { pid: string }) {
   });
   const mode = m.isPending && m.variables ? m.variables : saved;
   return (
-    <div className="flex items-center gap-1.5" title={m.error ? "Couldn't save the mode" : undefined}>
+    <div className="flex items-center" title={m.error ? "Couldn't save the mode" : undefined}>
       <Segmented
-        size="sm"
+        size="xs"
         value={mode}
         onChange={(v) => v !== mode && m.mutate(v)}
         ariaLabel="Agent mode"
@@ -649,7 +710,7 @@ function ModeSwitch({ pid }: { pid: string }) {
           { value: "manual", label: "Manual" },
         ]}
       />
-      <InfoTip>{MODE_HINT[mode]}</InfoTip>
+      <ModeHelp mode={mode} />
     </div>
   );
 }
@@ -679,10 +740,11 @@ function NoticeRow({ it, pid }: { it: Extract<ChatItem, { kind: "notice" }>; pid
 /** Shows or hides the past-chats panel beside the rail (the same one the rail's Chat button opens). */
 function HistoryToggle() {
   const panel = useChatHistoryPanel();
+  const Icon = panel.open ? PanelLeftClose : PanelLeftOpen;
   return (
-    <button type="button" onClick={() => panel.setOpen(!panel.open)} aria-expanded={panel.open} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink">
-      <History className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">{panel.open ? "Hide chats" : "All chats"}</span>
-    </button>
+    <IconAction label={panel.open ? "Hide chats" : "Show chats"} hint="Your past chats on this task" onClick={() => panel.setOpen(!panel.open)} expanded={panel.open}>
+      <Icon className="h-4 w-4" strokeWidth={1.5} />
+    </IconAction>
   );
 }
 

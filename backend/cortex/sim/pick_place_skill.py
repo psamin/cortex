@@ -14,6 +14,10 @@ labelled as such wherever it is used.
   5. close, lift, carry, lower, open, back off.
   The jaw roll is deterministic (``expert._horizontal_jaw_roll``), so grasp offsets computed from one IK
   solution hold for the others.
+* Objects riding a conveyor (issue #255): intercept. Predict the object's position from the belt
+  speed and pick the earliest point inside reach that the arm can get to first. Hover there with the
+  jaws across the belt, lower them so the object rides in between, close as its centre arrives, then
+  lift and place as for a top grasp.
 * Every episode ends by returning to the home pose ("go home").
 
 Closed loop like the verified probe: each move is solved by IK when it starts (seeded from the
@@ -30,6 +34,7 @@ import mujoco
 import numpy as np
 
 from .expert import GRIP_CLOSED, GRIP_OPEN, MAX_DEG_PER_STEP, closing_direction, solve_ik
+from .so101 import FPS
 from .grasp import approaches, grasp_height, grasp_mode, ik_seeds
 
 LIFT = 0.06
@@ -40,6 +45,13 @@ SLIDE_DEPTH = -0.020
 # A horizontal side grasp at the edge of the arc solves to just over 10 degrees; past this the
 # jaws are no longer approaching the bottle.
 MAX_APPROACH_ERR_DEG = 12.0
+# Conveyor intercept (issue #255).
+HOVER_DZ = 0.043  # hover this far above the grasp height
+ENTRY_CLEAR = 0.04  # the object's centre is at least this far upstream when the jaws are down
+END_MARGIN = 0.05  # intercept at least this far before the belt's end
+INTERCEPT_STEP = 0.01  # candidate intercept points along the belt
+CLOSE_LEAD_STEPS = 8  # close this many steps early: ~6 to contact from open at 8/step, ~2 to switch targets
+MOVE_MARGIN = 30  # steps allowed for the rate-limited approach on top of the transit estimate
 
 
 def pad_z(depth_x: float) -> float:
@@ -54,6 +66,7 @@ class Target:
     rate: float = MAX_DEG_PER_STEP
     settle: int = 4  # steps within tolerance before the next target
     phase: str = ""
+    until: Callable[[], bool] | None = None  # also hold the target until this is true (a timed close)
 
 
 class PickPlaceSkill:
@@ -66,6 +79,7 @@ class PickPlaceSkill:
         self.h = height if height is not None else float(getattr(env, "obj_h", 0.03))
         self.r = (grasp_width if grasp_width is not None else 0.03) / 2
         self.mode = grasp_mode(self.h)
+        self.intercept: float | None = None  # metres along the belt where a conveyor pick meets the object
         self.max_steps = max_steps_per_target
         self.home = np.asarray(env.module.HOME, dtype=np.float64)
 
@@ -180,6 +194,10 @@ class PickPlaceSkill:
 
     def _top(self) -> Iterator[Target]:
         env, p = self.env, self.p
+        belt = env.belt_of() if hasattr(env, "belt_of") else None
+        if belt is not None and belt.speed > 0 and belt.over(env.cube_pos()):
+            yield from self._intercept(belt)
+            return
         obj, dst = env.cube_pos(), env.box_pos()
         yaw = env.cube_yaw() + p.get("yaw_offset", 0.0)
         gz = grasp_height(self.h) - 0.003 + p.get("grasp_dz", 0.0)
@@ -195,6 +213,10 @@ class PickPlaceSkill:
         yield from self._line(g + [0, 0, 0.043], g, None, GRIP_OPEN, 6, "approach", yaw)
         _, q = self._ik(g, None, self._measured(), yaw=yaw, only_seed=True)
         yield Target(q, GRIP_CLOSED, rate=MAX_DEG_PER_STEP, settle=int(p.get("close_hold", 12)), phase="close")
+        yield from self._place(g, carry, r, rz, yaw)
+
+    def _place(self, g: np.ndarray, carry: float, r: np.ndarray, rz: float, yaw: float) -> Iterator[Target]:
+        """From a closed top grasp at ``g``: lift to ``carry``, carry over ``r``, lower to ``rz``, release, home."""
         yield from self._line(g, np.r_[g[:2], carry], None, GRIP_CLOSED, 6, "lift", yaw)
         _, q = self._ik(np.r_[r, carry], None, self._measured())
         if q is None:
@@ -207,8 +229,73 @@ class PickPlaceSkill:
         yield from self._line(np.r_[r, rz], np.r_[r, rz + 0.03], None, GRIP_OPEN, 4, "retreat")
         yield from self._go_home()
 
+    # ------------------------------------------------------------- conveyor
+    def _across(self, xyz: np.ndarray, yaw: float, seed: np.ndarray) -> tuple[float, np.ndarray | None]:
+        """Top-down IK whose jaws close across the belt (heading ``yaw``), not along it: the IK matches a
+        heading modulo 90 degrees, so the wrist roll is retried a quarter turn either way."""
+        w = self.env.world
+        d = mujoco.MjData(w.model)
+        want = np.array([np.cos(yaw), np.sin(yaw)])
+        best: tuple[float, np.ndarray | None] = (np.inf, None)
+        for droll in (0.0, 90.0, -90.0):
+            s = np.asarray(seed, dtype=np.float64).copy()
+            s[4] += droll
+            e, q = self._ik(xyz, None, s, yaw=yaw, only_seed=True)
+            d.qpos[:] = w.data.qpos
+            d.qpos[w.qadr[:5]] = np.deg2rad(q[:5])
+            mujoco.mj_kinematics(w.model, d)
+            if abs(float(closing_direction(w.model, d)[:2] @ want)) > 0.9 and e < best[0]:
+                best = (e, q)
+        return best
+
+    def _intercept(self, belt) -> Iterator[Target]:
+        env, p = self.env, self.p
+        dt = 1.0 / FPS
+        s0, lat = belt.coords(env.cube_pos())
+        yaw = belt.yaw + np.pi / 2  # jaws close across the belt
+        gz = belt.height + grasp_height(self.h) - 0.003 + p.get("grasp_dz", 0.0)
+        seed = self._measured()
+        plan = None
+        for s in np.arange(s0 + ENTRY_CLEAR, belt.length - END_MARGIN, INTERCEPT_STEP):
+            g = np.r_[belt.point(float(s), lat), gz]
+            eh, qh = self._across(g + [0, 0, HOVER_DZ], yaw, seed)
+            if qh is None or eh > 0.004:
+                continue
+            eg, qg = self._across(g, yaw, qh)
+            if qg is None or eg > 0.004:
+                continue
+            transit = np.abs(qh - self._measured()[:5]).max() / MAX_DEG_PER_STEP + MOVE_MARGIN
+            eta = (s - ENTRY_CLEAR - s0) / (belt.speed * dt)  # steps until the object is ENTRY_CLEAR short
+            if eta >= transit:
+                plan = (float(s), g, qh)
+                break
+        if plan is None:
+            self.failed = "the object leaves the reach window before the arm can get there"
+            return
+        s, g, qh = plan
+        self.intercept = s
+        yield Target(qh, GRIP_OPEN, settle=4, phase="hover")
+        yield from self._line(g + [0, 0, HOVER_DZ], g, None, GRIP_OPEN, 6, "lower", yaw)
+        lead = belt.speed * dt * CLOSE_LEAD_STEPS
+
+        def arrived() -> bool:
+            return belt.coords(env.cube_pos())[0] >= s - lead
+
+        _, q = self._across(g, yaw, self._measured())
+        yield Target(q, GRIP_OPEN, settle=1, phase="wait", until=arrived)
+        yield Target(q, GRIP_CLOSED, rate=MAX_DEG_PER_STEP, settle=int(p.get("close_hold", 12)), phase="close")
+        dst = env.box_pos()
+        carry = max(g[2] + LIFT, belt.height + p.get("carry_z", 0.075))
+        rz = max(self.h + 0.01, p.get("release_z", self.h + 0.025))
+        r = np.r_[dst[0] + p.get("release_dx", 0.0), dst[1] + p.get("release_dy", 0.0)]
+        yield from self._place(g, carry, r, rz, yaw)
+
     def _side(self) -> Iterator[Target]:
         env, p = self.env, self.p
+        belt = env.belt_of() if hasattr(env, "belt_of") else None
+        if belt is not None and belt.speed > 0 and belt.over(env.cube_pos()):
+            self.failed = "a tall object on a moving conveyor needs a side grasp, which has no intercept mode yet"
+            return
         obj, dst = env.cube_pos(), env.box_pos()
         gz = grasp_height(self.h) + p.get("grasp_dz", 0.0)
         g = np.r_[obj[0] + p.get("grasp_dx", 0.0), obj[1] + p.get("grasp_dy", 0.0), gz]
@@ -283,6 +370,8 @@ class PickPlaceSkill:
         self.cmd = self.cmd + step
         self.steps_on += 1
         arrived = np.allclose(self.cmd, tgt) and np.abs(self._measured()[:5] - tgt[:5]).max() < 0.7
+        if arrived and self.cur.until is not None:
+            arrived = self.cur.until()
         if arrived:
             self.settled += 1
         if (arrived and self.settled >= self.cur.settle) or self.steps_on >= self.max_steps:
