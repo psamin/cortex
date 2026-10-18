@@ -60,6 +60,8 @@ export interface AutopilotPolicy {
   planning_mode: PlanningMode;
   max_gpu_hours_per_job: number;
   allow_paid_jobs: boolean;
+  /** autonomous: the chat agent keeps going and training inside this policy starts without a click; manual: one step per turn */
+  autonomy: "autonomous" | "manual";
 }
 
 /** "agent" = a planning model drives the arm; "oracle" = scripted IK expert. "astra" is a legacy alias for "agent". */
@@ -87,6 +89,7 @@ export const DEFAULT_AUTOPILOT_POLICY: AutopilotPolicy = {
   planning_mode: "camera",
   max_gpu_hours_per_job: 1.5,
   allow_paid_jobs: false,
+  autonomy: "autonomous",
 };
 
 export interface Project {

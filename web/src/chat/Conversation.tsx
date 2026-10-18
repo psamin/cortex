@@ -1,8 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, History, Paperclip, Plus, Square, X } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, History, Paperclip, Plus, Square, X } from "lucide-react";
+import { api } from "../api/client";
 import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
+import { InfoTip, Segmented } from "../components/ui";
 import { cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
@@ -69,7 +72,9 @@ export function Conversation({ pid }: { pid: string }) {
     (b) => (b.type === "tools" && b.cards.some((r) => prefixOf(r) === "tj")) || (b.type === "item" && b.item.kind === "approval" && b.item.approvalKind !== "evaluation"),
   );
   const empty = !chat.loading && chat.items.length === 0;
-  const hasNext = (useProjectState(pid).data?.next_actions.length ?? 0) > 0;
+  const projectState = useProjectState(pid);
+  const hasNext = (projectState.data?.next_actions.length ?? 0) > 0;
+  const autonomous = projectState.data?.project.autopilot.autonomy !== "manual";
 
   return (
     <div
@@ -102,9 +107,7 @@ export function Conversation({ pid }: { pid: string }) {
         </div>
       )}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5">
-        <span className="kn-label kn-label-rule text-ink">
-          <span>Agent</span>
-        </span>
+        <ModeSwitch pid={pid} />
         <div className="ml-auto flex items-center gap-3">
           <HistoryToggle />
           <button
@@ -146,7 +149,9 @@ export function Conversation({ pid }: { pid: string }) {
                   <br />
                   <span className="kn-second">do next?</span>
                 </p>
-                <p className="mt-3 text-sm text-ink-3">Asks before anything paid or GPU.</p>
+                <p className="mt-3 text-sm text-ink-3">
+                  {autonomous ? "Runs the whole loop on its own. Needs you only for real robot motion and spend over your caps." : "One step at a time. Asks before anything paid or GPU."}
+                </p>
               </div>
             )}
             {blocks.map((b, i) => (
@@ -259,6 +264,8 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
       return <TodosCard it={it} />;
     case "changes":
       return <ChangesRow it={it} pid={pid} />;
+    case "notice":
+      return <NoticeRow it={it} />;
     case "import":
       return <ImportRow it={it} pid={pid} />;
     case "meta":
@@ -459,6 +466,7 @@ function LiveStatus({ status, startedAt }: { status: { state: string; tool?: str
 /** Work that is waiting on the user but was not raised in this conversation. */
 function PendingApproval({ pid }: { pid: string }) {
   const training = useTraining(pid);
+  const autonomous = useProjectState(pid).data?.project.autopilot.autonomy !== "manual";
   const [open, setOpen] = useState(false);
   const proposed = [...(training.data ?? [])].filter((t) => t.status === "proposed").sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
   if (!proposed.length) return null;
@@ -483,7 +491,7 @@ function PendingApproval({ pid }: { pid: string }) {
           <IsoIcon name="approve" size={20} accent />
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-servo live-dot" />
           <span className="min-w-0 flex-1 truncate text-ink">
-            Approve {tj.policy_type.toUpperCase()} training · {tj.estimate.paid ? "paid" : "no charge"}
+            {autonomous ? "Needs you · " : ""}Approve {tj.policy_type.toUpperCase()} training · {tj.estimate.paid ? "paid" : "no charge"}
             {proposed.length > 1 ? ` · ${proposed.length} jobs` : ""}
           </span>
           <span className="shrink-0 border-b border-servo font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-servo">Review →</span>
@@ -570,6 +578,57 @@ function Composer({
         </button>
       )}
     </form>
+  );
+}
+
+const MODE_HINT = {
+  autonomous:
+    "Autonomous: the agent keeps going on its own: sim demos, datasets, training inside your standing approval, evaluations, the next round. Still needs you for real robot motion and for spend over your caps (paid GPUs, more GPU-hours, a used-up planner budget).",
+  manual: "Manual: one step per message, and training waits for your approval.",
+} as const;
+
+/** Autonomous (default) or Manual, saved per project. */
+function ModeSwitch({ pid }: { pid: string }) {
+  const state = useProjectState(pid);
+  const qc = useQueryClient();
+  const saved = state.data?.project.autopilot.autonomy ?? "autonomous";
+  const m = useMutation({
+    mutationFn: (autonomy: "autonomous" | "manual") => api.setAutopilotPolicy(pid, { autonomy }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["state", pid] });
+      qc.invalidateQueries({ queryKey: ["projects"] });
+    },
+  });
+  const mode = m.isPending && m.variables ? m.variables : saved;
+  return (
+    <div className="flex items-center gap-1.5" title={m.error ? "Couldn't save the mode" : undefined}>
+      <Segmented
+        size="sm"
+        value={mode}
+        onChange={(v) => v !== mode && m.mutate(v)}
+        ariaLabel="Agent mode"
+        options={[
+          { value: "autonomous", label: "Autonomous" },
+          { value: "manual", label: "Manual" },
+        ]}
+      />
+      <InfoTip>{MODE_HINT[mode]}</InfoTip>
+    </div>
+  );
+}
+
+/** Cortex acted for you under your standing approval, or a hard gate needs you. */
+function NoticeRow({ it }: { it: Extract<ChatItem, { kind: "notice" }> }) {
+  const needs = it.tone === "needs_you";
+  const Icon = needs ? Hand : Bot;
+  return (
+    <div className={cn("enter flex items-start gap-2 text-xs leading-relaxed", needs ? "rounded border border-caution/40 bg-caution/5 px-3 py-2 text-ink-2" : "text-ink-3")}>
+      <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", needs ? "text-caution" : "text-ink-3")} strokeWidth={1.5} />
+      <p className="min-w-0">
+        <span className={cn("mr-1.5 font-mono text-[10px] uppercase tracking-[0.14em]", needs ? "text-caution" : "text-ink-3")}>{needs ? "Needs you" : "Autonomous"}</span>
+        {it.text}
+      </p>
+    </div>
   );
 }
 

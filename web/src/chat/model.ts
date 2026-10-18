@@ -32,6 +32,8 @@ export type ChatItem =
   | { kind: "changes"; id: number; items: ChangeItem[] }
   /** A demo import started from this studio (not in agent history): upload progress, then the live job card. */
   | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; errorDetail?: string; jobId?: string }
+  /** Written by Cortex in autonomous mode: it acted under your standing approval ("auto"), or a gate needs you. */
+  | { kind: "notice"; id: number; tone: "auto" | "needs_you"; text: string; refIds: string[] }
   /** Written by Cortex (not the LLM) when a background job finishes. */
   | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[]; detail?: string | null; superseded?: boolean };
 
@@ -58,6 +60,7 @@ export type ChatEvent =
   | { type: "error"; message: string }
   | { type: "todos"; items: TodoItem[] }
   | { type: "changes"; items: ChangeItem[] }
+  | { type: "notice"; tone: string; text: string; ref_ids: string[] }
   | { type: "job_done"; job_id: string; job_kind: string; status: string; text: string; ref_ids: string[]; detail?: string | null; superseded?: boolean };
 
 // ------------------------------------------------------------------ friendly labels
@@ -220,6 +223,8 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
     }
     case "changes":
       return ev.items.length ? [...items, { kind: "changes", id: id(), items: ev.items }] : items;
+    case "notice":
+      return [...items, { kind: "notice", id: id(), tone: ev.tone === "needs_you" ? "needs_you" : "auto", text: ev.text, refIds: ev.ref_ids }];
     case "job_done":
       // the same line can arrive live (SSE) and again from history: one row per job
       if (items.some((it) => it.kind === "job_done" && it.jobId === ev.job_id)) return items;
@@ -255,6 +260,7 @@ export function historyToEvents(rows: Record<string, unknown>[]): ChatEvent[] {
         args: (r.args as Record<string, unknown>) ?? {},
       });
     else if (k === "job_done") out.push(jobDoneEvent(r));
+    else if (k === "notice") out.push(noticeEvent(r));
     else if (k === "todos" && Array.isArray(r.items)) out.push({ type: "todos", items: r.items as TodoItem[] });
     else if (k === "changes" && Array.isArray(r.items)) out.push({ type: "changes", items: r.items as ChangeItem[] });
     else if (k === "done") out.push({ type: "done", turns: r.turns as number, cost_usd: r.cost_usd as number, duration_ms: r.duration_ms as number, is_error: r.is_error as boolean });
@@ -270,6 +276,11 @@ export const isCardRef = (ref: string) => (CARD_PREFIXES as readonly string[]).i
 
 /** Priority for the preview pane's "latest result". */
 export const PREVIEW_PREFIXES = ["ev", "ac", "ds", "tj", "an", "rec"];
+
+/** A notice row (history, the turn's SSE, or the project stream) as a chat event. */
+export function noticeEvent(r: Record<string, unknown>): ChatEvent {
+  return { type: "notice", tone: String(r.tone ?? "auto"), text: String(r.text ?? ""), ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [] };
+}
 
 /** A job_done payload (history row or live SSE `chat` event) as a chat event. */
 export function jobDoneEvent(r: Record<string, unknown>): ChatEvent {
