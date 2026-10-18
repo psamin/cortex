@@ -152,19 +152,42 @@ def plan_scenarios(project: Project, req: StartAgentCollectionRequest, base_seed
 
 # ------------------------------------------------------------------ budget
 
+_IN_FLIGHT = ("queued", "running")
+
+
 async def spent_usd(ctx: Ctx, project_id: str) -> float:
     rows = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project_id)
     return round(sum(float(a.usage.get("cost_usd", 0.0)) for a in rows), 4)
 
 
+async def reserved_usd(ctx: Ctx, project_id: str) -> float:
+    """Unspent cap of collections that have been saved but not finished.
+
+    Costs already recorded on those collections are in ``spent_usd``. Only the cap still
+    ahead of that spend is reserved, so two collections cannot each be allowed the full remainder.
+    """
+    attempts = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project_id)
+    cols = await ctx.repo.list("agent_collections", AgentCollection, project_id=project_id)
+    inflight = [c for c in cols if c.status in _IN_FLIGHT]
+    if not inflight:
+        return 0.0
+    ids = {c.id for c in inflight}
+    spent_there = sum(float(a.usage.get("cost_usd", 0.0)) for a in attempts if a.collection_id in ids)
+    caps = sum(float((c.totals or {}).get("budget_cap_usd") or 0.0) for c in inflight)
+    return round(max(0.0, caps - spent_there), 4)
+
+
 async def check_budget(ctx: Ctx, project: Project, req: StartAgentCollectionRequest) -> float:
     spent = await spent_usd(ctx, project.id)
-    remaining = round(project.autopilot.model_budget_usd - spent, 4)
+    held = await reserved_usd(ctx, project.id)
+    remaining = round(project.autopilot.model_budget_usd - spent - held, 4)
     cap = req.max_total_usd if req.max_total_usd is not None else min(remaining, req.num_demos * req.max_usd_per_episode)
     if cap <= 0 or cap > remaining + 1e-9:
-        raise PlannerBudgetExceeded(f"Planner budget: ${spent:.2f} of the project's ${project.autopilot.model_budget_usd:.2f} "
-                              f"standing approval is spent; this collection asks for up to ${cap:.2f}. "
-                              f"A human must raise model_budget_usd in the studio.")
+        reserved = f" ${held:.2f} is still reserved by a collection in progress." if held else ""
+        raise PlannerBudgetExceeded(
+            f"Planner budget: ${spent:.2f} of the project's ${project.autopilot.model_budget_usd:.2f} "
+            f"standing approval is spent; this collection asks for up to ${cap:.2f}.{reserved} "
+            f"A human must raise model_budget_usd in the studio.")
     return cap
 
 
@@ -194,30 +217,37 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
     if req.collector == "agent" and (down := await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)):
         raise PlannerUnavailable(down)
     paid = bool(planner and planner["price_per_m"])
-    cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
     prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
     base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)
     scenarios = plan_scenarios(project, req, base_seed)
-    col = AgentCollection(project_id=project.id, collector=req.collector, request=req, mode=mode,
-                          provider=planner["label"] if planner else None,
-                          model=planner["model"] if planner else "scripted_ik_oracle",
-                          scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
-                          reason=req.reason, totals=_empty_totals(cap))
-    attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
-                             seed=base_seed + i, scenario=s, status="failed", mode=mode,
-                             provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
-    cycle = None
-    if cycles:
-        from .intake_service import scene_payload
-        from .recording_service import reset_policy_for
+    from .intake_service import project_lock
 
-        if scene_payload(ctx, project) is None:
-            raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
-        cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
-                 "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
-        col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
-        attempts = []  # one attempt per segment, created as the worker reports them
-    await ctx.repo.save("agent_collections", col)
+    # Check and save under the project lock so a second start sees this collection's cap.
+    async with project_lock(project.id):
+        fresh = await ctx.repo.get("projects", project.id, Project)
+        if fresh is not None:
+            project = fresh
+        cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
+        col = AgentCollection(project_id=project.id, collector=req.collector, request=req, mode=mode,
+                              provider=planner["label"] if planner else None,
+                              model=planner["model"] if planner else "scripted_ik_oracle",
+                              scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
+                              reason=req.reason, totals=_empty_totals(cap))
+        attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
+                                 seed=base_seed + i, scenario=s, status="failed", mode=mode,
+                                 provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
+        cycle = None
+        if cycles:
+            from .intake_service import scene_payload
+            from .recording_service import reset_policy_for
+
+            if scene_payload(ctx, project) is None:
+                raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
+            cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
+                     "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
+            col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
+            attempts = []  # one attempt per segment, created as the worker reports them
+        await ctx.repo.save("agent_collections", col)
     await ctx.audit(actor, "start_agent_collection", project.id,
                     {**req.model_dump(mode="json"), "budget_cap_usd": cap, "provider": col.provider,
                      "model": col.model, "mode": mode, "cycles": cycles}, "ok",
