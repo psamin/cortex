@@ -821,3 +821,13 @@ export interface AgentThread {
   created_at: ISODate;
   updated_at: ISODate;
 }
+
+/** GET /api/live-policy: the Futurama GPU server running trained policies (#157). */
+export interface LivePolicyStatus {
+  available: boolean;
+  phase: "stopped" | "starting" | "ready";
+  reason?: string;
+  job?: string | null;
+  gpu?: string;
+  policies?: Record<string, { checkpoint: string; stage: string; held_out: number[] }>;
+}

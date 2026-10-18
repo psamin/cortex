@@ -55,6 +55,10 @@ class Settings(BaseSettings):
     futurama_repo_dir: str = "~/cortex"
     futurama_partition: str = "general"
     futurama_gres: str = "gpu:l40s:1"
+    # Live GPU inference (#157): infra/futurama/serve_policy.sbatch, tunneled to live_policy_url
+    live_policy_url: str = "http://127.0.0.1:8765"
+    futurama_policy_dir: str = "~/cortex-jenga"  # holds serve_policy.sbatch and output/<task>/ checkpoints
+    futurama_node_domain: str = "cc.gatech.edu"  # compute nodes are <node>.<domain>
 
     # Approval token required for paid jobs / hardware when called via MCP
     cortex_approval_secret: str | None = None

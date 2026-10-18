@@ -673,6 +673,53 @@ async def hardware_disarm(request: Request):
     return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
 
 
+@app.get("/api/live-policy")
+async def live_policy_status():
+    from ..services import live_policy_service as lp
+    return await lp.status(ctx())
+
+
+@app.post("/api/live-policy/start")
+async def live_policy_start(request: Request):
+    from ..services import live_policy_service as lp
+    try:
+        res = await lp.start(ctx())
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(400, str(e)) from e
+    await ctx().audit(actor(request), "live_policy_start", None, {"job": res.get("job")}, "ok",
+                      "GPU inference server requested")
+    return res
+
+
+@app.post("/api/live-policy/stop")
+async def live_policy_stop(request: Request):
+    from ..services import live_policy_service as lp
+    res = await lp.stop(ctx())
+    await ctx().audit(actor(request), "live_policy_stop", None, {}, "ok", "GPU inference server stopped")
+    return res
+
+
+@app.get("/api/live-policy/stream/{task}/{episode}")
+async def live_policy_stream(task: str, episode: int):
+    """The policy running on the GPU over a held-out episode, as MJPEG (proxied through the tunnel)."""
+    import httpx
+
+    from ..services import live_policy_service as lp
+    st = await lp.status(ctx())
+    if not st["available"]:
+        raise HTTPException(503, st["reason"])
+    if task not in st["policies"] or episode not in st["policies"][task]["held_out"]:
+        raise NotFound(f"No live policy '{task}' with held-out episode {episode}.")
+
+    async def gen():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
+            async with c.stream("GET", f"{lp.url(ctx())}/live/{task}/{episode}") as r:
+                async for chunk in r.aiter_raw():
+                    yield chunk
+
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
 class CalibrateReq(BaseModel):
     device: Literal["follower", "leader"]
 
