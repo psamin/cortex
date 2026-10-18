@@ -71,3 +71,16 @@ async def test_a_replay_of_an_unregistered_checkpoint_keeps_its_name(setup):
     assert rp.checkpoint_id is None and rp.checkpoint_name == "needle_001500"
     rows = [r for r in await studio_service.rollouts(ctx, p.id) if r["kind"] == "replay"]
     assert rows and all(r["policy"] == "needle_001500" for r in rows)
+
+
+async def test_a_live_sim_run_cut_off_early_is_not_a_failure(setup):
+    """Recorded before the fix: a partial run stored the last frame's "not yet" as success=False."""
+    from cortex.models import PolicyReplay, ReplayEpisode
+
+    ctx, p, _, _ = setup
+    rp = PolicyReplay(project_id=p.id, kind="live_sim", status="partial", task="jenga", episodes=[ReplayEpisode(
+        episode=7, frames=140, total_frames=900, success=False, steps=140, video_key="v.mp4")])
+    await replay_service.save(ctx, rp)
+    row = [r for r in await studio_service.rollouts(ctx, p.id) if r["kind"] == "replay"][0]
+    assert row["success"] is None and row["metric"] == "cut off, not judged · 140 steps"
+    assert replay_service.brief(rp)["success"] is None

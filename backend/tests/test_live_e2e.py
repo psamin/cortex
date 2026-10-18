@@ -403,7 +403,10 @@ def test_a_viewer_who_leaves_mid_run_is_saved_as_partial_and_frees_the_gpu(api, 
             if n >= 40:
                 break
     rp = _replays(api, sim)[0]
-    assert rp["status"] == "partial"
+    assert rp["status"] == "partial" and rp["episodes"][0]["success"] is None  # not judged, not a failure
+    row = [x for x in api.get(f"/projects/{sim}/rollouts").json() if x["kind"] == "replay"][0]
+    assert row["success"] is None and row["partial"] and row["metric"].startswith("cut off, not judged")
+    assert api.get(f"/projects/{sim}/state").json()["replays"][0]["success"] is None
     for _ in range(100):
         if serve.ended:
             break
