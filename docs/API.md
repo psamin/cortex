@@ -68,6 +68,8 @@ type Job = { id: string; kind: string; project_id: string; status: "queued"|"run
 |---|---|---|---|
 | POST | `/projects/{pid}/agent` | `{message: string}` | **SSE**: `event: text` (`{delta}`), `event: tool_call` (`{tool, args}`), `event: tool_result` (`{tool, summary, ref_ids}`), `event: approval_required` (`{kind, ref_id, summary}`), `event: done` |
 | GET | `/projects/{pid}/agent/history` | | `{role, content, tool?}[]` |
+| GET | `/projects/{pid}/agent/state` | | `{running, thread, status, resuming, waiting, paused}`: whether a turn really runs in the backend, and a pause that needs Continue |
+| POST | `/projects/{pid}/agent/continue` | | `{resumed}`: the Continue button; the autonomous workflow picks up where it stopped |
 
 ## Added after v1
 

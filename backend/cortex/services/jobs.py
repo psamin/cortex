@@ -58,6 +58,7 @@ class EventBus:
 
 
 TERMINAL = ("succeeded", "failed", "cancelled")
+INTERRUPTED = "interrupted by a backend restart"  # error_detail of a job a restart ended
 MAX_KEPT = 500  # finished jobs remembered (in memory and on disk); unfinished ones are always kept
 
 
@@ -74,12 +75,14 @@ class JobManager:
         self.on_finished: list[Callable[[Job], None]] = []
         self.closing = False
         self.stopping: set[str] = set()  # jobs a user asked to stop: their worker may die first and raise
+        self.interrupted: list[Job] = []  # jobs the last restart ended (autonomy reports them to their chain)
         if persist and persist.exists():
             for row in json.loads(persist.read_text() or "[]"):
                 j = Job.model_validate(row)
                 if j.status not in TERMINAL:
                     j.status, j.error = "failed", "It stopped because Cortex restarted. Run it again."
-                    j.error_detail = "interrupted by a backend restart"
+                    j.error_detail = INTERRUPTED
+                    self.interrupted.append(j)
                 self.jobs[j.id] = j
             self._save()
 

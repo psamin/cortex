@@ -84,6 +84,7 @@ def test_a_claude_code_turn_streams_a_live_status_line(tmp_path, monkeypatch):
     ]
 
     class Proc:
+        pid = 0
         returncode = None
         stderr = None
 

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "react-router-dom";
 import { api, ApiError, streamAgent } from "../api/client";
+import type { AgentState } from "../api/types";
 import { useChatStream } from "../api/events";
 import { splitError } from "../components/ui";
 import { applyEvent, historyToEvents, jobDoneEvent, newItemId, noticeEvent, type ChangeItem, type ChatEvent, type ChatItem, type TodoItem } from "./model";
@@ -21,6 +22,9 @@ interface ChatState {
   resultTick: number;
   send: (text: string) => void;
   stop: () => void;
+  /** the automatic steps stopped after repeated cut-offs (or a gate): the studio shows a Continue button */
+  paused: AgentState["paused"];
+  continueRun: () => void;
   reset: () => Promise<void>;
   /** the open chat thread (null = the backend's latest) */
   threadId: string | null;
@@ -98,6 +102,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   const busyRef = useRef(false);
   const [auto, setAuto] = useState(false);
   const autoRef = useRef(false);
+  const [paused, setPaused] = useState<AgentState["paused"]>(null);
 
   // the open thread survives reloads, per project
   const storeKey = `cortex.thread.${pid}`;
@@ -164,6 +169,50 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
 
   const runRef = useRef<(text: string) => Promise<void>>(async () => {});
 
+  // The backend says whether a turn is really running. A live line for a turn that is gone (a restart, a crashed
+  // agent) ends here instead of spinning forever, and a turn running without this tab (after a reload) shows live.
+  const misses = useRef(0);
+  const sync = useCallback(async () => {
+    let s: AgentState;
+    try {
+      s = await api.agentState(pid);
+    } catch {
+      if (busyRef.current || autoRef.current) setStatus((prev) => ({ state: prev?.state ?? "thinking", text: "Reconnecting to Cortex…" }));
+      return;
+    }
+    setPaused(s.paused);
+    if (s.running || s.resuming) {
+      misses.current = 0;
+      const here = !s.thread || !threadRef.current || s.thread === threadRef.current;
+      if (here && !busyRef.current && !autoRef.current) {
+        autoRef.current = true;
+        setAuto(true);
+        setTurnStartedAt((t) => t ?? Date.now());
+        setStatus({ state: "thinking", text: s.status ?? (s.resuming ? "Continuing on my own…" : "Working…") });
+      }
+      return;
+    }
+    if (!busyRef.current && !autoRef.current) return;
+    if (++misses.current < 2) return; // one miss can be a turn starting this very moment
+    misses.current = 0;
+    abort.current?.abort();
+    autoRef.current = false;
+    setAuto(false);
+    setStatus(null);
+    setTurnStartedAt(null);
+    load();
+  }, [pid, load]);
+
+  useEffect(() => {
+    void sync();
+  }, [sync]);
+
+  useEffect(() => {
+    if (!busy && !auto) return;
+    const t = setInterval(() => void sync(), 8000);
+    return () => clearInterval(t);
+  }, [busy, auto, sync]);
+
   /** One event of an automatic turn (autonomous mode), relayed on the project event stream. */
   const onLive = useCallback(
     (event: string, data: Record<string, unknown>) => {
@@ -204,7 +253,17 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
 
   // Cortex-written lines (job finished, notices, automatic turns) arrive on the project event stream
   useChatStream((entry) => {
+    if (entry.kind === "reconnected") {
+      // back after a drop (e.g. the backend restarted): what happened meanwhile is in the history
+      if (!busyRef.current) load();
+      void sync();
+      return;
+    }
     const here = typeof entry.thread !== "string" || !threadRef.current || entry.thread === threadRef.current;
+    if (entry.kind === "paused") {
+      if (here) setPaused({ thread: String(entry.thread ?? ""), reason: String(entry.reason ?? ""), at: Date.now() / 1000 });
+      return;
+    }
     if (entry.kind === "live") {
       if (here) onLive(String(entry.event ?? ""), (entry.data as Record<string, unknown>) ?? {});
       return;
@@ -222,6 +281,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     async (text: string) => {
       loadSeq.current++; // this turn's rows win over a history load still in flight
       setLoading(false);
+      setPaused(null); // a message picks the workflow up again
       busyRef.current = true;
       setBusy(true);
       setStatus({ state: "starting", text: "Starting…" });
@@ -304,8 +364,22 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   /** The stop button: end this turn and the autonomous chain (no more automatic steps). */
   const stop = useCallback(() => {
     abortOwn();
+    setPaused(null);
     void api.stopAgent(pid).catch(() => {});
   }, [abortOwn, pid]);
+
+  /** The Continue button after a pause: the agent picks the workflow up where it stopped. */
+  const continueRun = useCallback(() => {
+    setPaused(null);
+    autoRef.current = true;
+    setAuto(true);
+    setTurnStartedAt(Date.now());
+    setStatus({ state: "starting", text: "Picking up where it stopped…" });
+    void api
+      .continueAgent(pid)
+      .catch(() => {})
+      .finally(() => void sync());
+  }, [pid, sync]);
 
   const newChat = useCallback(async () => {
     abortOwn();
@@ -338,7 +412,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   }, []);
 
   return (
-    <Ctx.Provider value={{ items, loading, loadError, busy: busy || auto, auto, status, turnStartedAt, resultTick, send, stop, reset, reload: load, addImport, patchImport, threadId, newChat, openThread }}>
+    <Ctx.Provider value={{ items, loading, loadError, busy: busy || auto, auto, status, turnStartedAt, resultTick, send, stop, paused, continueRun, reset, reload: load, addImport, patchImport, threadId, newChat, openThread }}>
       {children}
     </Ctx.Provider>
   );

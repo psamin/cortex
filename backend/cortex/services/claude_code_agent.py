@@ -181,6 +181,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                                                     limit=16 * 1024 * 1024)
     except OSError as e:
         raise Unavailable(f"Claude Code could not start ({e.strerror or e})") from e
+    autonomy.agent_process(ctx, pid, proc.pid)  # a hard restart may leave it running: the next start ends it
     err_tail = bytearray()
 
     async def drain_stderr() -> None:  # read as it comes: a full stderr pipe would stall Claude Code mid-turn
@@ -221,6 +222,10 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                 await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
                 yield sse("status", {"state": "thinking", "engine": "claude-code", "model": ev.get("model"),
                                      "text": "Planning…"})
+            elif t == "system" and ev.get("subtype") == "api_retry":  # the Claude API is busy: say why it's slow
+                n, of = ev.get("attempt"), ev.get("max_retries")
+                yield sse("status", {"state": "thinking", "text": "Waiting on the Claude API" +
+                                     (f" (retry {n} of {of})…" if n and of else "…")})
             elif t == "assistant" and ev.get("message", {}).get("model") == "<synthetic>":
                 synthetic += " ".join(b.get("text", "") for b in ev["message"].get("content", []))
             elif t == "assistant":
@@ -261,6 +266,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                 result = ev
                 if ev.get("session_id"):
                     await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
+                break  # the turn is over: a process that lingers after its result must not hold the chat
         try:
             await asyncio.wait_for(proc.wait(), 15)
         except TimeoutError:
@@ -272,6 +278,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
             raise Unavailable(_failure(synthetic or str(result.get("result") or "") or err[0]))
         if proc.returncode and not result:
             yield sse("text", {"delta": f"Claude Code exited with an error: {err[0][:300]}"})
+            result = {"is_error": True}  # it stopped mid-turn: autonomous mode picks the work up again
     finally:
         if proc.returncode is None:
             _kill(proc)
