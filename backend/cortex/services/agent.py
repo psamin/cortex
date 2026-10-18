@@ -161,6 +161,8 @@ def tidy_job_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
 async def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any], tid: str | None = None) -> None:
     from . import chat_store
 
+    if autonomy.superseded(ctx):  # a newer backend took the chat over: the turn it ended writes nothing more
+        return
     t = await chat_store.current(ctx, pid, tid)
     await chat_store.append(ctx, pid, t["id"], entry)
 
@@ -349,6 +351,9 @@ async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor:
             hist.append({"role": "assistant", "content": "".join(text)})
             return
         except cc.Unavailable as e:  # it did nothing yet, so the next engine answers this turn
+            if autonomy.superseded(ctx):  # a newer backend ended Claude Code and took the turn over
+                yield _sse("done", {"is_error": True})
+                return
             eng = "model" if ctx.model and ctx.settings.agent_engine == "auto" else "rules"
             nxt = ctx.model.label if eng == "model" and ctx.model else f"the {RULES_LABEL}"
             if eng == "rules" and actor != "gui":  # an automatic turn: see below
@@ -500,6 +505,8 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
     assert route is not None
     async with httpx.AsyncClient(timeout=httpx.Timeout(MODEL_TIMEOUT_S, connect=10)) as http:
         for step in range(MAX_TURNS):
+            if autonomy.superseded(ctx):  # a newer backend took the turn over: it continues from here
+                return
             yield _sse("status", {"state": "thinking", "text": "Thinking…"})
             try:
                 async with asyncio.timeout(MODEL_TIMEOUT_S):  # the whole reply, also when it trickles in

@@ -57,6 +57,8 @@ async def lifespan(app: FastAPI):
     global CTX
     logging.basicConfig(level=logging.INFO)
     CTX = await build_ctx(settings())
+    from ..services import autonomy
+    autonomy.claim(CTX)  # an older backend still shutting down starts no more agent turns
     for n in CTX.notes:
         log.warning(n)
     await training_service.resume_pollers(CTX)
@@ -72,7 +74,6 @@ async def lifespan(app: FastAPI):
     resumed = await autopilot.resume_all(CTX)
     if resumed:
         log.info("resumed %d autopilot run(s)", resumed)
-    from ..services import autonomy
     if resumed := await autonomy.resume_after_restart(CTX):  # studio agent turns the restart cut off
         log.info("resuming %d autonomous agent turn(s) cut off by the restart", resumed)
     app.mount("/files", StaticFiles(directory=CTX.data_dir, check_dir=False), name="files")

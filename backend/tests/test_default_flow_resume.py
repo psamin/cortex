@@ -369,3 +369,141 @@ async def test_a_hung_collection_attempt_times_out_instead_of_hanging_the_job(tm
     col = AgentCollection(project_id=p.id, collector="agent", request=StartAgentCollectionRequest(num_demos=1))
     out = await asyncio.wait_for(ccc.run_attempt(ctx, p, col, Scenario(), 1, 0), 5)
     assert proc.killed and out["finished_by_agent"] is False and "timed out" in finished[0]
+
+
+# ------------------------------------------------- a restart while the old backend is still shutting down
+
+@contextlib.contextmanager
+def newer_backend(tmp_path):
+    """Another live process claims the data dir, as the new backend does at its start while the old one lingers
+    (uvicorn waits for open event streams after SIGTERM)."""
+    import subprocess
+    import sys
+
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+    try:
+        (tmp_path / autonomy.OWNER).write_text(str(proc.pid))
+        yield proc.pid
+    finally:
+        proc.kill()
+        proc.wait()
+
+
+async def restart_here(tmp_path):
+    """The old backend is gone and this process is the new one: it claims the data dir and resumes."""
+    forget_process_state()
+    ctx2 = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+    autonomy.claim(ctx2)
+    return ctx2, await autonomy.resume_after_restart(ctx2)
+
+
+def test_only_a_live_newer_backend_supersedes_this_one(tmp_path):
+    import subprocess
+
+    ctx = type("C", (), {"data_dir": tmp_path})()
+    assert not autonomy.superseded(ctx)  # no claim yet (tests, a first start)
+    autonomy.claim(ctx)
+    assert not autonomy.superseded(ctx)  # this process runs the data dir
+    gone = subprocess.Popen(["true"])
+    gone.wait()
+    (tmp_path / autonomy.OWNER).write_text(str(gone.pid))
+    assert not autonomy.superseded(ctx)  # the claimer died: nobody else runs it
+    with newer_backend(tmp_path):
+        assert autonomy.superseded(ctx)
+
+
+async def test_the_old_backend_starts_no_second_agent_when_the_new_one_takes_the_turn_over(tmp_path, monkeypatch):
+    """The new backend ends the old one's Claude Code (_end_orphan). That turn then fails in the old backend, which
+    used to retry it 5 s later next to the new backend's own resume: two agents on one project."""
+    ctx, p = await setup(tmp_path)
+    sent: list[str] = []
+    killed = asyncio.Event()
+
+    async def fake_claude(ctx_, pid, message, sse, tid=None):
+        sent.append(message)
+        if len(sent) == 1:
+            yield sse("tool_call", {"tool": "build_simulation", "args": {}})
+            yield sse("tool_result", {"tool": "build_simulation", "summary": "Scene built; feasible", "ref_ids": []})
+            await killed.wait()  # SIGTERM from the new backend: Claude Code exits with an error
+            yield sse("text", {"delta": "Claude Code exited with an error: terminated"})
+            yield sse("done", {"is_error": True})
+            return
+        yield sse("text", {"delta": "Collecting demos next."})
+        yield sse("done", {})
+
+    fake_agent(monkeypatch, fake_claude)
+    stream = agent.chat(ctx, p.id, PROMPT)
+    async for chunk in stream:
+        if chunk.startswith("event: tool_result"):
+            break
+    tid = autonomy.status(ctx, p.id)["thread"]
+    with newer_backend(tmp_path):
+        files = {n: (tmp_path / n).read_text() if (tmp_path / n).exists() else None
+                 for n in ("agent_runs.json", "autonomy.json")}
+        rows = await chat_store.load(ctx, p.id, tid)
+        killed.set()
+        async for _ in stream:
+            pass
+        await asyncio.sleep(0.2)  # the retry used to come after RECOVERY_BACKOFF_S (0 here)
+        assert sent == [PROMPT] and idle(ctx, p.id)  # no second agent from the old backend
+        now = {n: (tmp_path / n).read_text() if (tmp_path / n).exists() else None for n in files}
+        assert now == files and "turn" in json.loads(now["agent_runs.json"])[p.id]  # its stale caches write
+        # nothing: the cut-off mark stays for the new backend
+        assert await chat_store.load(ctx, p.id, tid) == rows  # ...and the chat is the new backend's to continue
+
+    ctx2, n = await restart_here(tmp_path)  # the new backend picks the step up: one agent, once
+    assert n == 1
+    await until(lambda: len(sent) == 2 and idle(ctx2, p.id))
+    assert "the backend restarted during the last step" in sent[1]
+
+
+async def test_a_retry_or_job_the_old_backend_was_waiting_on_never_starts_a_turn_there(tmp_path, monkeypatch):
+    """A retry wait or a running job has no agent process, so a restart can land inside it: the old backend's timer
+    and the new backend's start used to wake the same step twice."""
+    ctx, p = await setup(tmp_path)
+    agent.install_job_listener(ctx)
+    monkeypatch.setattr(autonomy, "RECOVERY_BACKOFF_S", (0.3, 0.3, 0.3))
+    sent: list[str] = []
+
+    async def fake_claude(ctx_, pid, message, sse, tid=None):
+        sent.append(message)
+        yield sse("done", {"is_error": len(sent) == 1})  # the first step crashed: a retry is scheduled
+
+    fake_agent(monkeypatch, fake_claude)
+    async for _ in agent.chat(ctx, p.id, PROMPT):
+        pass
+    assert autonomy.status(ctx, p.id)["resuming"]  # waiting out the retry pause
+    with newer_backend(tmp_path):
+        async def work(job):
+            return None
+        ctx.jobs.submit("agent_collect", p.id, work)  # a job the old backend still finishes
+        await asyncio.sleep(0.6)
+        assert sent == [PROMPT] and idle(ctx, p.id)
+
+    ctx2, _ = await restart_here(tmp_path)  # the new backend wakes the pending retry: once
+    await until(lambda: len(sent) == 2 and idle(ctx2, p.id))
+    await asyncio.sleep(0.4)
+    assert len(sent) == 2 and sent[1].startswith("[Cortex, autonomous mode] Picking the workflow up again")
+    await ctx.jobs.shutdown()
+
+
+async def test_the_old_backend_does_not_hand_a_taken_over_turn_to_another_engine(tmp_path, monkeypatch):
+    """Claude Code ended before it acted (the new backend stopped it): the user's turn used to fall back to the rule
+    planner in the old backend, which acts on the message itself."""
+    ctx, p = await setup(tmp_path)
+    ctx.model = None
+    planned: list[str] = []
+
+    async def fake_claude(ctx_, pid, message, sse, tid=None):
+        raise claude_code_agent.Unavailable("Claude Code exited (terminated)")
+        yield  # an async generator, like the real one
+
+    async def rules(ctx_, pid, message, *a, **k):
+        planned.append(message)
+        yield agent._sse("text", {"delta": "planned"})
+
+    fake_agent(monkeypatch, fake_claude)
+    monkeypatch.setattr(agent, "_rules", rules)
+    with newer_backend(tmp_path):
+        chunks = [c async for c in agent.chat(ctx, p.id, PROMPT)]
+    assert not planned and chunks[-1].startswith("event: done")

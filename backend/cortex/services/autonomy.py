@@ -22,6 +22,10 @@ Manual: the agent does one step per turn, and training waits for an approval cli
 A step that is cut off (the backend restarted mid-turn, or the agent process crashed or timed out) is picked up
 again on its own in autonomous mode, after a pause that grows each time. After MAX_RECOVERIES in a row the chain
 pauses, and the studio shows a Continue button (agent_runs.json keeps this across restarts).
+
+One backend runs the chain. After SIGTERM, uvicorn keeps the old process alive while a studio tab holds its event
+stream, so at a restart the old backend can still be running next to the new one. The new one claims the data dir
+(backend.owner) and takes the cut-off turn over; the old one then starts no turn and writes no state.
 """
 
 from __future__ import annotations
@@ -165,6 +169,8 @@ def _state(ctx: Ctx) -> dict[str, Any]:
 
 
 def _flush(ctx: Ctx) -> None:
+    if superseded(ctx):  # its cache is stale: the newer backend's state stands
+        return
     try:
         (ctx.data_dir / "autonomy.json").write_text(json.dumps(_state(ctx)))
     except OSError as e:  # the chain still works in this process
@@ -237,7 +243,7 @@ async def job_done(ctx: Ctx, job, entry: dict[str, Any]) -> dict[str, Any] | Non
     from .agent_orchestrator import get_project
 
     pid = job.project_id
-    if ctx.jobs.closing or pid in autopilot._running:
+    if ctx.jobs.closing or pid in autopilot._running or superseded(ctx):
         return None
     if job.status == "cancelled":  # the user stopped work: stop the chain too
         disarm(ctx, pid)
@@ -296,6 +302,8 @@ async def _wake(ctx: Ctx, pid: str, delay: float) -> None:
 
     await asyncio.sleep(delay)
     async with lock(pid):
+        if superseded(ctx):  # a newer backend took the chain over during the wait
+            return
         st = _state(ctx).get(pid) or {}
         tid, pending = st.get("thread"), st.get("pending") or []
         if not tid or not pending or _active(ctx, pid):
@@ -353,6 +361,34 @@ def stop(ctx: Ctx, pid: str) -> bool:
 
 # ------------------------------------------------------------------ cut-off turns: resume, bounded retries, pause
 
+OWNER = "backend.owner"  # the pid of the backend that runs this data dir's chains
+
+
+def claim(ctx: Ctx) -> None:
+    """Backend start: this process runs the chains from now on (see the module docstring)."""
+    try:
+        (ctx.data_dir / OWNER).write_text(str(os.getpid()))
+    except OSError as e:
+        log.warning("could not claim the data dir for this backend: %s", e)
+
+
+def superseded(ctx: Ctx) -> bool:
+    """A newer backend runs this data dir and is alive: this one is shutting down, so it leaves the work to it."""
+    try:
+        owner = int((ctx.data_dir / OWNER).read_text())
+    except (OSError, ValueError):
+        return False
+    if owner == os.getpid():
+        return False
+    try:
+        os.kill(owner, 0)
+    except ProcessLookupError:
+        return False
+    except OSError:  # e.g. EPERM: it exists
+        pass
+    return True
+
+
 def _runs(ctx: Ctx) -> dict[str, Any]:
     key = str(ctx.data_dir)
     if key not in _RUNS:
@@ -364,6 +400,8 @@ def _runs(ctx: Ctx) -> dict[str, Any]:
 
 
 def _save_runs(ctx: Ctx) -> None:
+    if superseded(ctx):
+        return
     try:
         (ctx.data_dir / "agent_runs.json").write_text(json.dumps(_runs(ctx)))
     except OSError as e:  # resuming after a restart needs it; this process still works without it
@@ -417,6 +455,8 @@ def run_finished(ctx: Ctx, pid: str, cut_off: bool) -> None:
 async def recover(ctx: Ctx, pid: str, tid: str, why: str) -> None:
     """A step was cut off: pick it up again after a pause that grows each time. After MAX_RECOVERIES in a row the
     chain pauses until someone presses Continue or sends a message."""
+    if superseded(ctx):  # the newer backend ended this step and picks it up itself
+        return
     r = _runs(ctx).setdefault(pid, {})
     n = int(r.get("attempts") or 0)
     if n >= MAX_RECOVERIES:
