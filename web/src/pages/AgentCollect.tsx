@@ -93,7 +93,7 @@ export function AgentCollect({ project, collector, onUseOracle }: { project: Pro
       {mine.length > 1 && (
         <div className="flex items-center gap-2 text-xs text-ink-3">
           <span>Collection</span>
-          <Select value={current?.id ?? ""} onChange={(e) => setSelectedId(e.target.value)} className="h-7 w-auto min-w-[280px] text-xs">
+          <Select value={current?.id ?? ""} onChange={(e) => setSelectedId(e.target.value)} className="h-7 w-auto min-w-[280px] text-xs" aria-label="Collection">
             {mine.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.id} · {c.status} · {c.totals.successes ?? 0}/{c.request.num_demos} · {ago(c.created_at)}

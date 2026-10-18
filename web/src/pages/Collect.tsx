@@ -516,7 +516,7 @@ function EpisodeStrip({
             disabled={pending === 0}
             loading={acceptPassing.isPending}
             onClick={() => acceptPassing.mutate()}
-            title="Accept every unreviewed episode that succeeded and passed the quality checks"
+            title={pending ? "Accept every unreviewed episode that succeeded and passed the quality checks" : "No unreviewed episodes left to accept"}
           >
             <Check className="h-3.5 w-3.5" /> Accept passing ({pending})
           </Button>
@@ -607,6 +607,7 @@ function EpisodeCard({
             variant={e.status === "accepted" ? "secondary" : "ghost"}
             className="h-6 flex-1 px-1 text-2xs"
             disabled={e.status === "accepted"}
+            title={e.status === "accepted" ? "Already accepted" : "Use this episode for training"}
             loading={m.isPending && m.variables === "accepted"}
             onClick={() => m.mutate("accepted")}
           >
@@ -617,6 +618,7 @@ function EpisodeCard({
             variant="ghost"
             className="h-6 flex-1 px-1 text-2xs"
             disabled={e.status === "rejected"}
+            title={e.status === "rejected" ? "Already rejected" : "Keep this episode out of training"}
             loading={m.isPending && m.variables === "rejected"}
             onClick={() => m.mutate("rejected")}
           >

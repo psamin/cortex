@@ -84,7 +84,13 @@ export function ProjectChatPage() {
           <Conversation pid={pid} />
         </div>
         <div className="min-w-0 flex-1">
-          <Viewer pid={pid} goal={state.data?.project.spec.goal ?? state.data?.project.task_prompt ?? "…"} activity={activity} sel={sel} />
+          <Viewer pid={pid} goal={state.data?.project.spec.goal ?? state.data?.project.task_prompt ?? "…"}
+            asked={
+              // the simulator only has the cube-and-bowl scene: say so when the request was about something else
+              state.data && !state.data.project.spec.objects.every((o) => state.data!.project.task_prompt.toLowerCase().includes(o.toLowerCase()))
+                ? state.data.project.task_prompt
+                : null
+            } activity={activity} sel={sel} />
         </div>
       </div>
       <Pipeline pid={pid} open={pipelineOpen} onToggle={() => setPipelineOpen(!pipelineOpen)} sel={sel} />
