@@ -1,5 +1,6 @@
 import { MCPServer } from "mcp-use";
 import { registerPrompts } from "./src/prompts.js";
+import { registerRelay } from "./src/relay.js";
 import { registerTools } from "./src/tools.js";
 import { registerViews } from "./src/views.js";
 
@@ -46,5 +47,6 @@ const server = new MCPServer({
 registerTools(server);
 registerViews(server); // MCP Apps views rendered in the agent's chat (#119)
 registerPrompts(server);
+registerRelay(server);
 
 export default server;

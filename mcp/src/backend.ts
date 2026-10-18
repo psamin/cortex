@@ -1,11 +1,14 @@
 import type { CallToolResult } from "mcp-use";
+import { relayCall, relayEnabled, runnerConnected } from "./relay.js";
 
 // The Cortex backend's tool registry is the single source of truth:
 //   GET  {CORTEX_API_URL}/tools        -> tool names + JSON Schemas
 //   POST {CORTEX_API_URL}/tools/{name} -> {summary, ref_ids, ...data}
-// A hosted MCP server cannot reach localhost, so on Manufact CORTEX_API_URL
-// must be a public URL (e.g. a cloudflared tunnel) and CORTEX_MCP_KEY must
-// match the backend's key.
+// Two transports, picked per call:
+//   runner  a local runner (backend/cortex/mcp_runner.py) is long-polling this
+//           server (src/relay.ts); used whenever one is connected. This is how
+//           a Manufact-hosted server reaches a laptop with no tunnel.
+//   direct  POST to CORTEX_API_URL (local dev, or a public/tunneled backend).
 export const API_URL = (process.env.CORTEX_API_URL ?? "http://127.0.0.1:8000/api").replace(/\/+$/, "");
 export const STUDIO_URL = (process.env.CORTEX_STUDIO_URL ?? "http://localhost:5173").replace(/\/+$/, "");
 const MCP_KEY = process.env.CORTEX_MCP_KEY;
@@ -56,28 +59,53 @@ function approvalRequired(tool: string, args: Json, detail: string): CallToolRes
   };
 }
 
-/** POST /tools/{tool} and turn the response into an MCP tool result. */
-export async function callTool(tool: string, args: Json, signal?: AbortSignal): Promise<CallToolResult> {
+const RUNNER_HINT =
+  "Start the local runner next to your backend: `scripts/dev.sh --runner <this server's URL>` or " +
+  "`cd backend && uv run python -m cortex.mcp_runner --server <this server's URL>` (same CORTEX_MCP_KEY on both).";
+
+type Transport = { status: number; raw: string } | { error: CallToolResult };
+
+async function send(tool: string, args: Json, signal?: AbortSignal): Promise<Transport> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
     "X-Cortex-Actor": "mcp",
   };
+  if (relayEnabled() && runnerConnected()) {
+    try {
+      const r = await relayCall(tool, args, headers, signal);
+      return r;
+    } catch (e) {
+      return { error: error(`The Cortex runner did not complete cortex.${tool} (${(e as Error).message}). Is it still running?`) };
+    }
+  }
   if (MCP_KEY) headers.Authorization = `Bearer ${MCP_KEY}`;
-
-  let res: Response;
   try {
-    res = await fetch(`${API_URL}/tools/${encodeURIComponent(tool)}`, {
+    const res = await fetch(`${API_URL}/tools/${encodeURIComponent(tool)}`, {
       method: "POST",
       headers,
       body: JSON.stringify(args),
       signal,
     });
+    return { status: res.status, raw: await res.text() };
   } catch (e) {
-    return error(`Cannot reach the Cortex backend at ${API_URL} (${(e as Error).message}). Is it running, and is CORTEX_API_URL correct?`);
+    const why = `Cannot reach the Cortex backend: no local runner is connected and ${API_URL} is unreachable (${(e as Error).message}).`;
+    return {
+      error: error(
+        relayEnabled()
+          ? `${why} ${RUNNER_HINT}`
+          : `${why} Is the backend running and CORTEX_API_URL correct? (To reach a laptop from a hosted server, set CORTEX_MCP_KEY here and start the runner.)`,
+      ),
+    };
   }
+}
 
-  const raw = await res.text();
+/** POST /tools/{tool} (directly or through the runner) and turn the response into an MCP tool result. */
+export async function callTool(tool: string, args: Json, signal?: AbortSignal): Promise<CallToolResult> {
+  const sent = await send(tool, args, signal);
+  if ("error" in sent) return sent.error;
+  const res = { status: sent.status, ok: sent.status >= 200 && sent.status < 300 };
+  const raw = sent.raw;
   let body: unknown;
   try {
     body = raw ? JSON.parse(raw) : {};
