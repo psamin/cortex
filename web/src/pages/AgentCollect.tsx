@@ -15,7 +15,7 @@ import {
 } from "../api/hooks";
 import { agentLabel, conditionKey, isAgent, type AgentCollection, type Collector, type CollectorStats, type PlannerStatus, type PlanningMode, type Project } from "../api/types";
 import { AttemptDrawer, PlanningModeBadge, ProvenanceBadge, ScenarioChip, ThoughtRow, TraceRow, Verdict } from "../components/AgentTrace";
-import { Badge, Button, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, SectionLabel, Segmented, Select, SkeletonRows, StatusBadge, Toggle, InlineError } from "../components/ui";
+import { Badge, Button, EmptyState, ErrorState, Field, InfoTip, Input, Meter, More, Panel, QueryState, SectionLabel, Segmented, Select, SkeletonRows, StatusBadge, Toggle, InlineError } from "../components/ui";
 import { WorkcellGrid } from "../components/Workcell";
 import { ago, cn, humanize, num, pct } from "../lib/format";
 
@@ -131,11 +131,11 @@ function PlannerUnavailable({ reason, onUseOracle }: { reason: string; onUseOrac
     <div className="flex flex-wrap items-start gap-3 rounded-md bg-caution/5 p-3.5 border border-caution/35">
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-caution" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-ink">No planning model is available for the agent.</p>
-        <p className="mt-0.5 text-xs text-ink-3">{reason} Cortex does not substitute another model.</p>
+        <p className="text-sm font-medium text-ink">No planning model available.</p>
+        <p className="mt-0.5 text-xs text-ink-3">{reason} No other model is substituted.</p>
       </div>
       <Button size="sm" onClick={onUseOracle}>
-        <Cog className="h-3.5 w-3.5" /> Use scripted oracle instead
+        <Cog className="h-3.5 w-3.5" /> Use oracle
       </Button>
     </div>
   );
@@ -220,36 +220,36 @@ function StartForm({
 
   return (
     <Panel
-      title={isAgent(collector) ? "Agent demonstrations" : "Scripted oracle demonstrations"}
-      meta={isAgent(collector) ? `${agentLabel(planner?.model)} plans · validated IK executes` : "privileged reference collector"}
+      title={isAgent(collector) ? "Agent demos" : "Oracle demos"}
+      meta={isAgent(collector) ? `${agentLabel(planner?.model)} plans · IK executes` : "oracle · privileged"}
       actions={
         running && current ? (
           <Button size="sm" variant="danger" loading={stop.isPending} onClick={() => stop.mutate()}>
-            <Square className="h-3 w-3 fill-current" /> Stop collection
+            <Square className="h-3 w-3 fill-current" /> Stop
           </Button>
         ) : (
           <Button size="sm" variant="primary" disabled={disabled} loading={start.isPending} onClick={() => start.mutate()}>
             {autopilot ? <Zap className="h-3.5 w-3.5" /> : <Circle className="h-3 w-3 fill-current" />}
-            {autopilot ? "Start autopilot" : `Collect ${numDemos}`}
+            {autopilot ? "Autopilot" : `Collect ${numDemos}`}
           </Button>
         )
       }
     >
-      <p className="mb-3 text-xs text-ink-3">
+      <More className="mb-3" label="How it works">
         {isAgent(collector)
           ? `${agentLabel(planner?.model)} plans each step from the camera, a validator checks every command, IK executes it in MuJoCo, and only attempts the simulator verifies as successful become LeRobot demonstrations.`
           : "The scripted oracle follows fixed IK waypoints computed from simulator ground truth. It is a reference collector with privileged state, not a learned or camera-grounded agent."}
-      </p>
+      </More>
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
         <div className="min-w-[220px] flex-1">
           <Field
             label="Task"
             hint={
               autopilot
-                ? "Autopilot always uses the project goal."
+                ? "Autopilot uses the project goal"
                 : taskOverride
-                  ? "Overrides the project goal for this collection only."
-                  : "The project goal; edit to override it for this collection."
+                  ? "Overrides the goal for this run"
+                  : "Project goal · edit to override"
             }
           >
             <Input value={autopilot ? project.spec.goal : task} disabled={autopilot} onChange={(e) => setTask(e.target.value)} aria-label="Task given to the planner" />
@@ -284,7 +284,7 @@ function StartForm({
           </>
         )}
         <div className="pb-0.5">
-          <Toggle checked={autopilot} onChange={setAutopilot} label="Autopilot" hint="collect → train → evaluate loop" />
+          <Toggle checked={autopilot} onChange={setAutopilot} label="Autopilot" hint="full loop" />
         </div>
       </div>
 
@@ -316,14 +316,14 @@ function StartForm({
       )}
       {autopilot && (
         <p className="mt-2 text-2xs text-ink-3">
-          Autopilot uses the {collectorName(collector, planner?.model)} collector and runs the full loop under the project's standing approvals. Follow it on the Autopilot page.
+          {collectorName(collector, planner?.model)} · full loop under your standing approvals.
         </p>
       )}
       {planner && planner.available && isAgent(collector) && (
         <p className="mt-2 text-2xs text-ink-4">
           {typeof planner.pricing_per_m_tokens === "string"
             ? `Cost: ${planner.pricing_per_m_tokens}`
-            : `Pricing: $${planner.pricing_per_m_tokens.input}/M input · $${planner.pricing_per_m_tokens.output}/M output tokens`}
+            : `$${planner.pricing_per_m_tokens.input}/M in · $${planner.pricing_per_m_tokens.output}/M out tokens`}
         </p>
       )}
 
@@ -367,7 +367,7 @@ function RaiseBudget({ pid, current, message, onRaised }: { pid: string; current
       <span className="text-xs text-ink-3">$</span>
       <Input type="number" min={0} step={1} value={value} onChange={(e) => setValue(Number(e.target.value) || 0)} className="num h-7 w-20 font-mono" aria-label="New model budget" />
       <Button size="sm" variant="primary" loading={m.isPending} disabled={value <= (current ?? 0)} onClick={() => m.mutate()}>
-        Raise project budget
+        Raise budget
       </Button>
       {m.error && <InlineError error={m.error} className="w-full" />}
     </div>
@@ -398,7 +398,7 @@ function LiveViewport({
   return (
     <Panel
       title="Live simulation"
-      meta={running ? "MuJoCo · every simulator step" : "idle"}
+      meta={running ? "MuJoCo" : "idle"}
       actions={col && <StatusBadge status={col.status} />}
       bodyClassName="p-0"
     >
@@ -408,7 +408,7 @@ function LiveViewport({
         ) : (
           <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-ink-4">
             <VideoOff className="h-6 w-6" />
-            <p className="text-xs">{running ? "Live stream unavailable" : "No collection running. Start one to watch the robot execute."}</p>
+            <p className="text-xs">{running ? "Live stream unavailable" : "Not running"}</p>
           </div>
         )}
         {running && (
@@ -492,12 +492,12 @@ function ActionTimeline({
       {!col ? (
         <EmptyState title="No collection yet">
           {isAgent(collector)
-            ? "Start a collection. Every tool call the agent makes, accepted or rejected by the validator, appears here."
-            : "Start a collection. Each attempt and its simulator verdict appears here."}
+            ? "Start one to see each tool call."
+            : "Start one to see each attempt."}
         </EmptyState>
       ) : collector === "oracle" && live && indices.length > 0 ? (
         <ol className="max-h-[440px] min-h-[200px] divide-y divide-[var(--line-soft)] overflow-y-auto px-3.5 scroll-thin">
-          <li className="py-2 text-2xs text-ink-3">The scripted oracle follows fixed IK waypoints from simulator state; it has no tool trace.</li>
+          <li className="py-2 text-2xs text-ink-3">Oracle · privileged · no tool trace</li>
           {indices.map((i) => {
             const a = live.attempts[i];
             return (
@@ -523,10 +523,8 @@ function ActionTimeline({
           })}
         </ol>
       ) : !att ? (
-        <EmptyState title={running ? "Waiting for the next step" : "No live steps in this session"}>
-          {running
-            ? "Steps stream in as the robot acts. Steps from before this page loaded are in each attempt's full trace once it finishes."
-            : "Open an attempt below to see its full recorded trace."}
+        <EmptyState title={running ? "Waiting for a step" : "No live steps"}>
+          {running ? "Earlier steps are in each attempt's trace." : "Open an attempt below for its trace."}
         </EmptyState>
       ) : (
         <>
@@ -539,14 +537,14 @@ function ActionTimeline({
             {att.items.map((it, i) => (it.kind === "step" ? <TraceRow key={i} step={it.step} dense /> : <ThoughtRow key={i} text={it.text} />))}
             {att.items.length === 0 && !att.result && (
               <li className="py-3 text-xs text-ink-3">
-                {collector === "oracle" ? "The scripted oracle follows fixed IK waypoints; it has no tool trace." : "Waiting for the first model call…"}
+                {collector === "oracle" ? "Oracle · no tool trace" : "Waiting for the first model call…"}
               </li>
             )}
             {att.result && (
               <li className="space-y-1.5 py-2.5">
                 <Verdict a={att.result} />
                 <button type="button" onClick={() => onOpenAttempt(att.result!.id)} className="inline-flex items-center gap-1 text-2xs text-ink-3 hover:text-servo">
-                  Video and full trace <ArrowRight className="h-3 w-3" />
+                  Video and trace <ArrowRight className="h-3 w-3" />
                 </button>
               </li>
             )}
@@ -579,26 +577,26 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
   return (
     <Panel title="Dataset progress" meta={col ? collectorName(col.collector, col.model) : undefined}>
       {!col ? (
-        <p className="text-xs text-ink-3">Totals appear once a collection starts.</p>
+        <p className="text-xs text-ink-3">No collection yet.</p>
       ) : (
         <div className="space-y-4">
           <div className="grid grid-cols-2 gap-3">
             <div>
               <div className="num kn-display text-[40px] leading-none text-pass">{t.successes ?? 0}</div>
-              <div className="mt-1 text-2xs text-ink-3">demos (simulator-verified)</div>
+              <div className="mt-1 text-2xs text-ink-3">demos · sim-verified</div>
             </div>
             <div>
               <div className="num kn-display text-[40px] leading-none text-ink-2">{t.failures ?? 0}</div>
               <div className="mt-1 text-2xs text-ink-3">failed attempts</div>
             </div>
           </div>
-          <p className="-mt-2 text-2xs text-ink-3">
-            Failed attempts are kept as diagnostics. They never become training data.
-            {` ${t.attempts ?? 0} of ${col.request.num_demos} attempts done.`}
+          <p className="-mt-2 flex items-center gap-1.5 text-2xs text-ink-3">
+            {`${t.attempts ?? 0}/${col.request.num_demos} attempts`}
+            <InfoTip>Failed attempts are kept as diagnostics. They never become training data.</InfoTip>
           </p>
 
           <div>
-            <SectionLabel className="mb-1.5">Coverage · successes / attempts (plan target)</SectionLabel>
+            <SectionLabel className="mb-1.5">Coverage · ok / tries (target)</SectionLabel>
             <WorkcellGrid
               renderCell={(c) => {
                 const k = conditionKey(c);
@@ -619,12 +617,12 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
             <div>
               <SectionLabel>Quality</SectionLabel>
               <div className="num mt-0.5 font-mono text-ink">{meanQ === null ? "—" : meanQ.toFixed(2)}</div>
-              <div className="text-2xs text-ink-3">{accepted} of {produced.length} episodes accepted</div>
+              <div className="text-2xs text-ink-3">{accepted}/{produced.length} accepted</div>
             </div>
             <div>
               <SectionLabel>Recoveries</SectionLabel>
               <div className="num mt-0.5 font-mono text-ink">{t.recoveries ?? 0}</div>
-              <div className="text-2xs text-ink-3">{t.tool_errors ?? 0} rejected commands</div>
+              <div className="text-2xs text-ink-3">{t.tool_errors ?? 0} rejected cmds</div>
             </div>
           </div>
 
@@ -644,7 +642,7 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
                 <span>project total</span>
                 <span className="num font-mono">
                   {budget.data
-                    ? `$${num(budget.data.spent_usd, 2)} / $${num(budget.data.budget_usd, 2)} standing approval`
+                    ? `$${num(budget.data.spent_usd, 2)} / $${num(budget.data.budget_usd, 2)} approved`
                     : budget.error
                       ? "unavailable"
                       : "…"}
@@ -661,7 +659,7 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
           )}
           <div className="flex flex-wrap items-center gap-1.5">
             <PlanningModeBadge mode={col.mode} />
-            {col.collector === "oracle" && <span className="text-2xs text-ink-3">reads simulator state</span>}
+            {col.collector === "oracle" && <span className="text-2xs text-ink-3">privileged</span>}
           </div>
           {t.stopped_reason && <p className="text-xs text-caution">{t.stopped_reason}</p>}
           {col.error && <InlineError error={col.error} fallback="The collection stopped with an error." />}
@@ -674,7 +672,7 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
                 <p className="text-xs text-ink-3">{next.data[0].reason}</p>
               </div>
             ) : (
-              <p className="text-xs text-ink-4">{next.isLoading ? "…" : "None right now"}</p>
+              <p className="text-xs text-ink-4">{next.isLoading ? "…" : "None"}</p>
             )}
           </div>
         </div>
@@ -697,12 +695,12 @@ function AttemptsTable({ pid, onOpen, collectionId }: { pid: string; onOpen: (id
   return (
     <Panel
       title="Attempts"
-      meta="every attempt, successful or not · click for video and action trace"
+      meta="click for video and trace"
       actions={
         collectionId && (
           <label className="flex items-center gap-1.5 text-2xs text-ink-3">
             <input type="checkbox" checked={onlyCurrent} onChange={(e) => setOnlyCurrent(e.target.checked)} className="accent-[rgb(var(--servo))]" />
-            this collection only
+            this run only
           </label>
         )
       }
@@ -711,7 +709,7 @@ function AttemptsTable({ pid, onOpen, collectionId }: { pid: string; onOpen: (id
       <QueryState q={q} skeleton={<div className="p-3.5"><SkeletonRows rows={3} /></div>}>
         {() =>
           rows.length === 0 ? (
-            <EmptyState title="No finished attempts yet" />
+            <EmptyState title="No attempts yet" />
           ) : (
             <div className="max-h-[420px] overflow-auto scroll-thin">
               <table className="w-full text-left text-sm">
@@ -738,7 +736,7 @@ function AttemptsTable({ pid, onOpen, collectionId }: { pid: string; onOpen: (id
                         <ScenarioChip scenario={a.scenario} seed={a.seed} />
                       </td>
                       <td className="px-2 py-2">
-                        {a.status === "success" ? <Badge tone="pass">demo</Badge> : <Badge tone="fault" title={a.stop_reason ?? (a.error ? "Ended with an error: open the attempt for details" : undefined)}>failed · diagnostic</Badge>}
+                        {a.status === "success" ? <Badge tone="pass">demo</Badge> : <Badge tone="fault" title={a.stop_reason ?? (a.error ? "Ended with an error: open the attempt for details" : undefined)}>failed</Badge>}
                       </td>
                       <td className="num px-2 py-2 text-right font-mono text-xs">{a.usage.calls ?? 0}</td>
                       <td className="num px-2 py-2 text-right font-mono text-xs">{a.usage.cost_usd ? `$${Number(a.usage.cost_usd).toFixed(3)}` : "—"}</td>
@@ -772,7 +770,7 @@ const COMPARE_ROWS: { key: keyof CollectorStats; label: string; fmt: (v: number)
 export function CollectorComparisonCard({ pid }: { pid: string }) {
   const q = useCollectorComparison(pid);
   return (
-    <Panel title="Agent vs oracle" meta="measured over this project's attempts · no claims beyond the counts" bodyClassName="p-0">
+    <Panel title="Agent vs oracle" meta="measured · this project" bodyClassName="p-0">
       <QueryState q={q} skeleton={<div className="p-3.5"><SkeletonRows rows={3} /></div>}>
         {(c) => (
           <table className="w-full text-left text-sm">
@@ -783,9 +781,9 @@ export function CollectorComparisonCard({ pid }: { pid: string }) {
                   <th key={side} className="px-3.5 py-2 text-right font-medium">
                     <span className="inline-flex items-center gap-1">
                       {side === "agent" ? <Bot className="h-3 w-3" /> : <Cog className="h-3 w-3" />}
-                      {side === "agent" ? "Agent" : "Scripted oracle"}
+                      {side === "agent" ? "Agent" : "Oracle"}
                     </span>
-                    {!(side === "agent" ? c.agent ?? c.astra : c[side]) && <div className="mt-0.5 font-sans text-[10px] normal-case tracking-normal text-ink-4">not measured yet</div>}
+                    {!(side === "agent" ? c.agent ?? c.astra : c[side]) && <div className="mt-0.5 font-sans text-[10px] normal-case tracking-normal text-ink-4">not measured</div>}
                   </th>
                 ))}
               </tr>
