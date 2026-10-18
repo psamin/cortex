@@ -58,7 +58,11 @@ async def with_history(ctx: Ctx, projects: list[Project]) -> list[Project]:
 
     async def check(p: Project) -> bool:
         async with sem:
-            keep = await has_history(ctx, p.id)
+            try:
+                keep = await has_history(ctx, p.id)
+            except Exception as e:  # noqa: BLE001 - can't tell: show it, and never delete on a failed check
+                log.warning("history check failed for %s, keeping it: %s", p.id, e)
+                return True
             if not keep and p.created_at < cutoff:
                 await _delete(ctx, p.id)
             return keep
