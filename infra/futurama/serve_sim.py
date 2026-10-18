@@ -24,7 +24,8 @@ try:
 except TypeError:  # Pillow < 10.1
     FONT = ImageFont.load_default()
 
-TITLES = {"jenga": "Jenga: extract the marked block", "unscrew": "Factory: unscrew the bolt",
+TITLES = {"jenga": "Jenga: extract the marked block", "screwdriver": "Factory: unscrew a screw with a screwdriver",
+          "unscrew": "Factory: unscrew the bolt", "palletize": "Factory: unload boxes from the forklift",
           "suture": "Suture: pass the needle through the eyelets"}
 CAMERAS = {"smolvla": {"camera1": "front", "camera2": "wrist"}}  # smolvla_base's camera names -> the sim's
 
