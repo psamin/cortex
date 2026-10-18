@@ -16,11 +16,11 @@ from ..models import (
 )
 from ..sim.so101 import REGION_XY
 from . import analysis_service, simulation_runner
+from .augment import ASSUMED_DIM_RATIO, LIGHTING_GAP, AugmentEvidence, describe, plan_augmentation
 from .recommendation_engine import CellEvidence, cells_from_plan, recommend_demonstrations
 from .recording_service import AUTO_ACCEPT_MIN_SCORE, list_episodes
 
 MIN_TRAIN_EPISODES = 10
-LIGHTING_GAP = 0.2
 
 
 def region_of(base: str, offset: tuple[float, float]) -> str:
@@ -82,28 +82,65 @@ async def recommend(ctx: Ctx, project: Project, budget: int | None = None, actor
     return recs
 
 
+def dim_brightness_ratio(eps) -> float | None:
+    """Median frame brightness of recorded dim-light demos over normal-light ones (measured)."""
+    def med(light: str) -> float | None:
+        v = sorted(e.quality.metrics["brightness_mean"] for e in eps if e.condition.lighting == light
+                   and e.quality and e.quality.metrics.get("brightness_mean"))
+        return v[len(v) // 2] if v else None
+    dim, normal = med("dim"), med("normal")
+    return dim / normal if dim and normal else None
+
+
+async def augment_recommendation(ctx: Ctx, project: Project, eps, latest_learned) -> Recommendation | None:
+    """Augmentation chosen and sized from measured evidence (#102): a lighting gap in the latest
+    learned-policy evaluation, the measured dimming of recorded frames, and human-confirmed VLM
+    visibility clusters. Unconfirmed VLM hypotheses alone never produce an evidence-backed plan."""
+    ev, evidence = AugmentEvidence(), []
+    if latest_learned:
+        res = {b.spec.name: b.result for b in latest_learned["branches"] if b.result}
+        base, dim = res.get("baseline"), res.get("changed_lighting")
+        if base and dim and base.n >= 5 and dim.n >= 5:
+            ev.lighting_gap = base.success_rate - dim.success_rate
+            if ev.lighting_gap >= LIGHTING_GAP:
+                evidence.append(Evidence(kind="evaluation", ref_ids=[latest_learned["run"].id], value=ev.lighting_gap,
+                                         description=f"baseline {base.successes}/{base.n} vs dim {dim.successes}/"
+                                                     f"{dim.n} successes (95% CI dim {dim.ci95[0]:.0%}–{dim.ci95[1]:.0%})"))
+    vis = [c for c in await analysis_service.current_clusters(ctx, project.id) if c.category == "vlm:poor_visibility"]
+    ev.visibility_confirmed = any(c.verified_by_human for c in vis)
+    if vis:
+        evidence.append(Evidence(kind="vlm", ref_ids=[x for c in vis for x in c.episode_ids][:10],
+                                 description=f"{sum(len(c.episode_ids) for c in vis)} rollouts with a poor-visibility "
+                                             + ("diagnosis (confirmed by a human)" if ev.visibility_confirmed
+                                                else "hypothesis (unverified)")))
+    if ev.lighting_gap >= LIGHTING_GAP:
+        ev.dim_brightness_ratio = dim_brightness_ratio(eps)
+        evidence.append(Evidence(kind="quality", value=ev.dim_brightness_ratio, description=(
+            f"recorded dim-light frames are {ev.dim_brightness_ratio:.0%} as bright as normal ones (measured)"
+            if ev.dim_brightness_ratio else f"no dim-light demos to measure darkening; assumed {ASSUMED_DIM_RATIO:.0%}")))
+    plan = plan_augmentation(ev)
+    if not plan and not vis:
+        return None
+    backed = bool(plan)  # lighting gap (measured) or human-confirmed visibility
+    what = (f"success drops {ev.lighting_gap:.0%} under dim light" if ev.lighting_gap >= LIGHTING_GAP
+            else "poor visibility in failed rollouts")
+    return Recommendation(
+        project_id=project.id, action="augment", support="evidence_backed" if backed else "hypothesis",
+        title=(f"Train on an augmented dataset version ({what}): {describe(plan)}" if backed else
+               "Possible visibility problem (unverified VLM hypothesis): confirm it in Analyze to get an augmentation plan"),
+        score=round(max(ev.lighting_gap, 0.3 if ev.visibility_confirmed else 0.1), 3),
+        components=ev.as_components(), evidence=evidence)
+
+
 async def pipeline_recommendations(ctx: Ctx, project: Project, eps, latest_learned) -> list[Recommendation]:
     out: list[Recommendation] = []
     accepted = [e for e in eps if e.status == EpisodeStatus.accepted]
     datasets = await ctx.repo.list("dataset_versions", DatasetVersion, project_id=project.id)
     ckpts = await ctx.repo.list("checkpoints", Checkpoint, project_id=project.id)
 
-    # Lighting gap measured in the latest learned-policy evaluation -> augmentation experiment.
-    if latest_learned:
-        res = {b.spec.name: b.result for b in latest_learned["branches"] if b.result}
-        base, dim = res.get("baseline"), res.get("changed_lighting")
-        if base and dim and base.n >= 5 and dim.n >= 5 and base.success_rate - dim.success_rate >= LIGHTING_GAP:
-            out.append(Recommendation(
-                project_id=project.id, action="augment",
-                title=(f"Train on a lighting-augmented dataset version: success drops "
-                       f"{base.success_rate:.0%} → {dim.success_rate:.0%} under dim light"),
-                score=round(base.success_rate - dim.success_rate, 3),
-                components={"lighting_gap": round(base.success_rate - dim.success_rate, 3)},
-                evidence=[Evidence(kind="evaluation", description=(
-                    f"baseline {base.successes}/{base.n} vs dim {dim.successes}/{dim.n} successes "
-                    f"(95% CI dim {dim.ci95[0]:.0%}–{dim.ci95[1]:.0%})"),
-                    ref_ids=[latest_learned["run"].id])],
-                support="evidence_backed"))
+    rec = await augment_recommendation(ctx, project, eps, latest_learned)
+    if rec:
+        out.append(rec)
 
     if len(accepted) >= MIN_TRAIN_EPISODES:
         newest = datasets[-1] if datasets else None

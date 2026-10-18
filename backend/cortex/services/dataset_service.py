@@ -43,6 +43,19 @@ def split_episodes(eps: list[Episode], eval_fraction: float, seed: int) -> dict[
     return split
 
 
+def allocate_views(fractions: list[float], n_train: int) -> list[int]:
+    """Train episodes per augmented view. A fraction >= 1 means every train episode. Views with
+    fractions < 1 share a budget of floor(sum(fractions) * n_train) copies, split by largest
+    remainder, so rounding can never push the augmented share past the planned cap (on tiny
+    datasets the last views may get none)."""
+    out = [n_train if f >= 1 else int(f * n_train) for f in fractions]
+    part = [i for i, f in enumerate(fractions) if f < 1]
+    spare = int(sum(fractions[i] for i in part) * n_train + 1e-9) - sum(out[i] for i in part)
+    for i in sorted(part, key=lambda i: (-(fractions[i] * n_train % 1), i))[:max(0, spare)]:
+        out[i] += 1
+    return out
+
+
 def dataset_root(project_id: str, ds_id: str) -> str:
     return f"projects/{project_id}/datasets/{ds_id}/lerobot"
 
@@ -70,10 +83,13 @@ async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRe
                                            lerobot_episode_index=len(items)))
         items.append({"npz": str(await ctx.ensure_local(npz_key(e))),
                       "augmentation": None})
-    for ai, aug in enumerate(req.augmentations):
-        for e in sorted(eps, key=lambda e: e.index):
-            if split[e.id] != "train":
-                continue
+    train = [e for e in sorted(eps, key=lambda e: e.index) if split[e.id] == "train"]
+    counts = allocate_views([a.params.get("fraction", 1.0) for a in req.augmentations], len(train))
+    for ai, (aug, k) in enumerate(zip(req.augmentations, counts)):
+        # each view goes to a deterministic slice of train episodes, rotated per view so different views
+        # cover different demos
+        for j in range(k):
+            e = train[(ai * k + j) % len(train)]
             ds.links.append(DatasetEpisodeLink(episode_id=e.id, split="train", augmentation=aug,
                                                lerobot_episode_index=len(items)))
             items.append({"npz": items[[ln.episode_id for ln in ds.links].index(e.id)]["npz"],

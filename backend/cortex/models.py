@@ -282,8 +282,9 @@ class Recommendation(BaseModel):
 # ------------------------------------------------------------------ datasets
 
 class Augmentation(BaseModel):
-    type: Literal["brightness", "contrast", "color_temperature", "shadow"]
-    params: dict[str, float]
+    type: Literal["brightness", "contrast", "color_temperature", "shadow", "hue_saturation", "blur", "noise",
+                  "camera_jitter"]
+    params: dict[str, float]  # "fraction" (0-1): share of train episodes that get this view (default all)
 
 
 class DatasetEpisodeLink(BaseModel):
