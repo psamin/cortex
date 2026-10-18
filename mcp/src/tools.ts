@@ -1,6 +1,6 @@
 import type { MCPServer, ToolAnnotations } from "mcp-use";
 import { z } from "zod";
-import { callTool } from "./backend.js";
+import { callTool, identityOf } from "./backend.js";
 
 // Input schemas mirror the backend registry (GET /api/tools). Where the
 // registry says plain `string` but the domain model only accepts a fixed set
@@ -553,6 +553,15 @@ const TOOLS: Def[] = [
     }),
     annotations: READ,
   },
+  {
+    name: "get_session_link",
+    title: "Get session link",
+    description:
+      "The Cortex studio URL where your human can watch this session live: every tool call with its arguments, " +
+      "results, images, durations and approvals. Share it with them when you start working.",
+    inputSchema: z.object({}),
+    annotations: READ,
+  },
 ];
 
 /** Registers every backend tool as `cortex.<name>`. */
@@ -568,7 +577,7 @@ export function registerTools(server: MCPServer) {
       },
       async (input, ctx) => {
         const [name, args] = t.backend ? t.backend(input as Record<string, unknown>) : [t.name, input as Record<string, unknown>];
-        return callTool(name, args, ctx.signal);
+        return callTool(name, args, ctx.signal, identityOf(ctx));
       },
     );
   }
