@@ -7,6 +7,8 @@ worker processes (one MuJoCo/GL context each).
 
 from __future__ import annotations
 
+import logging
+
 import asyncio
 import json
 import math
@@ -38,6 +40,7 @@ DEFAULT_BRANCHES = [
 ]
 
 
+log = logging.getLogger(__name__)
 INTERRUPTED = "interrupted by a backend restart"
 
 
@@ -48,12 +51,22 @@ async def sweep_interrupted(ctx: Ctx) -> int:
     for status in (JobStatus.queued, JobStatus.running):
         for b in await ctx.repo.list("simulation_branches", SimulationBranch, status=status):
             b.status, b.error = JobStatus.failed, INTERRUPTED
-            await ctx.repo.save("simulation_branches", b, project_id=b.project_id)
+            await _save_or_skip(ctx, "simulation_branches", b, project_id=b.project_id)
         for run in await ctx.repo.list("evaluation_runs", EvaluationRun, status=status):
             run.status = JobStatus.failed
-            await ctx.repo.save("evaluation_runs", run)
-            n += 1
+            if await _save_or_skip(ctx, "evaluation_runs", run):
+                n += 1
     return n
+
+
+async def _save_or_skip(ctx: Ctx, table: str, row, **kw) -> bool:
+    """One unsavable row (e.g. an orphan whose project is gone) must not stop the backend from starting."""
+    try:
+        await ctx.repo.save(table, row, **kw)
+        return True
+    except Exception as e:  # noqa: BLE001 - logged and skipped by design
+        log.warning("startup sweep skipped %s %s: %s", table, getattr(row, "id", "?"), e)
+        return False
 
 
 def wilson(k: int, n: int, z: float = 1.96) -> tuple[float, float]:

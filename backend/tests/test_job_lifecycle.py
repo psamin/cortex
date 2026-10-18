@@ -228,3 +228,25 @@ async def test_shutdown_and_the_startup_sweep_end_an_interrupted_evaluation(tmp_
     assert await sr.sweep_interrupted(ctx2) == 1
     r, bs = await _stored(ctx2, run)
     assert r.status == JobStatus.failed and {b.status for b in bs} == {JobStatus.failed}
+
+
+async def test_startup_sweep_skips_a_row_it_cannot_save(tmp_path, monkeypatch):
+    """An orphan branch (its project is gone, so the DB rejects the update) must not stop the backend."""
+    ctx, run = await _evaluation(tmp_path, monkeypatch, _hang)
+    await ctx.jobs.shutdown()
+    r, bs = await _stored(ctx, run)
+    r.status = JobStatus.running
+    await ctx.repo.save("evaluation_runs", r)
+    for b in bs:
+        b.status = JobStatus.queued
+        await ctx.repo.save("simulation_branches", b, project_id=b.project_id)
+    ctx2 = await _ctx(tmp_path)
+    real = ctx2.repo.save
+
+    async def fk_violation(table, row, **kw):
+        if table == "simulation_branches":
+            raise RuntimeError("409: Key (project_id)=() is not present in table projects")
+        return await real(table, row, **kw)
+
+    monkeypatch.setattr(ctx2.repo, "save", fk_violation)
+    assert await sr.sweep_interrupted(ctx2) == 1  # the run is still swept
