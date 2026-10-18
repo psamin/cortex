@@ -216,7 +216,8 @@ async def observe(ctx: Ctx, caller: Caller | None, tool: str, raw_args: dict[str
     """Run one registry tool call with a start row, an end row and live events."""
     pid = raw_args.get("project_id") if isinstance(raw_args.get("project_id"), str) else None
     call: dict[str, Any] = {"id": new_id("aud"), "tool": tool, "open": True,
-                            "session_id": caller.session_id if caller else None}
+                            "session_id": caller.session_id if caller else None,
+                            "key_id": caller.key_id if caller else None}
     base = {"id": call["id"], "actor": actor, "tool": tool, "args": redact_secrets(raw_args), "project_id": pid,
             "session_id": call["session_id"], "client": caller.client if caller else None,
             "owner": caller.owner if caller else None, "started_at": now().isoformat(),

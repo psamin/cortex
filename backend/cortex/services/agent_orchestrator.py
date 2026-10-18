@@ -1025,7 +1025,21 @@ async def t_session_link(ctx, a, actor):
             "url": url, "session_id": sid}
 
 
+async def t_verify_agent_key(ctx, a, actor):
+    from ..context import CURRENT_CALL
+    from .agent_obs import AgentKeyRefused
+
+    # /api/tools already refused an unknown or revoked key (403 agent_key_invalid) before this runs.
+    call = CURRENT_CALL.get() or {}
+    if not call.get("key_id"):
+        raise AgentKeyRefused("No agent key given.")
+    return {"summary": "This agent key is active.", "ref_ids": [], "valid": True, "key_id": call["key_id"]}
+
+
 TOOLS.update({t.name: t for t in [
+    Tool("verify_agent_key", "For the hosted MCP server's /mcp gate: is the X-Cortex-Agent-Key on this call active? "
+         "Goes through /api/tools so it works over a tunnel or the runner relay.", NoArgs, t_verify_agent_key,
+         agent_callable=False),
     Tool("get_session_link", "The Cortex studio URL where your human can watch this agent session live (every tool "
          "call, its arguments, results, images and approvals). Share it when you start working.", NoArgs,
          t_session_link),
