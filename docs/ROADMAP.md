@@ -51,3 +51,4 @@ comments (the `Claim:` convention on #20 and the owning issue) remain the source
 |---|---|---|---|
 | #52 redesign (Kinetic) | `52-landing`, then `52-*` | Claude Code, driven by @AneeshD04 | `web/src/landing/**`, `web/src/robotics/**`, small route edits in `web/src/App.tsx` and `layout/AppShell.tsx`, visual-only edits in `web/src/**` |
 | P5/P6: sessions and collection on intake scenes | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py` and `backend/cortex/services/robot_session_service.py`, coordinated on #16 |
+| #102 adaptive augmentation | `102-adaptive-augmentation` | Claude Code, driven by @Suhas0723 | `backend/cortex/services/augment.py`, `backend/cortex/services/recommendation_service.py`, `backend/cortex/services/autopilot.py`, `backend/cortex/models.py` (`Augmentation.type` Literal only), `backend/cortex/workers/dataset_builder.py` (if needed), `[new] backend/tests/test_augment_plan.py` |
