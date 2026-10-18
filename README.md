@@ -1,21 +1,69 @@
 # Cortex
 
-An agent-native robot-learning studio on [LeRobot](https://github.com/huggingface/lerobot). Tell it
-"I want my SO-101 to pick up a cube and place it in a bowl" and it runs the imitation-learning loop:
-collect demonstrations, check their quality, diagnose failures, recommend which demos to collect next,
-version and augment datasets, train an ACT policy, evaluate it in parallel MuJoCo conditions, compare
-results, and recommend the next step. **Autopilot** runs that loop unattended within the approvals
-you grant up front.
+**The robot-training MCP agents want.** Cortex lets any AI agent train its own physical robot, with no
+human in the training loop.
 
-Demonstrations are generated autonomously: an **agent planner**, by default our own self-hosted
-**Qwen3-VL** (or GPT-6 Astra via OpenRouter), looks at the rendered MuJoCo scene and picks actions
-through validated tools (point at the cube, move, grip, verify, place), and a local IK controller
-executes them. Only simulator-verified successes become LeRobot episodes. The existing
-scripted IK oracle stays available as a labelled baseline for A/B comparison.
+Agents can write software, run experiments and ship code. They still can't teach a robot. Robot
+learning today needs people at every step:
+- someone teleoperates the demonstrations;
+- someone labels and cleans the data;
+- someone launches training and babysits the runs;
+- someone watches rollouts to decide what failed and what to collect next.
 
-Hugging Face's LeLab is a GUI for LeRobot. Cortex is an experiment orchestrator and data-collection
-agent: it decides what to do next and shows the evidence for each decision. People use it through the
-React studio; agents use the same project through an MCP server.
+That human loop is why robot policies are slow and expensive to make. It's also why most factories,
+warehouses, labs, kitchens and farms still can't retrain a robot when the task or the layout changes.
+
+Cortex turns each of those steps into an MCP tool with measured results, so the agent runs the whole
+loop itself:
+
+1. **Describe.** The agent tells Cortex the arm, cameras, objects and workspace layout, in plain
+   language over MCP. Any custom environment, not a fixed demo scene.
+2. **Simulate.** Cortex builds that layout as a MuJoCo scene and measures whether the arm can do the
+   job: jaw opening, holding torque, reach.
+3. **Demonstrate.** The agent drives the arm itself through validated tools: home → pick → place →
+   home, then it resets and goes again. Only simulator-verified successes become LeRobot episodes.
+4. **Augment.** Clones of the demos get adversarial changes such as lighting and camera, so the
+   policy is robust to more than one scene.
+5. **Train.** An ACT policy trains on the agent's own demonstrations.
+6. **Evaluate.** Seeded test runs measure success with confidence intervals. The agent reads the
+   numbers, not a person.
+7. **Improve.** The agent finds the weakest condition, collects targeted demos or runs RL sandboxes
+   for it, and retrains until the numbers hold.
+8. **Deploy.** The policy goes to the physical arm to keep training on real demonstrations and then
+   run the task.
+
+**Humans out of the loop, not out of control.** People don't do the training work. They only
+approve the two things an agent should never decide alone:
+- spending money, such as a GPU training job;
+- moving real hardware, which happens only with an operator present, a live deadman and an e-stop.
+
+An agent can never approve its own training job or drive a real arm through the MCP.
+
+Built on [LeRobot](https://github.com/huggingface/lerobot) 0.6.1, MuJoCo, ACT and the SO-101 arm.
+The MVP runs the whole loop in physics simulation. The physical-arm path is supervised and early.
+See [What is real](#what-is-real).
+
+## For agents
+
+If you are an agent, start with [AGENTS.md](AGENTS.md). It has the exact tool sequence from "the
+user named a task" to "a measured policy". Connect once:
+
+```bash
+claude mcp add --transport http cortex http://localhost:3000/mcp
+```
+
+Then the user only has to say what the robot should learn. The MCP server's own `instructions`
+carry the same step-by-step path, so any MCP client gets it on connect. Agent-readable indexes:
+[llms.txt](web/public/llms.txt) and [.well-known/mcp.json](web/public/.well-known/mcp.json).
+
+## For the humans watching
+
+The studio (React, http://127.0.0.1:5173) is where people watch what their agents are doing:
+- each agent session's live timeline of tool calls, results and camera frames (`/studio/agents`);
+- the demos and evaluation videos;
+- the approval buttons.
+
+It also runs its own studio agent, so you can drive the same loop by chat.
 
 ## Quick start
 
@@ -25,16 +73,16 @@ Requirements: macOS, Linux or Windows, [uv](https://docs.astral.sh/uv/), Node 22
 ```bash
 cp .env.example .env          # optional: every provider falls back to a local equivalent
 scripts/dev.sh                # backend :8000, studio :5173, MCP :3000
-open http://127.0.0.1:5173
-```
-
-Type "Teach a robot to pick and place a cube.", keep Simulation and Autopilot on, and press Start.
-
-Connect Claude Code to the same backend:
-
-```bash
 claude mcp add --transport http cortex http://localhost:3000/mcp
 ```
+
+Then tell your agent: *"Train my SO-101 to pick up the water bottle and put it on the mat."* Watch it
+in the studio at http://127.0.0.1:5173.
+
+How the demonstrations are made:
+- The default demonstrator is an **agent planner**: our self-hosted **Qwen3-VL**, or GPT-6 Astra via OpenRouter. It looks at the rendered scene and picks actions through validated tools, and a local IK controller executes them.
+- Your own agent can also drive the arm directly with the `robot_*` tools.
+- The scripted IK oracle stays available as a labelled baseline.
 
 ## Commands
 
@@ -63,7 +111,7 @@ claude mcp add --transport http cortex http://localhost:3000/mcp
 | [scripts/](scripts/) | dev launcher, e2e test, deterministic demo generator |
 | [docs/](docs/) | [API contract](docs/API.md), [provider integrations and limitations](docs/INTEGRATIONS.md) |
 
-Read next: [ARCHITECTURE.md](ARCHITECTURE.md), then [DEMO.md](DEMO.md) for the two-minute judge walkthrough.
+Read next: [AGENTS.md](AGENTS.md) if you are an agent, [ARCHITECTURE.md](ARCHITECTURE.md), then [DEMO.md](DEMO.md) for the two-minute judge walkthrough.
 
 ## What is real
 
