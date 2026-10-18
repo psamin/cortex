@@ -78,12 +78,12 @@ def add_workcell(mj: ET.Element, wb: ET.Element) -> None:
             cam.set("xyaxes", f"0 1 0 {-np.sin(e):.4f} 0 {np.cos(e):.4f}")
 
 
-def add_plate(body: ET.Element, hx: float, hy: float) -> None:
+def add_plate(body: ET.Element, hx: float, hy: float, top: float = FIX_TOP) -> None:
     """The steel base plate (10 mm wider than the block) and four visual cap screws on the block top."""
     box(body, "fix_plate", (0, 0, PLATE_H / 2), (hx + 0.010, hy + 0.010, PLATE_H / 2), "fixture_steel")
     for i, (sx, sy) in enumerate([(-1, -1), (-1, 1), (1, -1), (1, 1)]):
         ET.SubElement(body, "geom", name=f"fix_bolt{i}", type="cylinder", size="0.0035 0.0012",
-                      pos=f"{sx * (hx - 0.008):.4f} {sy * (hy - 0.008):.4f} {FIX_TOP + 0.0010:.4f}",
+                      pos=f"{sx * (hx - 0.008):.4f} {sy * (hy - 0.008):.4f} {top + 0.0010:.4f}",
                       material="bolt", contype="0", conaffinity="0")
 
 
@@ -97,6 +97,24 @@ def add_ring(body: ET.Element, name: str, center: tuple[float, float], radius: f
         a = 2 * np.pi * k / n
         box(body, f"{name}{k}", (center[0] + r * np.cos(a), center[1] + r * np.sin(a), z), (t / 2, half_len, half_h),
             "fixture_al", yaw=a)
+
+
+def add_holed_block(body: ET.Element, name: str, hx: float, hy: float, z0: float, z1: float, hole_r: float,
+                    material: str = "fixture_al", t: float = 0.004, **kw: str) -> None:
+    """A block from z0 to z1 with a round through-hole of radius ``hole_r`` at its centre: bars around a
+    square cutout, and a ring of boxes (thickness ``t``) inside it. ``kw`` goes to every geom."""
+    zc, zh = (z0 + z1) / 2, (z1 - z0) / 2
+    c = hole_r + 0.001
+    assert hole_r + t >= c * np.sqrt(2), "the ring must cover the cutout's corners"
+    for s in (-1, 1):
+        box(body, f"{name}_bar{s:+d}", (0, s * (hy + c) / 2, zc), (hx, (hy - c) / 2, zh), material, **kw)
+        box(body, f"{name}_side{s:+d}", (s * (hx + c) / 2, 0, zc), ((hx - c) / 2, c, zh), material, **kw)
+    half_len = (hole_r + t) * np.tan(np.pi / 16)
+    for k in range(16):
+        a = 2 * np.pi * k / 16
+        r = hole_r + t / 2
+        box(body, f"{name}_ring{k}", (r * np.cos(a), r * np.sin(a), zc), (t / 2, half_len, zh), material, yaw=a,
+            **kw)
 
 
 def add_tray(wb: ET.Element, xy: np.ndarray, yaw: float, inner: tuple[float, float] = (0.043, 0.095),
