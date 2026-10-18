@@ -24,3 +24,11 @@ def test_imported_demo_uses_the_dataset_camera_names():
 
 def test_attempts_and_evaluations_only_have_the_studio_render():
     assert ids(cameras_for("attempt")) == ids(cameras_for("eval")) == ["presentation"]
+
+
+def test_policy_camera_details_say_what_resolution_is_shown():
+    lo = cameras_for("demo", {"planner": "claude-code"})
+    hi = cameras_for("demo", {"planner": "claude-code"}, hd=True)
+    assert ids(hi) == ids(lo) == ["presentation", "front", "wrist"]
+    assert all("128x96" in c["detail"] and "640x480" not in c["detail"] for c in lo[1:])
+    assert all("640x480" in c["detail"] and "128x96" in c["detail"] for c in hi[1:])  # shown sharp, seen small

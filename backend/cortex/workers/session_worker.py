@@ -25,7 +25,7 @@ from typing import Any
 
 from ..sim.manipulation import ManipulationSession, annotate_overhead
 from ..sim.so101 import PickPlaceEnv, Variation, configure_gl
-from ..sim.viewer import DemoCamera
+from ..sim.viewer import DemoCamera, PolicyCameras
 from .agent_worker import live_writer, save_attempt
 
 
@@ -50,6 +50,7 @@ def main() -> None:
     env_digest: str | None = None
     session: ManipulationSession | None = None
     camera: DemoCamera | None = None
+    cams: PolicyCameras | None = None
     trace: list[dict[str, Any]] = []
     t0 = time.time()
     for line in sys.stdin:
@@ -61,7 +62,7 @@ def main() -> None:
                     env.close()
                     env = env_factory.make_env(req.get("scene"), 10_000)
                     env_digest = env_factory.digest(req.get("scene"))
-                    camera = None
+                    camera = cams = None
                 sc = req["scenario"]
                 var = Variation(cube_region=sc["cube_region"], lighting=sc["lighting"],
                                 cube_offset=tuple(sc.get("cube_offset", (0, 0))),
@@ -69,8 +70,10 @@ def main() -> None:
                 env.reset(req["seed"], var)
                 if camera is None:
                     camera = DemoCamera(env.world.model)
+                    cams = PolicyCameras(env.world.model, env.env.cameras)
                 session = ManipulationSession(env, mode=req.get("mode", "camera"),
-                                              on_frame=live_writer(Path(req["live_dir"])), video_renderer=camera)
+                                              on_frame=live_writer(Path(req["live_dir"])), video_renderer=camera,
+                                              cam_renderer=cams)
                 session.reset_environment(req["seed"], var)
                 trace, t0 = [], time.time()
                 live_writer(Path(req["live_dir"]))(camera.render(env.world.data))

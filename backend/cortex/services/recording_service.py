@@ -14,6 +14,8 @@ from .quality_analysis import analyze_episode
 
 SEED_BASE = 10_000
 AUTO_ACCEPT_MIN_SCORE = 0.6
+# display-only 640x480 copies of the policy cameras (cortex.sim.viewer.PolicyCameras), when the recorder wrote them
+HD_FILES = (("front_hd", "front_hd.mp4"), ("wrist_hd", "wrist_hd.mp4"))
 
 
 def episode_key(project_id: str, episode_id: str, name: str = "") -> str:
@@ -91,8 +93,12 @@ async def finalize_episode(ctx: Ctx, ep: Episode, ev: dict[str, Any], blur_ref: 
     ep.num_frames = int(ev["num_frames"])
     ep.fps = int(ev["fps"])
     ep.success = bool(ev["success"])
-    ep.artifacts = {name.split(".")[0]: f"{base_key}/{name}" if base_key else episode_key(ep.project_id, ep.id, name)
-                    for name in ("front.mp4", "thumb.jpg", "episode.npz")}
+
+    def key(name: str) -> str:
+        return f"{base_key}/{name}" if base_key else episode_key(ep.project_id, ep.id, name)
+
+    ep.artifacts = {name.split(".")[0]: key(name) for name in ("front.mp4", "thumb.jpg", "episode.npz")}
+    ep.artifacts.update({kind: key(name) for kind, name in HD_FILES if ctx.local(key(name)).exists()})
     ep.quality = quality_for(ctx, ep, blur_ref)
     for k in ep.artifacts.values():
         await ctx.publish_file(k)

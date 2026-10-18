@@ -27,7 +27,9 @@ from ..models import (
 )
 from ..sim.so101 import REGION_XY
 from .jobs import Job
-from .recording_service import AUTO_ACCEPT_MIN_SCORE, dataset_blur_reference, live_key, list_episodes, quality_for
+from .recording_service import (
+    AUTO_ACCEPT_MIN_SCORE, HD_FILES, dataset_blur_reference, live_key, list_episodes, quality_for,
+)
 
 REGIONS = ["left", "center", "right"]
 LIGHTS = ["normal", "dim", "bright"]
@@ -444,7 +446,7 @@ async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: A
             {"planner": "scripted_ik_oracle", "seed": a.seed, "scenario": a.scenario.model_dump(), "trace": [],
              "note": "the scripted oracle has no tool trace; it follows fixed IK waypoints from simulator state"}))
     for kind, name in (("episode", "episode.npz"), ("front", "front.mp4"), ("thumb", "thumb.jpg"),
-                       ("trace", "trace.json")):
+                       ("trace", "trace.json"), *HD_FILES):
         if ctx.local(key(name)).exists():
             a.artifacts[kind] = key(name)
             await ctx.publish_file(a.artifacts[kind])
@@ -453,7 +455,8 @@ async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: A
         ep = Episode(project_id=project.id, index=len(eps), condition=a.scenario.condition, seed=a.seed,
                      source=EpisodeSource.sim_agent if a.collector == "agent" else EpisodeSource.sim_scripted,
                      num_frames=a.num_frames, fps=30, success=True,
-                     artifacts={k: v for k, v in a.artifacts.items() if k in ("episode", "front", "thumb")},
+                     artifacts={k: v for k, v in a.artifacts.items()
+                                if k in ("episode", "front", "thumb", *(kind for kind, _ in HD_FILES))},
                      provenance={"planner": a.model if a.collector == "agent" else "scripted_ik_oracle",
                                  "provider": a.provider, "model": a.model, "mode": a.mode,
                                  "attempt_id": a.id, "collection_id": col.id, "scenario": a.scenario.model_dump(),

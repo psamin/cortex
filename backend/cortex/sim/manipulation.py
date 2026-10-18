@@ -40,6 +40,7 @@ from .expert import ARM, approach_error_deg, solve_ik
 from .grasp import approaches, grasp_height, grasp_mode
 from .pick_place_skill import LIFT, PickPlaceSkill
 from .so101 import PickPlaceEnv
+from .viewer import CAM_EVERY
 
 PLAN_CAM, PLAN_PX = "top", 480
 OBSERVE_POSE = np.array([0.0, -100.0, 0.0, -90.0, 0.0, 30.0], np.float32)  # arm vertical: clear overhead view
@@ -205,6 +206,7 @@ class Recorder:
     action: list[np.ndarray] = field(default_factory=list)
     reward: list[float] = field(default_factory=list)
     video: list[np.ndarray] = field(default_factory=list)
+    hd: dict[str, list[np.ndarray]] = field(default_factory=dict)  # display copies of front/wrist, every CAM_EVERY
 
     def __len__(self) -> int:
         return len(self.action)
@@ -212,10 +214,11 @@ class Recorder:
 
 class ManipulationSession:
     def __init__(self, env: PickPlaceEnv, mode: Literal["camera", "privileged"] = "camera",
-                 on_frame: Any = None, video_renderer: Any = None):
+                 on_frame: Any = None, video_renderer: Any = None, cam_renderer: Any = None):
         self.env, self.mode = env, mode
         self.on_frame = on_frame  # called with each preview frame (live view)
         self.video_renderer = video_renderer
+        self.cam_renderer = cam_renderer  # cortex.sim.viewer.PolicyCameras: sharp copies for the viewer only
         self.rec = Recorder()
         self.obs: dict[str, Any] | None = None
         self.cmd = np.zeros(6)
@@ -283,6 +286,9 @@ class ManipulationSession:
             self.rec.video.append(frame)
             if self.on_frame:
                 self.on_frame(frame)
+        if self.cam_renderer is not None and (len(self.rec) - 1) % CAM_EVERY == 0:
+            for k, f in self.cam_renderer.render(self.env.world.data).items():
+                self.rec.hd.setdefault(k, []).append(f)
 
     def _drive(self, q_target: np.ndarray, timeout: int = MOTION_TIMEOUT_STEPS, settle: int = 3,
                rate: float = ARM_DEG_PER_STEP, measured: bool = False) -> int:

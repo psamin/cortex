@@ -29,19 +29,26 @@ SIM_POLICY_CAMS = [
     {"id": "wrist", "label": "Wrist camera (policy input)",
      "detail": "Camera on the gripper, 128x96: what the trained policy sees."},
 ]
+SIM_POLICY_CAMS_HD = [
+    {"id": "front", "label": "Front camera (policy input)",
+     "detail": "Fixed camera facing the arm, shown at 640x480. The trained policy sees this view at 128x96."},
+    {"id": "wrist", "label": "Wrist camera (policy input)",
+     "detail": "Camera on the gripper, shown at 640x480. The trained policy sees this view at 128x96."},
+]
 
 
-def cameras_for(kind: str, provenance: dict[str, Any] | None = None) -> list[dict[str, str]]:
+def cameras_for(kind: str, provenance: dict[str, Any] | None = None, hd: bool = False) -> list[dict[str, str]]:
     """The views that exist for one rollout, labelled by what they actually show.
 
     Recorded files: `presentation` is the episode's main video, `front`/`wrist` are the two
     low-resolution image streams in episode.npz (for imported data: the dataset's first two cameras).
+    With ``hd`` (newer sim recordings) `front`/`wrist` play the 640x480 display copies of those cameras.
     """
     if kind != "demo":
         return [STUDIO]  # failed attempts and evaluations keep only the studio render
     prov = provenance or {}
     if not prov.get("cameras"):  # recorded episodes (imported, real teleop) carry their camera keys; sim ones don't
-        return [STUDIO, *SIM_POLICY_CAMS]
+        return [STUDIO, *(SIM_POLICY_CAMS_HD if hd else SIM_POLICY_CAMS)]
     keys = list(prov.get("cameras") or [])
     name = lambda k: k.removeprefix("observation.images.")  # noqa: E731
     first = name(keys[0]) if keys else "camera 1"
@@ -62,7 +69,8 @@ async def rollouts(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                     "status": str(e.status), "condition": e.condition.key, "seed": e.seed,
                     "planner": e.provenance.get("planner", "scripted_ik_oracle"),
                     "video_url": await ctx.media_url(e.artifacts["front"]),
-                    "cameras": cameras_for("demo", e.provenance), "created_at": e.created_at})
+                    "cameras": cameras_for("demo", e.provenance, hd="front_hd" in e.artifacts),
+                    "created_at": e.created_at})
     for a in await ctx.repo.list("agent_attempts", AgentAttempt, project_id=pid):
         if a.status == "failed" and "front" in a.artifacts:
             out.append({"kind": "attempt", "id": a.id, "label": f"Failed attempt ({a.collector})", "success": False,
@@ -163,8 +171,17 @@ async def _eval_summary(ctx: Ctx, run: EvaluationRun) -> dict[str, Any]:
             "overall_success_rate": float(np.mean(rates)) if rates else None}
 
 
+def upscale(frame: np.ndarray, k: int = 2) -> np.ndarray:
+    """Enlarge a small camera frame smoothly (bicubic), not in blocks; the viewer scales it at most 2x more."""
+    from PIL import Image
+
+    h, w = frame.shape[:2]
+    return np.asarray(Image.fromarray(frame).resize((w * k, h * k), Image.BICUBIC))
+
+
 async def camera_video(ctx: Ctx, episode_id: str, camera: str) -> Path:
-    """The robot's own camera (what the policy sees), rendered from the recorded trajectory."""
+    """The robot's own camera (what the policy sees): the recorder's 640x480 display copy when it wrote one,
+    else rendered from the 96x128 frames in episode.npz (older episodes cannot gain detail)."""
     from ..workers.sim_worker import write_mp4
 
     if camera not in ("front", "wrist"):
@@ -172,11 +189,12 @@ async def camera_video(ctx: Ctx, episode_id: str, camera: str) -> Path:
     ep = await ctx.repo.get("episodes", episode_id, Episode)
     if ep is None:
         raise NotFound(episode_id)
+    if hd := ep.artifacts.get(f"{camera}_hd"):
+        return await ctx.ensure_local(hd)
     src = await ctx.ensure_local(npz_key(ep))
-    out = src.parent / f"cam_{camera}.mp4"
+    out = src.parent / f"cam_{camera}_smooth.mp4"  # not cam_<camera>.mp4: those are the old blocky renders
     if not out.exists():
         with np.load(src) as z:
             frames = z[camera]
-        big = [np.repeat(np.repeat(f, 4, axis=0), 4, axis=1) for f in frames]  # 96x128 -> 384x512, pixel-true
-        write_mp4(big, out)
+        write_mp4([upscale(f) for f in frames], out)
     return out
