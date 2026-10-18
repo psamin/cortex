@@ -19,17 +19,17 @@ export function SiteNav() {
         aria-label="Primary"
         className="mx-auto flex h-[72px] items-center justify-between px-6 sm:px-10 lg:px-[clamp(2.5rem,5.5vw,6rem)]"
       >
-        <Link to="/" className="flex items-center gap-2.5 text-[#171717]" aria-label={`${BRAND.name} home`}>
+        <Link to="/" className="flex items-center gap-2.5 text-ink" aria-label={`${BRAND.name} home`}>
           <BrandMark />
           <span className="kn-sans text-[15px] font-medium tracking-[-0.01em]">{BRAND.name}</span>
         </Link>
-        <ul className="hidden items-center gap-9 kn-sans text-[13px] text-[#3a3a3a] md:flex">
+        <ul className="hidden items-center gap-9 kn-sans text-[13px] text-ink-2 md:flex">
           {LINKS.map(([l, id]) => (
             <li key={id}>
               <a
                 href={`#${id}`}
                 onClick={(e) => scrollToSection(e, id)}
-                className="transition-colors hover:text-[#171717] focus-visible:underline"
+                className="transition-colors hover:text-ink focus-visible:underline"
               >
                 {l}
               </a>
@@ -40,7 +40,7 @@ export function SiteNav() {
           <ThemeToggle />
           <Link
             to={STUDIO_ENTRY}
-            className="inline-flex h-9 items-center rounded-full bg-[#171717] px-4 kn-sans text-[12.5px] font-medium text-white hover:bg-black"
+            className="inline-flex h-9 items-center rounded-full bg-ink px-4 kn-sans text-[12.5px] font-medium text-bench hover:bg-ink-2"
             data-testid="cta-access"
           >
             Open studio

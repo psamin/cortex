@@ -125,7 +125,7 @@ function Callout({ y, i }: { y: number; i: number }) {
   return (
     <g className="kn-callout">
       <path d={`M${x0} ${y} L${x1} ${y1} L${x2} ${y1}`} fill="none" stroke={INK} strokeWidth={0.8} pathLength={1} className="kn-draw" />
-      <circle cx={x0} cy={y} r={3} fill="#fff" stroke={INK} strokeWidth={0.9} />
+      <circle cx={x0} cy={y} r={3} fill="var(--kn-paper)" stroke={INK} strokeWidth={0.9} />
       <text x={x1 + 4} y={y1 - 10} fontSize={12} letterSpacing="0.12em" fill={INK} className="kn-fade">
         {s.n} / {s.label.toUpperCase()}
       </text>

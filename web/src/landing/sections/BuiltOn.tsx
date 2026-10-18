@@ -52,18 +52,18 @@ const COLUMNS: { title: string; solid: boolean; items: string[] }[] = [
 /** FIG.05: the stack, and the line between measured and labelled. */
 export function BuiltOn() {
   return (
-    <section id="stack" aria-labelledby="stack-title" className="kn-gutter border-t border-[#E6E6E6] py-24 lg:py-32">
+    <section id="stack" aria-labelledby="stack-title" className="kn-gutter border-t border-line py-24 lg:py-32">
       <SectionHead titleId="stack-title" fig="FIG.05" label="Built on" first="Open tools underneath." second="Nothing hidden on top." />
 
-      <dl className="mt-14 border-t border-[#171717]">
+      <dl className="mt-14 border-t border-ink">
         {STACK.map((s) => (
           <div
             key={s.name}
-            className="grid gap-2 border-b border-[#E6E6E6] py-5 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_9rem] md:items-baseline md:gap-8"
+            className="grid gap-2 border-b border-line py-5 md:grid-cols-[minmax(0,16rem)_minmax(0,1fr)_9rem] md:items-baseline md:gap-8"
           >
-            <dt className="kn-display text-[22px] text-[#171717]">{s.name}</dt>
-            <dd className="kn-sans text-[14.5px] leading-[1.6] text-[#555]">{s.body}</dd>
-            <dd className="kn-mono text-[10px] uppercase tracking-[0.16em] text-[#858585] md:text-right">{s.tag}</dd>
+            <dt className="kn-display text-[22px] text-ink">{s.name}</dt>
+            <dd className="kn-sans text-[14.5px] leading-[1.6] text-ink-2">{s.body}</dd>
+            <dd className="kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3 md:text-right">{s.tag}</dd>
           </div>
         ))}
       </dl>
@@ -76,11 +76,11 @@ export function BuiltOn() {
             </div>
             <ul className="mt-5 space-y-3">
               {c.items.map((t) => (
-                <li key={t} className="flex gap-3 kn-sans text-[14.5px] leading-[1.6] text-[#3a3a3a]">
+                <li key={t} className="flex gap-3 kn-sans text-[14.5px] leading-[1.6] text-ink-2">
                   <span
                     aria-hidden
                     className={`mt-[8px] h-[7px] w-[7px] shrink-0 rounded-full border ${
-                      c.solid ? "border-[#171717] bg-[#171717]" : "border-dashed border-[#858585]"
+                      c.solid ? "border-ink bg-ink" : "border-dashed border-ink-3"
                     }`}
                   />
                   {t}

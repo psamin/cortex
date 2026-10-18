@@ -13,7 +13,7 @@ export function HeroFallback() {
         alt="Isometric line drawing of a six-axis robotic arm on a square base"
         width={820}
         height={610}
-        className="h-auto w-[92%] max-w-[820px] lg:w-[57%]"
+        className="h-auto w-[92%] max-w-[820px] lg:w-[57%] dark:invert"
         decoding="async"
         style={{
           maskImage: "radial-gradient(ellipse 72% 70% at 55% 50%, #000 62%, transparent 100%)",

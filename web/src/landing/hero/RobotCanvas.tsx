@@ -4,6 +4,7 @@ import { Line } from "@react-three/drei";
 import * as THREE from "three";
 import { RobotArm } from "../robot/RobotArm";
 import { RenderStyleContext } from "../robot/RobotGeometry";
+import { useScenePalette } from "../robot/RobotMaterials";
 import { debugStore, RuntimeContext, type RobotRuntime } from "../robot/runtime";
 import { IsometricCamera } from "../scene/IsometricCamera";
 import {
@@ -17,6 +18,7 @@ const PhysicsLayer = lazy(() => import("../physics/PhysicsLayer"));
 
 /** Reachable-workspace approximation (debug only). */
 function WorkspaceShell({ runtime }: { runtime: RobotRuntime }) {
+  const c = useScenePalette();
   const ws = runtime.controller.workspace;
   const ring = useMemo(() => {
     const pts: THREE.Vector3[] = [];
@@ -30,9 +32,9 @@ function WorkspaceShell({ runtime }: { runtime: RobotRuntime }) {
     <group>
       <mesh position={ws.center}>
         <sphereGeometry args={[ws.rMax, 32, 16]} />
-        <meshBasicMaterial color="#9a9a9a" wireframe transparent opacity={0.15} />
+        <meshBasicMaterial color={c.ghost} wireframe transparent opacity={0.15} />
       </mesh>
-      <Line points={ring} color="#666" lineWidth={1} />
+      <Line points={ring} color={c.ring} lineWidth={1} />
     </group>
   );
 }

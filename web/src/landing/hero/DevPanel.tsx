@@ -25,14 +25,14 @@ export default function DevPanel({ runtime }: { runtime: RobotRuntime }) {
     return (
       <button
         onClick={() => setOpen(true)}
-        className="fixed bottom-3 left-3 z-50 rounded border border-[#e6e6e6] bg-white px-2 py-1 kn-mono text-[10px] text-[#858585]"
+        className="fixed bottom-3 left-3 z-50 rounded border border-line bg-bench px-2 py-1 kn-mono text-[10px] text-ink-3"
       >
         DEV `
       </button>
     );
 
   return (
-    <div className="fixed bottom-3 left-3 z-50 max-h-[80vh] w-[300px] overflow-auto rounded border border-[#171717] bg-white p-3 kn-mono text-[10px] leading-relaxed text-[#171717] shadow-sm">
+    <div className="fixed bottom-3 left-3 z-50 max-h-[80vh] w-[300px] overflow-auto rounded border border-ink bg-bench p-3 kn-mono text-[10px] leading-relaxed text-ink shadow-sm">
       <div className="mb-2 flex justify-between">
         <b>{BRAND.name.toUpperCase()} · DEV</b>
         <button onClick={() => setOpen(false)}>close ×</button>
@@ -46,7 +46,7 @@ export default function DevPanel({ runtime }: { runtime: RobotRuntime }) {
         {c.ik.directionError.toFixed(3)} rad · it {c.ik.iterations}
       </div>
       <div>clamped: {String(c.targetClamped)} · gripper {(c.gripper * 1000).toFixed(0)} mm · cube {runtime.cube.status}</div>
-      <hr className="my-2 border-[#e6e6e6]" />
+      <hr className="my-2 border-line" />
       {ROBOT.joints.map((j, i) => (
         <label key={j.name} className="flex items-center gap-2">
           <span className="w-16">{j.label.split(" / ")[0]}</span>
@@ -71,7 +71,7 @@ export default function DevPanel({ runtime }: { runtime: RobotRuntime }) {
       <button className="mt-1 underline" onClick={() => (c.manual = null)}>
         release manual override
       </button>
-      <hr className="my-2 border-[#e6e6e6]" />
+      <hr className="my-2 border-line" />
       {(Object.keys(flags) as (keyof DebugFlags)[]).map((k) => (
         <label key={k} className="mr-3 inline-flex items-center gap-1">
           <input type="checkbox" checked={flags[k]} onChange={(e) => debugStore.set({ [k]: e.target.checked })} />

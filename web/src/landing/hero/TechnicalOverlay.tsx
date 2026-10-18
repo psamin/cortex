@@ -16,8 +16,8 @@ export function TechnicalOverlay() {
       <svg className="absolute inset-0 hidden h-full w-full overflow-visible md:block" aria-hidden>
         {CALLOUTS.map((c) => (
           <g key={c.id}>
-            <path ref={(el) => void (reg(c.id).path = el)} fill="none" stroke="#171717" strokeWidth={0.75} />
-            <circle ref={(el) => void (reg(c.id).node = el)} r={2.6} fill="#fff" stroke="#171717" strokeWidth={0.9} />
+            <path ref={(el) => void (reg(c.id).path = el)} fill="none" stroke="var(--kn-ink)" strokeWidth={0.75} />
+            <circle ref={(el) => void (reg(c.id).node = el)} r={2.6} fill="var(--kn-paper)" stroke="var(--kn-ink)" strokeWidth={0.9} />
           </g>
         ))}
       </svg>
@@ -25,26 +25,26 @@ export function TechnicalOverlay() {
         <div
           key={c.id}
           ref={(el) => void (reg(c.id).label = el)}
-          className="absolute left-0 top-0 hidden whitespace-nowrap bg-white/85 md:block px-1 py-0.5 kn-mono text-[10px] leading-none tracking-[0.08em] text-[#171717] will-change-transform"
+          className="absolute left-0 top-0 hidden whitespace-nowrap bg-bench/85 md:block px-1 py-0.5 kn-mono text-[10px] leading-none tracking-[0.08em] text-ink will-change-transform"
           aria-hidden
         >
           <span>{c.label}</span>
-          <span ref={(el) => void (reg(c.id).value = el)} className="ml-2 text-[#858585] tabular-nums" />
+          <span ref={(el) => void (reg(c.id).value = el)} className="ml-2 text-ink-3 tabular-nums" />
         </div>
       ))}
 
       {/* Status block */}
-      <div className="absolute right-[4.5%] top-[17%] hidden kn-mono text-[10px] uppercase leading-[1.9] tracking-[0.12em] text-[#858585] lg:block">
-        <div className="flex items-center gap-3 text-[#171717]">
-          <span className="h-px w-8 bg-[#171717]" />
+      <div className="absolute right-[4.5%] top-[17%] hidden kn-mono text-[10px] uppercase leading-[1.9] tracking-[0.12em] text-ink-3 lg:block">
+        <div className="flex items-center gap-3 text-ink">
+          <span className="h-px w-8 bg-ink" />
           <span>FIG.01</span>
-          <span className="text-[#858585]">Illustrative 6-axis arm</span>
+          <span className="text-ink-3">Illustrative 6-axis arm</span>
         </div>
         <div className="mt-2 pl-11">Kinematic control</div>
-        <div className="flex items-center gap-2 pl-11 text-[#171717]">
+        <div className="flex items-center gap-2 pl-11 text-ink">
           <span className="relative inline-flex h-1.5 w-1.5">
-            <span className="absolute inset-0 animate-ping rounded-full bg-[#171717]/40 motion-reduce:hidden" />
-            <span className="relative h-1.5 w-1.5 rounded-full bg-[#171717]" />
+            <span className="absolute inset-0 animate-ping rounded-full bg-ink/40 motion-reduce:hidden" />
+            <span className="relative h-1.5 w-1.5 rounded-full bg-ink" />
           </span>
           <span ref={(el) => void (o.status = el)} data-testid="robot-state">
             Initializing
@@ -54,13 +54,13 @@ export function TechnicalOverlay() {
       </div>
 
       {/* Footer row: affordance hint + the one optional action. */}
-      <div className="absolute inset-x-6 bottom-[4.5%] flex items-center justify-between gap-6 kn-mono text-[10px] uppercase tracking-[0.16em] text-[#858585] lg:left-[52%] lg:right-[4.5%]">
+      <div className="absolute inset-x-6 bottom-[4.5%] flex items-center justify-between gap-6 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3 lg:left-[52%] lg:right-[4.5%]">
         <span className="hidden xl:inline">Move the cursor here to command the end effector</span>
         <button
           ref={(el) => void (o.graspButton = el)}
           type="button"
           onClick={() => (rt.cube.requested = true)}
-          className="pointer-events-auto group ml-auto inline-flex items-center gap-2 whitespace-nowrap border-b border-[#171717] pb-1 text-[#171717] transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-[#171717] disabled:cursor-not-allowed disabled:border-[#e6e6e6] disabled:text-[#858585]"
+          className="pointer-events-auto group ml-auto inline-flex items-center gap-2 whitespace-nowrap border-b border-ink pb-1 text-ink transition-opacity hover:opacity-70 focus-visible:outline focus-visible:outline-1 focus-visible:outline-offset-4 focus-visible:outline-ink disabled:cursor-not-allowed disabled:border-line disabled:text-ink-3"
           data-testid="grasp-button"
         >
           Run pick sequence

@@ -2,7 +2,7 @@ import { createContext, useContext, useMemo, type ReactNode } from "react";
 import type * as THREE from "three";
 import { Edges, Outlines } from "@react-three/drei";
 import { DIMS } from "../../robotics/robotConfig";
-import { INK, robotMaterials, type MaterialKey } from "./RobotMaterials";
+import { robotMaterials, useScenePalette, type MaterialKey } from "./RobotMaterials";
 import {
   alongX,
   boneLink,
@@ -50,12 +50,13 @@ export function Part({
 }: PartProps) {
   const style = useContext(RenderStyleContext);
   const mats = robotMaterials();
+  const { ink } = useScenePalette();
   const dark = material === "dark" || material === "black";
   return (
     <mesh geometry={geometry} material={mats[material]} position={position} rotation={rotation}>
-      {style.edges && edges && !dark && <Edges threshold={threshold} color={INK} lineWidth={1} />}
+      {style.edges && edges && !dark && <Edges threshold={threshold} color={ink} lineWidth={1} />}
       {/* World-space thickness: under the fixed orthographic scale this is a constant ~1.3 px line. */}
-      {style.outlines && outline && <Outlines thickness={OUTLINE_WORLD} color={INK} angle={Math.PI} />}
+      {style.outlines && outline && <Outlines thickness={OUTLINE_WORLD} color={ink} angle={Math.PI} />}
       {children}
     </mesh>
   );
