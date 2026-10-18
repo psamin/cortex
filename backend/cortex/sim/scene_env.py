@@ -7,6 +7,9 @@ upright inside the target zone and nothing is holding it".
 
 The cycle protocol swaps the target with ``set_target`` (demo: the task zone;
 reset: the origin or the next zone).
+
+Conveyors (issue #255) run from the first step: before every control step each belt drives the free
+bodies resting on it to its velocity (``Belt.drive``), so an object that starts ``on`` a belt rides it.
 """
 
 from __future__ import annotations
@@ -46,6 +49,22 @@ class SceneEnv(PickPlaceEnv):
         self.obj_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] == self.cube}
         self.others = {n: w._free_qadr(mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, b))
                        for n, b in self.info.objects.items() if n != self.pick}
+        self.belts = self.info.belts()
+        self.beds = {n: mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_GEOM, f"belt_{n}_bed") for n in self.belts}
+        root = w.model.body_rootid[mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, "gripper")]
+        self.robot_bodies = {b for b in range(w.model.nbody) if w.model.body_rootid[b] == root}
+
+    def belt_of(self, name: str | None = None):
+        """The belt an object (default: the pick object) starts on, or None."""
+        if self.world is None:
+            self._bind()
+        return self.belts.get(self.info.on.get(name or self.pick, ""))
+
+    def step(self, action: np.ndarray, render: bool = True):
+        if self.world is not None:
+            for n, b in self.belts.items():
+                b.drive(self.world.model, self.world.data, self.beds[n], exclude=self.robot_bodies)
+        return super().step(action, render)
 
     def set_target(self, zone: str | None = None, xy: tuple[float, float] | None = None,
                    half: tuple[float, float] = (0.04, 0.04)) -> None:
@@ -88,7 +107,9 @@ class SceneEnv(PickPlaceEnv):
         qa = self.cube_qadr if name == self.pick else self.others[name]
         h = self.info.heights[name]
         d = self.world.data
-        d.qpos[qa:qa + 3] = (xy[0], xy[1], h / 2 + 0.0005)
+        b = self.belt_of(name)
+        z0 = b.height if b is not None and b.over(np.asarray(xy)) else 0.0  # on its belt, or on the table
+        d.qpos[qa:qa + 3] = (xy[0], xy[1], z0 + h / 2 + 0.0005)
         d.qpos[qa + 3:qa + 7] = (np.cos(yaw / 2), 0, 0, np.sin(yaw / 2))
 
     # ------------------------------------------------------------- queries
