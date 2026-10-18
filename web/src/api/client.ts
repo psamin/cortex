@@ -194,6 +194,7 @@ export const api = {
   startLivePolicy: () => post<LivePolicyStatus>("/live-policy/start"),
   stopLivePolicy: () => post<LivePolicyStatus>("/live-policy/stop"),
   livePolicyStreamUrl: (task: string, episode: number) => `${API_BASE}/live-policy/stream/${task}/${episode}`,
+  livePolicySimUrl: (task: string, seed: number) => `${API_BASE}/live-policy/sim/${task}/${seed}`,
   record: (pid: string, condition: Condition, seed?: number) =>
     post<Job>(`/projects/${pid}/recordings`, seed === undefined ? { condition } : { condition, seed }),
   recordBatch: (pid: string, conditions: Condition[], per_condition: number, base_seed?: number) =>

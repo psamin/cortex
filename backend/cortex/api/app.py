@@ -728,6 +728,27 @@ async def live_policy_stream(task: str, episode: int):
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
+@app.get("/api/live-policy/sim/{task}/{seed}")
+async def live_policy_sim(task: str, seed: int):
+    """A sim-trained policy running closed loop in MuJoCo on the GPU, on an unseen layout, as MJPEG."""
+    import httpx
+
+    from ..services import live_policy_service as lp
+    st = await lp.status(ctx())
+    if not st["available"]:
+        raise HTTPException(503, st["reason"])
+    if task not in (st.get("sim") or {}):
+        raise NotFound(f"No sim-trained policy for '{task}' on the GPU server yet.")
+
+    async def gen():
+        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
+            async with c.stream("GET", f"{lp.url(ctx())}/sim/{task}/{seed}") as r:
+                async for chunk in r.aiter_raw():
+                    yield chunk
+
+    return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
+
+
 class CalibrateReq(BaseModel):
     device: Literal["follower", "leader"]
 
