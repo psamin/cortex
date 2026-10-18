@@ -20,7 +20,7 @@ import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
 try:
-    FONT = ImageFont.load_default(size=24)  # readable on a projector at 1280x960
+    FONT = ImageFont.load_default(size=15)  # readable on a projector at 640x480
 except TypeError:  # Pillow < 10.1
     FONT = ImageFont.load_default()
 
@@ -89,23 +89,35 @@ def visible_seed(task: str, env, seed: int) -> int:
     return seed
 
 
+def _inset(img: np.ndarray, wrist: np.ndarray) -> np.ndarray:
+    """The policy's wrist camera in the bottom-right corner of the live view."""
+    out = img.copy()
+    h, w = out.shape[0] // 4, out.shape[1] // 4
+    small = np.asarray(Image.fromarray(wrist).resize((w, h)))
+    y, x = out.shape[0] - h - 10, out.shape[1] - w - 10
+    out[y - 2:y + h + 2, x - 2:x + w + 2] = 235
+    out[y:y + h, x:x + w] = small
+    return out
+
+
 def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> bytes:
     im = Image.fromarray(img)
     d = ImageDraw.Draw(im)
     w = max(d.textlength(t, font=FONT) for t, _ in lines) + 32
-    d.rectangle([16, 16, 16 + w, 28 + 32 * len(lines)], fill=(14, 14, 14))
+    d.rectangle([8, 8, 8 + w, 16 + 20 * len(lines)], fill=(14, 14, 14))
     for i, (t, color) in enumerate(lines):
-        d.text((32, 26 + 32 * i), t, fill=color, font=FONT)
+        d.text((16, 12 + 20 * i), t, fill=color, font=FONT)
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=85)
+    im.save(buf, format="JPEG", quality=72)
     return buf.getvalue()
 
 
 def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
     """(jpeg, step, inference ms, success) per control step, at real time, until done or out of steps."""
+    import mujoco
     import torch
     from cortex.sim.tasks import make
-    from cortex.sim.tasks.run import SETTLE, Presenter
+    from cortex.sim.tasks.run import SETTLE
 
     # MuJoCo's GL context belongs to the thread that created it, and each request runs in its own server
     # thread, so every run builds its own sim here (about a second) instead of reusing the startup one.
@@ -119,7 +131,10 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
         seed = visible_seed(p["task"], env, seed)
     obs = env.reset(seed)
     policy.reset(env, obs, seed)
-    presenter = Presenter(env)
+    # A plain 640x480 camera for the live view: the studio's high-quality presentation renderer (8x MSAA, huge
+    # shadow maps) renders garbage under headless EGL in this server, and its 1280x960 frames were too big for the
+    # VPN tunnel (~1.5 fps). The policy's own wrist view is inset.
+    view = mujoco.Renderer(env.world.model, 480, 640)
     held = 0
     try:
         for step in range(env.max_steps):
@@ -128,7 +143,15 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
             if torch.cuda.is_available():
                 torch.cuda.synchronize()
             ms = (time.perf_counter() - t0) * 1000
-            frame = presenter.frame(obs)
+            if step % 2:  # 15 fps of video is plenty and halves the bandwidth; the policy still runs every step
+                obs, _, success, _, _ = env.step(action)
+                held = held + 1 if success else 0
+                if held >= 3 * SETTLE:
+                    break
+                time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
+                continue
+            view.update_scene(env.world.data, camera="front")
+            frame = _inset(view.render(), obs["pixels"]["wrist"])
             obs, _, success, _, _ = env.step(action)
             held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
             status = ("Task complete (verified by the simulator)", (110, 220, 130)) if success else (
@@ -144,5 +167,5 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                 break
             time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
     finally:
-        presenter.close()
+        view.close()
         env.close()
