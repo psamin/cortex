@@ -10,6 +10,7 @@ import type {
   StartAgentCollectionRequest,
   Analysis,
   AuditRow,
+  AgentThread,
   AutopilotPolicy,
   AutopilotRun,
   Checkpoint,
@@ -233,7 +234,10 @@ export const api = {
   nextActions: (pid: string) => get<NextAction[]>(`/projects/${pid}/next-actions`),
 
   // agent
-  agentHistory: (pid: string) => get<Record<string, unknown>[]>(`/projects/${pid}/agent/history`),
+  agentHistory: (pid: string, thread?: string | null) =>
+    get<Record<string, unknown>[]>(`/projects/${pid}/agent/history${thread ? `?thread=${encodeURIComponent(thread)}` : ""}`),
+  agentThreads: (pid: string) => get<AgentThread[]>(`/projects/${pid}/agent/threads`),
+  newThread: (pid: string) => post<AgentThread>(`/projects/${pid}/agent/threads`),
   resetAgent: (pid: string) => post<{ reset: boolean }>(`/projects/${pid}/agent/reset`),
   agentEngine: () => get<{ engine: string; label: string; model: string | null }>("/agent/engine"),
 };
@@ -246,13 +250,14 @@ export async function* streamAgent(
   pid: string,
   message: string,
   signal?: AbortSignal,
+  thread?: string | null,
 ): AsyncGenerator<{ event: string; data: Record<string, unknown> }> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/projects/${pid}/agent`, {
       method: "POST",
       headers: { ...ACTOR_HEADER, "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(thread ? { message, thread } : { message }),
       signal,
     });
   } catch (e) {

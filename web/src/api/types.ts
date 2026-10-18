@@ -813,3 +813,11 @@ export interface Infra {
   robot: InfraOption[];
   walltime_min: { min: number; max: number; note: string };
 }
+
+/** A past chat in a project (title = first user message). */
+export interface AgentThread {
+  id: string;
+  title: string;
+  created_at: ISODate;
+  updated_at: ISODate;
+}
