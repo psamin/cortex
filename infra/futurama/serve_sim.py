@@ -27,7 +27,7 @@ except TypeError:  # Pillow < 10.1
 TITLES = {"jenga": "Jenga: extract the marked block", "screwdriver": "Factory: unscrew a screw with a screwdriver",
           "unscrew": "Factory: unscrew the bolt", "unscrew_black": "Factory: unscrew the bolt (policy 2)", "palletize": "Factory: unload boxes from the forklift",
           "suture": "Suture: pass the needle through the eyelets", "pick_place": "Pick and place the cube",
-          "jenga_big": "Jenga: push the block out, pull it, place it on top"}
+          "jenga_big": "Jenga: push the block out, pull it, place it on top", "sort_cubes": "Sort the cubes by color"}
 CAMERAS = {"smolvla": {"camera1": "front", "camera2": "wrist"}}  # smolvla_base's camera names -> the sim's
 
 
@@ -125,7 +125,8 @@ VIEWS = ("both", "front", "wrist")
 
 # A 3/4 close-up on the part being worked, for people watching (the policy's front camera sees the arm's back).
 # (azimuth, elevation, distance m); the policy never sees it.
-CLOSEUP = {"unscrew": (150, -26, 0.55), "unscrew_black": (150, -26, 0.55), "pick_place": (150, -32, 0.85)}
+CLOSEUP = {"unscrew": (150, -26, 0.55), "unscrew_black": (150, -26, 0.55), "pick_place": (150, -32, 0.85),
+           "sort_cubes": (180, -50, 0.65)}  # from the front: all three bins, clear of the wrist inset
 
 
 def _closeup(env, task: str) -> np.ndarray | None:
