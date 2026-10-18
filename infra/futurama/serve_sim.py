@@ -90,33 +90,39 @@ def visible_seed(task: str, env, seed: int) -> int:
     return seed
 
 
-def _inset(img: np.ndarray, wrist: np.ndarray) -> np.ndarray:
-    """The policy's wrist camera in the bottom-right corner of the live view."""
-    out = img.copy()
-    h, w = out.shape[0] // 4, out.shape[1] // 4
-    small = np.asarray(Image.fromarray(wrist).resize((w, h)))
-    y, x = out.shape[0] - h - 10, out.shape[1] - w - 10
-    out[y - 2:y + h + 2, x - 2:x + w + 2] = 235
-    out[y:y + h, x:x + w] = small
-    return out
+FRAME_W, FRAME_H, MAIN_W = 960, 540, 720  # 16:9: the 4:3 camera view, then a 240 px column on the right
 
 
-BAR = 52  # the stats bar under the picture: nothing is drawn over the arm
+def _wrap(d: ImageDraw.ImageDraw, text: str, width: float) -> list[str]:
+    out, cur = [], ""
+    for word in text.split(" "):
+        t = f"{cur} {word}".strip()
+        if cur and d.textlength(t, font=FONT) > width:
+            out.append(cur)
+            cur = word
+        else:
+            cur = t
+    return out + [cur]
 
 
-def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> bytes:
-    """The frame with its live stats in a bar underneath: lines[0] and lines[3] on the first row (title, status
-    on the right), lines[1] and lines[2] on the second."""
-    h, w = img.shape[:2]
-    im = Image.new("RGB", (w, h + BAR), (14, 14, 14))
-    im.paste(Image.fromarray(img), (0, 0))
+def _frame(main: np.ndarray, wrist: np.ndarray | None, lines: list[tuple[str, tuple[int, int, int]]]) -> bytes:
+    """One widescreen JPEG: the camera view on the left; on the right the policy's wrist camera (if given) and the
+    live stats, so nothing is drawn over the arm."""
+    im = Image.new("RGB", (FRAME_W, FRAME_H), (14, 14, 14))
+    im.paste(Image.fromarray(main).resize((MAIN_W, FRAME_H), Image.BILINEAR), (0, 0))
+    side, y = FRAME_W - MAIN_W, 0
+    if wrist is not None:
+        im.paste(Image.fromarray(wrist).resize((side, side * 3 // 4), Image.BILINEAR), (MAIN_W, 0))
+        y = side * 3 // 4
     d = ImageDraw.Draw(im)
-    for row, (left, right) in enumerate(((lines[0], lines[3]), (lines[1], lines[2]))):
-        y = h + 7 + 22 * row
-        d.text((12, y), left[0], fill=left[1], font=FONT)
-        d.text((w - 12 - d.textlength(right[0], font=FONT), y), right[0], fill=right[1], font=FONT)
+    y += 14
+    for text, color in lines:
+        for ln in _wrap(d, text, side - 24):
+            d.text((MAIN_W + 12, y), ln, fill=color, font=FONT)
+            y += 20
+        y += 8
     buf = io.BytesIO()
-    im.save(buf, format="JPEG", quality=72)
+    im.save(buf, format="JPEG", quality=70)
     return buf.getvalue()
 
 
@@ -144,12 +150,12 @@ def _closeup(env, task: str) -> np.ndarray | None:
     return w.renderer.render().copy()
 
 
-def _view(obs: dict[str, Any], view: str, close: np.ndarray | None = None) -> np.ndarray:
-    """The live view, scaled up: the close-up (or the policy's front camera) with the wrist camera inset, or
-    just the policy's front or wrist camera."""
-    cam = close if view == "both" and close is not None else obs["pixels"]["wrist" if view == "wrist" else "front"]
-    img = np.asarray(Image.fromarray(cam).resize((640, 480), Image.BILINEAR))
-    return _inset(img, obs["pixels"]["wrist"]) if view == "both" else img
+def _pictures(obs: dict[str, Any], view: str, close: np.ndarray | None) -> tuple[np.ndarray, np.ndarray | None]:
+    """(main picture, wrist column): the close-up (or the policy's front camera) with its wrist camera beside it,
+    or just the policy's front or wrist camera."""
+    if view == "both":
+        return (close if close is not None else obs["pixels"]["front"]), obs["pixels"]["wrist"]
+    return obs["pixels"]["wrist" if view == "wrist" else "front"], None
 
 
 def _episode(p: dict[str, Any], seed: int, stop, view: str = "both",
@@ -187,20 +193,20 @@ def _episode(p: dict[str, Any], seed: int, stop, view: str = "both",
                 close = _closeup(env, p["task"]) if view == "both" else None
             except Exception:  # noqa: BLE001 - an env without cube_pos/world: the policy's own camera
                 close = None
-            frame = _view(obs, view, close)
+            frame = _pictures(obs, view, close)
         t2 = time.perf_counter()
         obs, _, success, _, _ = env.step(action)
         t3 = time.perf_counter()
         t_act, t_step, t_frame, steps = t_act + t1 - t0, t_step + t3 - t2, t_frame + t2 - t1, steps + 1
         held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
         if frame is not None:
-            status = ("Task complete (verified by the simulator)", (110, 220, 130)) if success else (
+            status = ("Task complete, verified by the simulator", (110, 220, 130)) if success else (
                 "Running", (200, 200, 200))
-            jpg = _overlay(frame, [
+            jpg = _frame(*frame, [
                 (TITLES.get(p["task"], p["task"]), (240, 240, 240)),
-                (f"{p['variant'].upper()} trained only in sim  ·  "
-                 + (f"practice layout {seed}" if p.get("layouts") or p.get("layout_seeds")
-                    else f"unseen layout (seed {seed})"), (160, 200, 255)),
+                (f"{p['variant'].upper()} policy, trained only in simulation", (160, 200, 255)),
+                (f"practice layout {seed}" if p.get("layouts") or p.get("layout_seeds")
+                 else f"unseen layout (seed {seed})", (160, 200, 255)),
                 (f"step {step}  ·  {ms:4.1f} ms on GPU", (160, 200, 255)),
                 status])
             yield jpg, step, ms, success
