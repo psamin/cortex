@@ -1,3 +1,4 @@
+import { lazy, Suspense } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { ProjectLayout } from "./layout/ProjectLayout";
@@ -9,11 +10,22 @@ import { AnalyzePage } from "./pages/Analyze";
 import { ImprovePage } from "./pages/improve/Improve";
 import { LineagePage } from "./pages/Lineage";
 
+// Public home page (Kinetic landing). Lazy so the studio bundle never pulls in three.js for it.
+const LandingPage = lazy(() => import("./landing/LandingPage"));
+
 export function App() {
   return (
     <Routes>
+      <Route
+        index
+        element={
+          <Suspense fallback={null}>
+            <LandingPage />
+          </Suspense>
+        }
+      />
       <Route element={<AppShell />}>
-        <Route index element={<HomePage />} />
+        <Route path="studio" element={<HomePage />} />
         <Route path="new" element={<NewProjectPage />} />
         <Route path="p/:pid" element={<ProjectLayout />}>
           <Route index element={<PlanPage />} />
@@ -22,7 +34,7 @@ export function App() {
           <Route path="improve" element={<ImprovePage />} />
           <Route path="graph" element={<LineagePage />} />
         </Route>
-        <Route path="*" element={<Navigate to="/" replace />} />
+        <Route path="*" element={<Navigate to="/studio" replace />} />
       </Route>
     </Routes>
   );
