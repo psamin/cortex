@@ -147,20 +147,24 @@ def _metric(e: ReplayEpisode) -> str | None:
 
 async def rollout_rows(ctx: Ctx, pid: str, versions: dict[str, str]) -> list[dict[str, Any]]:
     """Viewer rows for every recorded episode that has a video. success is None for replays on recorded
-    demos (nothing was judged) and the simulator's verdict for live sim runs."""
+    demos (nothing was judged) and the simulator's verdict for live sim runs that reached their end; a run cut
+    off before (the viewer left, Stop GPU) was not judged either."""
     out = []
     for rp in await list_replays(ctx, pid):
         sim = rp.kind == "live_sim"
+        partial = rp.status == "partial"
         policy = versions.get(rp.checkpoint_id or "") or rp.checkpoint_name or "policy"
         for e in rp.episodes:
             if not e.video_key:
                 continue
             out.append({"kind": "replay", "id": f"{rp.id}/ep{e.episode}", "replay_id": rp.id, "replay_kind": rp.kind,
                         "label": f"{LABELS[rp.kind]} · {'seed' if sim else 'ep'} {e.episode}",
-                        "success": e.success if sim else None, "seed": e.episode if sim else None,
-                        "policy": policy, "metric": _metric(e), "joint_mae_deg": e.joint_mae_deg,
+                        "success": e.success if sim and not partial else None, "seed": e.episode if sim else None,
+                        "policy": policy, "joint_mae_deg": e.joint_mae_deg,
+                        "metric": " · ".join(x for x in ("cut off, not judged" if sim and partial else None, _metric(e))
+                                             if x) or None,
                         "inference_ms": e.inference_ms.get("mean"), "episode": e.episode, "steps": e.steps,
-                        "instruction": e.instruction, "frames": e.frames, "partial": rp.status == "partial",
+                        "instruction": e.instruction, "frames": e.frames, "partial": partial,
                         "note": rp.note, "video_url": await ctx.media_url(e.video_key), "cameras": [CAMERA],
                         "created_at": rp.created_at})
     return out
@@ -186,5 +190,5 @@ def brief(rp: PolicyReplay) -> dict[str, Any]:
     return {"id": rp.id, "kind": rp.kind, "task": rp.task, "checkpoint_id": rp.checkpoint_id,
             "checkpoint": rp.checkpoint_name, "episodes": [e.episode for e in rp.episodes],
             "joint_mae_deg": rp.joint_mae_deg, "status": rp.status, "note": rp.note,
-            **({"success": rp.episodes[0].success, "steps": rp.episodes[0].steps}
-               if rp.kind == "live_sim" and rp.episodes else {})}
+            **({"success": rp.episodes[0].success if rp.status == "complete" else None,
+                "steps": rp.episodes[0].steps} if rp.kind == "live_sim" and rp.episodes else {})}

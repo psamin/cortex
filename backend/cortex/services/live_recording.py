@@ -212,7 +212,7 @@ async def save_session(ctx: Ctx, task: str, episode: int, rec: StreamRecorder, s
                                      total_frames=rec.total, joint_mae_deg=joint,
                                      gripper_mae=replay_service.mean_or_none(rec.grip), inference_ms=_stats(rec.ms),
                                      video_key=video, trace_key=trace,
-                                     success=rec.success if sim else None,
+                                     success=rec.success if sim and rec.complete else None,
                                      steps=(rec.last_index + 1 if rec.last_index is not None else rec.frames)
                                      if sim else None))
     rp.joint_mae_deg = joint
