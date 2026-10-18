@@ -6,7 +6,7 @@ import { useEngine, useHealth, useProjects } from "../api/hooks";
 import { cn } from "../lib/format";
 
 function useTheme() {
-  const [theme, setTheme] = useState<"dark" | "light">(() => (document.documentElement.dataset.theme as "dark" | "light") || "dark");
+  const [theme, setTheme] = useState<"dark" | "light">(() => (document.documentElement.dataset.theme as "dark" | "light") || "light");
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     try {

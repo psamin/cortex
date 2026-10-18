@@ -20,8 +20,9 @@ export default {
       },
       borderColor: { line: "var(--line)", "line-soft": "var(--line-soft)", "line-strong": "var(--line-strong)" },
       fontFamily: {
-        sans: ['"Inter Variable"', "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono Variable"', "ui-monospace", "SFMono-Regular", "monospace"],
+        sans: ['"IBM Plex Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ['"IBM Plex Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
+        serif: ['"Newsreader"', '"Iowan Old Style"', '"Times New Roman"', "serif"],
       },
       fontSize: {
         "2xs": ["11px", "16px"],
