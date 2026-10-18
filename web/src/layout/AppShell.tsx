@@ -69,7 +69,7 @@ function HealthSummary() {
   return (
     <span
       className={cn("inline-flex h-7 items-center gap-1.5 px-2.5 text-ink-3", statusLabel)}
-      title={fallbacks ? subs.filter(([, d]) => d.fallback).map(([k, d]) => `${k}: ${d.name}`).join("\n") : undefined}
+      title={fallbacks ? subs.filter(([, d]) => d.fallback).map(([k, d]) => `${k}: ${d.name}`).join("\n") : "All services connected"}
     >
       <span className={cn("h-1.5 w-1.5 rounded-full", fallbacks ? "bg-caution" : "bg-pass")} />
       <span className="hidden whitespace-nowrap sm:inline">{fallbacks ? `${fallbacks} local fallback${fallbacks === 1 ? "" : "s"}` : "All services connected"}</span>
@@ -131,7 +131,7 @@ export function AppShell() {
         )}
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           {pid && engine.data && (
-            <span className={cn("hidden h-7 items-center gap-1.5 px-2 text-ink-3 md:inline-flex", statusLabel)} title={engine.data.note ?? (engine.data.model ? `model ${engine.data.model}` : "agent engine")}>
+            <span className={cn("hidden h-7 items-center gap-1.5 whitespace-nowrap px-2 text-ink-3 xl:inline-flex", statusLabel)} title={engine.data.note ?? (engine.data.model ? `model ${engine.data.model}` : "agent engine")}>
               <span className={cn("h-1.5 w-1.5 rounded-full", engine.data.engine === "rules" || engine.data.note ? "bg-caution" : "bg-pass")} />
               {engine.data.label}
             </span>
@@ -154,7 +154,7 @@ export function AppShell() {
           {!onStudioHome && (
             <Link
               to="/studio"
-              className="sk-pill sk-pill-primary hidden h-8 items-center px-4 text-[12.5px] font-medium sm:inline-flex"
+              className="sk-pill sk-pill-primary hidden h-8 items-center whitespace-nowrap px-4 text-[12.5px] font-medium sm:inline-flex"
             >
               New project
             </Link>
