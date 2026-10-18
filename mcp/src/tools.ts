@@ -841,6 +841,34 @@ const TOOLS: Def[] = [
     inputSchema: z.object({}),
     annotations: READ,
   },
+  {
+    name: "save_physical_skill",
+    title: "Save a Physical Skill",
+    description:
+      "After training and evaluation: name a finished checkpoint as a Physical Skill, e.g. 'Jenga v1'. It is already " +
+      "listed (every finished checkpoint is); this names it, and returns its skill_id and measured score. Find " +
+      "checkpoints and skills with cortex_list(kind=\"skills\").",
+    inputSchema: z.object({
+      project_id: projectId,
+      checkpoint_id: z.string().describe("A finished training job's checkpoint (ck_...)"),
+      name: z.string().min(1).max(80).describe("What the skill does, e.g. 'Jenga v1'"),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "deploy_physical_skill",
+    title: "Deploy a Physical Skill",
+    description:
+      "Deploy a Physical Skill: requests or attaches the Futurama GPU server (the same safeguards as request_gpu) and " +
+      "sets up a live closed-loop run of the skill in the deployment simulator, on an unseen layout. Returns " +
+      "deployment_url (the studio page that plays the run; share it with the user as View deployment) and run_id. " +
+      "While the GPU comes up it returns deployed=false: poll cortex_get_gpu_status, then call it again. Find skills " +
+      "with cortex_list(kind=\"skills\").",
+    inputSchema: z.object({
+      skill_id: z.string().describe("A Physical Skill id (sk_...), from save_physical_skill or cortex_list(kind=\"skills\")"),
+    }),
+    annotations: WRITE_EXTERNAL,
+  },
 ];
 
 const INTAKE = new Set(["start_intake", "update_intake"]);
