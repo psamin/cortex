@@ -6,7 +6,7 @@ import { useAutopilot, useTraining } from "../api/hooks";
 import { AUTOPILOT_STATES, isAgent, type AutopilotPolicy, type AutopilotRun, type AutopilotStep, type Project } from "../api/types";
 import { ProvenanceBadge } from "../components/AgentTrace";
 import { RefChip, useApprover } from "../components/refs";
-import { Badge, Button, ErrorState, Input, Segmented, Skeleton, Toggle, type Tone, InlineError } from "../components/ui";
+import { Badge, Button, ErrorState, InfoTip, Input, Segmented, Skeleton, Toggle, type Tone, InlineError } from "../components/ui";
 import { cn, evidenceValue, humanize, pct } from "../lib/format";
 
 // ------------------------------------------------------------------ policy fields
@@ -41,19 +41,19 @@ export function PolicyFields({ value, onChange }: { value: AutopilotPolicy; onCh
           checked={value.auto_approve_free_training}
           onChange={(v) => set("auto_approve_free_training", v)}
           label="Auto-approve free training"
-          hint="University / self-hosted GPUs that cost you nothing"
+          hint="Free GPUs only"
         />
         <Toggle
           checked={value.allow_paid_jobs}
           onChange={(v) => set("allow_paid_jobs", v)}
           label="Allow paid GPU jobs"
-          hint="Off: paid cloud jobs always wait for your click"
+          hint="Off: paid jobs wait for you"
         />
       </div>
-      <div className="w-[180px]">{numField("max_gpu_hours_per_job", "Max GPU-hours per job", 0.5)}</div>
+      <div className="w-[180px]">{numField("max_gpu_hours_per_job", "Max GPU-h / job", 0.5)}</div>
       <div className="flex flex-wrap items-end gap-4 border-t border-line-soft pt-3">
         <label className="block space-y-1">
-          <span className="block text-2xs font-medium text-ink-3">Demonstrations from</span>
+          <span className="block text-2xs font-medium text-ink-3">Demos from</span>
           <Segmented
             size="sm"
             value={value.collector}
@@ -61,7 +61,7 @@ export function PolicyFields({ value, onChange }: { value: AutopilotPolicy; onCh
             ariaLabel="Collector"
             options={[
               { value: "agent", label: "Agent" },
-              { value: "oracle", label: "Scripted oracle" },
+              { value: "oracle", label: "Oracle (privileged)" },
             ]}
           />
         </label>
@@ -80,7 +80,7 @@ export function PolicyFields({ value, onChange }: { value: AutopilotPolicy; onCh
                 ]}
               />
             </label>
-            <div className="w-[150px]">{numField("model_budget_usd", "Planner budget (USD)", 1)}</div>
+            <div className="w-[150px]">{numField("model_budget_usd", "Planner $", 1)}</div>
           </>
         )}
       </div>
@@ -125,7 +125,9 @@ function StateMachine({ run }: { run: AutopilotRun }) {
         })}
       </ol>
       {idx < 0 && <p className="mt-1 font-mono text-[10.5px] text-ink-3">state: {run.state}</p>}
-      <p className="mt-1 text-2xs text-ink-4">After NEXT_EXPERIMENT_SELECTED the loop returns to SCENARIO_PLANNED with targeted conditions.</p>
+      <p className="mt-1 flex items-center gap-1.5 text-2xs text-ink-4">
+        loops <InfoTip>After NEXT_EXPERIMENT_SELECTED the loop returns to SCENARIO_PLANNED with targeted conditions.</InfoTip>
+      </p>
     </div>
   );
 }
@@ -180,7 +182,7 @@ export function AutopilotHero({ project }: { project: Project }) {
         )}
         <div className="ml-auto flex items-center gap-1.5">
           <Button size="sm" variant="ghost" onClick={() => setShowPolicy((s) => !s)} aria-expanded={showPolicy}>
-            Standing approvals <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showPolicy && "rotate-180")} />
+            Approvals <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", showPolicy && "rotate-180")} />
           </Button>
           {active ? (
             <Button size="sm" variant="danger" loading={stop.isPending} onClick={() => stop.mutate()}>
@@ -188,7 +190,7 @@ export function AutopilotHero({ project }: { project: Project }) {
             </Button>
           ) : (
             <Button size="sm" variant="primary" loading={start.isPending} onClick={() => start.mutate()}>
-              <Play className="h-3.5 w-3.5" /> {run ? "Run again" : "Start autopilot"}
+              <Play className="h-3.5 w-3.5" /> {run ? "Run again" : "Start"}
             </Button>
           )}
         </div>
@@ -212,10 +214,9 @@ export function AutopilotHero({ project }: { project: Project }) {
         </div>
       ) : !run ? (
         <div className="px-4 py-6">
-          <p className="max-w-[560px] text-sm text-ink-2">
-            Autopilot runs the whole loop for you: collect demos, check quality, build a dataset, train, evaluate in three
-            sim branches, and decide what to collect next. It stops at your target success rate or round limit, and only
-            pauses for things outside your standing approvals.
+          <p className="flex max-w-[560px] items-center gap-1.5 text-sm text-ink-2">
+            Collect → train → evaluate → repeat, within your approvals.
+            <InfoTip>Autopilot runs the whole loop for you: collect demos, check quality, build a dataset, train, evaluate in three sim branches, and decide what to collect next. It stops at your target success rate or round limit, and only pauses for things outside your standing approvals.</InfoTip>
           </p>
         </div>
       ) : (
@@ -247,7 +248,7 @@ function PolicyEditor({ project }: { project: Project }) {
       <PolicyFields value={draft} onChange={setDraft} />
       <div className="mt-3 flex items-center gap-2">
         <Button size="sm" variant="primary" disabled={!dirty} loading={m.isPending} onClick={() => m.mutate()}>
-          Save policy
+          Save
         </Button>
         {m.isSuccess && !dirty && <span className="text-2xs text-pass">Saved</span>}
         {m.error && <InlineError error={m.error} />}
@@ -350,7 +351,7 @@ function ApproveTraining({ tid, pid, cost, paid }: { tid: string; pid: string; c
       <Button size="sm" variant="primary" disabled={!approver.trim()} loading={m.isPending} onClick={() => m.mutate()}>
         <Check className="h-3.5 w-3.5" /> Approve{paid ? ` $${cost.toFixed(2)}` : ""}
       </Button>
-      <span className="text-2xs text-ink-3">Autopilot launches it once approved.</span>
+      <span className="text-2xs text-ink-3">Launches once approved</span>
       {m.error && <InlineError error={m.error} className="w-full" />}
     </div>
   );
@@ -373,7 +374,7 @@ export function ManualTraining({ pid, tid }: { pid: string; tid: string }) {
   return (
     <div className="mt-2 space-y-2 rounded bg-well p-2.5 border border-line">
       <div className="flex items-center justify-between text-2xs text-ink-3">
-        <span>Run this on a GPU machine</span>
+        <span>Run on a GPU machine</span>
         {cmd.data && (
           <button
             type="button"
@@ -401,7 +402,7 @@ export function ManualTraining({ pid, tid }: { pid: string; tid: string }) {
           <Upload className="h-3.5 w-3.5" /> Register
         </Button>
       </div>
-      {reg.isSuccess && <p className="text-2xs text-pass">Checkpoint registered. Autopilot will pick it up.</p>}
+      {reg.isSuccess && <p className="text-2xs text-pass">Registered · autopilot picks it up</p>}
       {reg.error && <InlineError error={reg.error} />}
     </div>
   );
