@@ -13,6 +13,7 @@ from typing import Any
 
 from ..context import Ctx
 from ..models import Analysis, EpisodeDiagnosis, FailureCluster, Project
+from . import claude_code_diagnosis as ccd
 from . import recording_service as rec
 from . import simulation_runner as sim
 from . import vlm_diagnostics as vlm
@@ -28,7 +29,8 @@ TELEMETRY_LABEL = {
 async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_vlm: int = 6,
                          actor: str = "gui") -> Job:
     async def run(job: Job) -> str:
-        an = Analysis(project_id=project.id, vlm_provider=ctx.vlm_source if use_vlm else None)
+        route, route_label = ccd.diagnoser(ctx, project) if use_vlm else (None, "")
+        an = Analysis(project_id=project.id, vlm_provider=route_label if route else None)
         await ctx.repo.save("analyses", an)
         eps = await rec.list_episodes(ctx, project.id)
         an.episode_count = len(eps)
@@ -54,7 +56,7 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
                         failures.append({"eval_id": ev["run"].id, "branch": b, "ep": e})
 
         # 3) VLM hypotheses on failed eval episodes with video, then failed/flagged demos
-        if use_vlm and ctx.model:
+        if route:
             targets: list[tuple[str, list, dict[str, Any]]] = []
             for f in failures:
                 if f["ep"].video_key and len(targets) < max_vlm:
@@ -71,12 +73,15 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
                     targets.append((ep.id, vlm.keyframes_from_array(z["front"]), {
                         "outcome": "success" if ep.success else "failure",
                         "quality_flags": [fl.code for fl in ep.quality.flags] if ep.quality else []}))
-            ctx.jobs.update(job, message=f"VLM review of {len(targets)} episodes", progress=0.5)
-            diags = await asyncio.gather(*(vlm.diagnose(ctx.model, ref, fr, project.spec.goal, tel)
-                                           for ref, fr, tel in targets))
-            an.diagnoses = list(diags)
+            ctx.jobs.update(job, message=f"{route_label}: reviewing {len(targets)} episodes", progress=0.5)
+            if route == "claude_code":
+                an.diagnoses = await ccd.diagnose_all(
+                    ctx, project, targets, ctx.data_dir / "agent_sessions" / project.id / "diagnosis" / an.id)
+            else:
+                an.diagnoses = list(await asyncio.gather(*(vlm.diagnose(ctx.model, ref, fr, project.spec.goal, tel)
+                                                           for ref, fr, tel in targets)))
         elif use_vlm:
-            an.summary += "VLM skipped: no model endpoint configured. "
+            an.summary += f"VLM skipped: {route_label}. "
 
         # 4) clusters
         ctx.jobs.update(job, message="clustering failures", progress=0.9)
