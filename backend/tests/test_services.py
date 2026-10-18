@@ -59,3 +59,43 @@ def test_stats():
 def test_shifted_branch_maps_to_left_region():
     assert region_of("center", (0.0, 0.0)) == "center"
     assert region_of("center", (0.04, 0.06)) == "left"
+
+
+def _vlm_diag(ref: str):
+    from cortex.models import EpisodeDiagnosis, Hypothesis
+    return EpisodeDiagnosis(episode_id=ref, model="m", hypotheses=[
+        Hypothesis(category="grasp_miss", confidence=0.7, rationale="jaws close beside the cube")])
+
+
+def test_vlm_clusters_name_the_condition_cells_they_cover():
+    from cortex.models import Analysis, BranchSpec, EpisodeResult, SimulationBranch
+    from cortex.services.analysis_service import build_clusters, failure_ref
+
+    ep = Episode(project_id="prj_1", index=0, source=EpisodeSource.sim_agent, seed=1, num_frames=10, fps=30,
+                 success=False, condition=Condition(cube_region="right", lighting="dim"))
+    shifted = SimulationBranch(evaluation_id="ev_1", project_id="prj_1", seeds=[1000], spec=BranchSpec(
+        name="shifted_object", condition=Condition(cube_region="center", lighting="normal"), cube_offset=(0.04, 0.06)))
+    fail = {"eval_id": "ev_1", "branch": shifted, "ep": EpisodeResult(seed=1000, success=False, reward=0.0, steps=1)}
+    an = Analysis(project_id="prj_1", diagnoses=[_vlm_diag(ep.id), _vlm_diag(failure_ref(fail))])
+
+    vlm = [c for c in build_clusters("prj_1", an, [ep], [fail]) if c.source == "vlm"]
+    assert len(vlm) == 1 and vlm[0].category == "vlm:grasp_miss"
+    assert vlm[0].conditions == ["left/normal", "right/dim"]  # the shifted branch lands nearest 'left'
+
+
+async def test_vlm_clusters_reach_the_recommendation_ranking(tmp_path):
+    from cortex.config import Settings
+    from cortex.context import build_ctx
+    from cortex.models import FailureCluster
+    from cortex.services import agent_orchestrator as orch
+    from cortex.services import recommendation_service
+
+    ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+    p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
+    await ctx.repo.save("failure_clusters", FailureCluster(
+        project_id=p.id, analysis_id="an_1", category="vlm:grasp_miss", source="vlm", episode_ids=["ep_a", "ep_b"],
+        conditions=["center/normal"], evidence=[], uncertainty=0.3), status="current")
+    recs = await recommendation_service.recommend(ctx, p)
+    cell = next(r for r in recs if r.condition and r.condition.key == "center/normal")
+    assert cell.components["vlm_signal"] > 0
+    assert any(e.kind == "vlm" for e in cell.evidence)

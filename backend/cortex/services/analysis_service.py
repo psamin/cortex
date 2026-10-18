@@ -59,7 +59,7 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
             for f in failures:
                 if f["ep"].video_key and len(targets) < max_vlm:
                     frames = await asyncio.to_thread(vlm.keyframes_from_video, ctx.local(f["ep"].video_key))
-                    targets.append((f"{f['eval_id']}/{f['branch'].id}/seed{f['ep'].seed}", frames, {
+                    targets.append((failure_ref(f), frames, {
                         "outcome": "failure", "condition": f["branch"].spec.name,
                         "cube_max_height_m": round(f["ep"].max_cube_z, 3),
                         "final_cube_to_box_m": round(f["ep"].final_cube_box_dist, 3)}))
@@ -99,6 +99,11 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
     return ctx.jobs.submit("analyze", project.id, run)
 
 
+def failure_ref(f: dict[str, Any]) -> str:
+    """Reference to one failed evaluation episode: <evaluation id>/<branch id>/seed<seed>."""
+    return f"{f['eval_id']}/{f['branch'].id}/seed{f['ep'].seed}"
+
+
 def build_clusters(project_id: str, an: Analysis, eps, failures) -> list[FailureCluster]:
     out: list[FailureCluster] = []
     by_flag: dict[str, list] = defaultdict(list)
@@ -118,10 +123,18 @@ def build_clusters(project_id: str, an: Analysis, eps, failures) -> list[Failure
         b = items[0]["branch"]
         out.append(FailureCluster(
             project_id=project_id, analysis_id=an.id, category=f"eval:{mode}", source="evaluation",
-            episode_ids=[f"{f['eval_id']}/{f['branch'].id}/seed{f['ep'].seed}" for f in items],
+            episode_ids=[failure_ref(f) for f in items],
             conditions=[b.spec.condition.key + ("+shift" if b.spec.cube_offset != (0.0, 0.0) else "")],
             evidence=[f"{len(items)} failed trials in '{branch}': {TELEMETRY_LABEL.get(mode, mode)}"],
             uncertainty=0.0))
+
+    # condition cell of each reviewed item, so VLM clusters feed the per-cell recommendation ranking
+    from .recommendation_service import region_of  # local: recommendation_service imports this module
+
+    cell_of = {ep.id: ep.condition.key for ep in eps}
+    for f in failures:
+        spec = f["branch"].spec
+        cell_of[failure_ref(f)] = f"{region_of(spec.condition.cube_region, spec.cube_offset)}/{spec.condition.lighting}"
 
     by_cat: dict[str, list[tuple[EpisodeDiagnosis, float]]] = defaultdict(list)
     for d in an.diagnoses:
@@ -134,7 +147,8 @@ def build_clusters(project_id: str, an: Analysis, eps, failures) -> list[Failure
         mean_conf = sum(c for _, c in items) / len(items)
         out.append(FailureCluster(
             project_id=project_id, analysis_id=an.id, category=f"vlm:{cat}", source="vlm",
-            episode_ids=[d.episode_id for d, _ in items], conditions=[],
+            episode_ids=[d.episode_id for d, _ in items],
+            conditions=sorted({cell_of[d.episode_id] for d, _ in items if d.episode_id in cell_of}),
             evidence=[next(h.rationale for h in d.hypotheses if h.category == cat) for d, _ in items[:3]],
             uncertainty=round(1 - mean_conf, 3)))
     return out
