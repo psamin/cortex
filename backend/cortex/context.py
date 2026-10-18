@@ -120,7 +120,8 @@ async def build_ctx(s: Settings) -> Ctx:
                      "oracle, telemetry analysis and everything else still run.")
 
     bus = EventBus()
-    return Ctx(settings=s, store=store, blobs=blobs, repo=Repo(store), bus=bus, jobs=JobManager(bus),
+    return Ctx(settings=s, store=store, blobs=blobs, repo=Repo(store), bus=bus,
+               jobs=JobManager(bus, persist=s.data_dir / "jobs.json"),
                data_dir=s.data_dir, model=route, vlm_source=src, gateway_error=gw_err, notes=notes)
 
 

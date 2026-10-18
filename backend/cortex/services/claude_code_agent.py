@@ -32,8 +32,9 @@ happened and what the evidence shows. No JSON, no ids unless the user asks, no m
 Rules:
 - Only report numbers that tools returned. Simulator results are measured; VLM/agent diagnoses are hypotheses.
 - Training on the GPU cluster needs the human's approval in the app: propose it, then tell the user to approve.
-- Long jobs (collection, analysis, datasets, evaluation) return job ids: wait with short polls
-  (cortex.get_job / cortex.get_collection_progress) and report when done.
+- Long jobs (collection, analysis, datasets, evaluation) return a job id. Start the job, then END YOUR TURN
+  with one sentence saying it is running. Do NOT poll in a loop: the app shows a live progress card and posts
+  the result in the chat when it finishes. Check progress only if the user asks.
 - Scripted-oracle demos read simulator state; say so when you use them."""
 
 
@@ -156,8 +157,9 @@ async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
                         yield sse("tool_result", {"tool": name, "summary": summary, "ref_ids": refs,
                                                   "ok": not block.get("is_error")})
                         if needs_approval:
-                            yield sse("approval_required", {"kind": "training", "ref_id": pid, "summary": summary,
-                                                            "args": {}})
+                            tj = next((r for r in refs if r.startswith("tj_")), None)
+                            yield sse("approval_required", {"kind": "training", "ref_id": tj or pid,
+                                                            "training_job_id": tj, "summary": summary, "args": {}})
                 yield sse("status", {"state": "thinking"})
             elif t == "result":
                 result = ev
