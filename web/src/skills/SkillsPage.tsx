@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CircleDashed, Cpu, Sparkles, Square } from "lucide-react";
@@ -108,6 +108,13 @@ export function GpuControl({ compact = false }: { compact?: boolean }) {
   };
   const start = useMutation({ mutationFn: api.startLivePolicy, onSettled: refresh });
   const stop = useMutation({ mutationFn: api.stopLivePolicy, onSettled: refresh });
+  // releasing the shared GPU takes two clicks: the first arms it for 3 s, the second stops
+  const [armed, setArmed] = useState(false);
+  useEffect(() => {
+    if (!armed) return;
+    const t = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(t);
+  }, [armed]);
   const st = gpu.data;
   const err = (start.error ?? stop.error) as ApiError | null;
   const busy = st?.phase === "starting" || start.isPending;
@@ -117,8 +124,17 @@ export function GpuControl({ compact = false }: { compact?: boolean }) {
       <div className="flex flex-wrap items-center justify-end gap-2">
         <GpuPill st={st} compact={compact} />
         {st?.available ? (
-          <Button size="sm" onClick={() => stop.mutate()} loading={stop.isPending} title="Ends the live session and gives the GPU back to the cluster">
-            <Square className="h-3 w-3" /> {stop.isPending ? "Releasing the GPU…" : "Stop & release GPU"}
+          <Button
+            size="sm"
+            onClick={() => {
+              setArmed(!armed);
+              if (armed) stop.mutate();
+            }}
+            loading={stop.isPending}
+            className={armed ? "!text-caution" : undefined}
+            title="Ends the live session and gives the GPU back to the cluster"
+          >
+            <Square className="h-3 w-3" /> {stop.isPending ? "Releasing the GPU…" : armed ? "Release GPU? Click again" : "Stop & release GPU"}
           </Button>
         ) : busy ? (
           <>
