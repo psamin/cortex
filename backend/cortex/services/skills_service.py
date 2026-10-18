@@ -64,12 +64,18 @@ def _task_of(p: Project, keys: dict[str, str]) -> tuple[str | None, bool | None]
     return (sim, True) if sim else (None, None)
 
 
+def _prompt(p: Project) -> str:
+    """The task as the person (or the sim importer) typed it, without the importer's "(MuJoCo sim)" tag. Not
+    spec.goal: a project made from a prompt alone keeps the default cube goal there."""
+    return re.sub(r"\s*\((MuJoCo )?sim[^)]*\)", "", p.task_prompt).strip()
+
+
 def _name(task: str | None, sim: bool, p: Project | None) -> str:
     names = SIM_NAMES if sim else REAL_NAMES
     if task in names:
         return names[task]
-    text = ((p.spec.goal or p.task_prompt) if p else (task or "Trained policy")).strip()
-    text = re.sub(r"\s*\((MuJoCo )?sim[^)]*\)", "", re.split(r"(?<=[.!?])\s", text)[0]).rstrip(".").replace("_", " ")
+    text = _prompt(p) if p else (task or "").replace("_", " ")
+    text = re.split(r"(?<=[.!?])\s", text)[0].rstrip(".")
     return (text[:1].upper() + text[1:])[:80] or "Trained policy"
 
 
@@ -258,7 +264,7 @@ async def list_skills(ctx: Ctx) -> list[dict[str, Any]]:
         evidence = await _evidence(ctx, score, branches, runs, held)
         out.append({
             "id": f"sk_{gid}", "name": _name(task, sim, p), "task": task, "data": "sim" if sim else "real",
-            "instruction": (p.spec.goal or p.task_prompt).strip(), "robot": _robot(tj),
+            "instruction": _prompt(p), "robot": _robot(tj),
             "project_id": p.id, "project_name": p.name, "policy_type": rep.policy_type,
             "policy": _policy(rep.policy_type), "variant": variant, "steps": rep.step,
             "trained_where": _where(tj), "trained_at": rep.created_at.isoformat(),

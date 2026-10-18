@@ -104,9 +104,10 @@ async def test_every_trained_policy_is_a_skill_with_plain_names(world):
     assert j["id"] == f"sk_{tj.id}" and j["project_id"] == real.id and j["checkpoint_id"] == ck.id
     assert j["robot"] == "SO-100" and j["policy"] == "SmolVLA" and j["data"] == "real"
     assert j["trained_where"] == "Futurama H200" and j["weights"] == "on the cluster" and j["steps"] == 10000
+    assert j["instruction"] == "Pull a block out of a Jenga tower"  # the prompt, not the default cube goal
     u = by_name["Unscrew a bolt with the gripper"]
     assert u["policy"] == "ACT" and u["data"] == "sim" and u["robot"] == "SO-101" and u["steps"] == 30000
-    assert u["project_id"] == sim["project_id"]
+    assert u["project_id"] == sim["project_id"] and u["instruction"] == "Unscrew a hex bolt from a fixture with the SO-101"
 
 
 async def test_scores_are_labelled_honestly(world):
