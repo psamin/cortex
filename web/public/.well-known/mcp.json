@@ -1520,6 +1520,72 @@
       "needsApproval": false
     },
     {
+      "name": "close_rl_round",
+      "mcpTools": [
+        "cortex.close_rl_round"
+      ],
+      "description": "Close the loop for a finished RL sandbox, one step per call (call again to continue): its successful demos (provenance rl_sandbox:<id>, quality-gated) go into a new version of the latest dataset, capped so targeted demos stay at most 40% of the train split; then a retrain is PROPOSED (a human approves it); once its checkpoint exists, the old and new checkpoints are re-evaluated on every condition on matched held-out seeds (McNemar per condition, regressions flagged), the predicted vs realised uplift is logged and the transfer curve refitted (learned after 3 realised rounds, prior before).",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "sandbox_id": {
+            "description": "a finished sandbox (rl_...) with a measured held-out result",
+            "type": "string"
+          },
+          "episodes_per_condition": {
+            "anyOf": [
+              {
+                "maximum": 200,
+                "minimum": 5,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "matched held-out seeds per condition in the re-evaluation; default: the n of the evaluation the weakness came from"
+          },
+          "wait_s": {
+            "default": 0,
+            "description": "keep advancing for up to this long while a dataset build or the re-evaluation runs",
+            "maximum": 300,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id",
+          "sandbox_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "get_rl_rounds",
+      "mcpTools": [
+        "cortex.get_rl_rounds"
+      ],
+      "description": "A project's RL rounds: status, predicted (estimate) vs realised (measured) uplift on the weak condition, the paired per-condition comparison with regressions, and the current transfer curve.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "collection_snapshot",
       "mcpTools": [],
       "description": "Live snapshot of an agent demonstration collection for the MCP App view: status, successes/attempts, model calls and spend, recent attempts and the latest sim frame.",
