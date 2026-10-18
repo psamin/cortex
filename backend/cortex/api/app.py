@@ -709,21 +709,28 @@ async def live_policy_stop(request: Request):
 
 @app.get("/api/live-policy/stream/{task}/{episode}")
 async def live_policy_stream(task: str, episode: int):
-    """The policy running on the GPU over a held-out episode, as MJPEG (proxied through the tunnel)."""
+    """The policy running on the GPU over a held-out episode, as MJPEG (proxied through the tunnel).
+    The session is recorded as it passes and saved to the task's project when the stream ends (#179)."""
     import httpx
 
     from ..services import live_policy_service as lp
+    from ..services import live_recording
     st = await lp.status(ctx())
     if not st["available"]:
         raise HTTPException(503, st["reason"])
     if task not in st["policies"] or episode not in st["policies"][task]["held_out"]:
         raise NotFound(f"No live policy '{task}' with held-out episode {episode}.")
+    rec = live_recording.StreamRecorder()
 
     async def gen():
-        async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
-            async with c.stream("GET", f"{lp.url(ctx())}/live/{task}/{episode}") as r:
-                async for chunk in r.aiter_raw():
-                    yield chunk
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
+                async with c.stream("GET", f"{lp.url(ctx())}/live/{task}/{episode}") as r:
+                    async for chunk in r.aiter_raw():
+                        rec.feed(chunk)
+                        yield chunk
+        finally:  # finished, or the viewer left: encode and store in the background
+            live_recording.save_soon(ctx(), task, episode, rec, st, lp.STATE.get("job"))
 
     return StreamingResponse(gen(), media_type="multipart/x-mixed-replace; boundary=frame")
 
