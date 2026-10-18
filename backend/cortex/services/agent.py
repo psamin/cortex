@@ -135,6 +135,7 @@ async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> Asyn
     tid = (await chat_store.current(ctx, pid, tid))["id"]
     yield _sse("thread", {"id": tid})
     await _append_log(ctx, pid, {"kind": "user", "text": message}, tid)
+    before = await _counts(ctx, pid)
     text: list[str] = []
     async for chunk in _chat(ctx, pid, message, tid):
         ev, _, data = chunk.partition("\ndata: ")
@@ -145,6 +146,8 @@ async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> Asyn
             d = {}
         if ev == "text":
             text.append(d.get("delta", ""))
+        elif ev == "todos":
+            await _append_log(ctx, pid, {"kind": "todos", "items": d.get("items", [])}, tid)
         elif ev in ("tool_call", "tool_result", "approval_required"):
             if text:
                 await _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)}, tid)
@@ -155,8 +158,36 @@ async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> Asyn
             if text:
                 await _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)}, tid)
                 text = []
+            changes = _diff(before, await _counts(ctx, pid))
+            if changes:  # what this turn actually changed, measured from the project, not the model's words
+                await _append_log(ctx, pid, {"kind": "changes", "items": changes}, tid)
+                yield _sse("changes", {"items": changes})
             await _append_log(ctx, pid, {"kind": "done", **d}, tid)
         yield chunk
+
+
+CHANGE_LABELS = {"episodes": ("demo", "demos"), "dataset_versions": ("dataset version", "dataset versions"),
+                 "training_jobs": ("training job", "training jobs"), "checkpoints": ("policy", "policies"),
+                 "evaluation_runs": ("evaluation", "evaluations"), "agent_collections": ("collection", "collections")}
+
+
+async def _counts(ctx: Ctx, pid: str) -> dict[str, int]:
+    out = {}
+    for table in CHANGE_LABELS:
+        try:
+            out[table] = len(await ctx.store.list(table, project_id=pid))
+        except Exception:  # a store without the table counts as unchanged
+            out[table] = 0
+    return out
+
+
+def _diff(before: dict[str, int], after: dict[str, int]) -> list[dict[str, Any]]:
+    items = []
+    for table, (one, many) in CHANGE_LABELS.items():
+        n = after.get(table, 0) - before.get(table, 0)
+        if n:
+            items.append({"what": table, "delta": n, "text": f"{'+' if n > 0 else ''}{n} {one if abs(n) == 1 else many}"})
+    return items
 
 
 async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:

@@ -45,3 +45,11 @@ def test_a_project_from_before_threads_keeps_its_chat(tmp_path):
         assert len(items) == 1 and items[0]["title"] == "pick up the cube" and items[0]["session_id"] == "old-sess"
         assert [e["kind"] for e in await agent.load_log(ctx, "prj_2")] == ["user", "assistant"]
     run(go())
+
+
+def test_turn_changes_are_measured_from_the_project():
+    before = {"episodes": 10, "dataset_versions": 1, "checkpoints": 0, "training_jobs": 0, "evaluation_runs": 2,
+              "agent_collections": 1}
+    after = {**before, "episodes": 12, "checkpoints": 1, "agent_collections": 2}
+    assert [c["text"] for c in agent._diff(before, after)] == ["+2 demos", "+1 policy", "+1 collection"]
+    assert agent._diff(before, before) == []
