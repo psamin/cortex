@@ -102,9 +102,13 @@ def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> 
 def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
     """(jpeg, step, inference ms, success) per control step, at real time, until done or out of steps."""
     import torch
+    from cortex.sim.tasks import make
     from cortex.sim.tasks.run import SETTLE, Presenter
 
-    env, policy = p["env"], p["policy"]
+    # MuJoCo's GL context belongs to the thread that created it, and each request runs in its own server
+    # thread, so every run builds its own sim here (about a second) instead of reusing the startup one.
+    env, _ = make(p["task"], 240, 320)
+    policy = p["policy"]
     if p.get("layouts"):
         seed = seed % p["layouts"]  # a practice layout it was trained on (demo reliability over generalization)
     else:
@@ -137,3 +141,4 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
             time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
     finally:
         presenter.close()
+        env.close()
