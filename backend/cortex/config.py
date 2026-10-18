@@ -3,16 +3,20 @@ credentials select the disclosed local fallback."""
 
 from __future__ import annotations
 
+import os
 from functools import lru_cache
 from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parents[2]
+# CORTEX_DOTENV=0 ignores the repo's .env. The test suite sets it (tests/conftest.py) so a developer's real
+# InsForge / OpenRouter credentials never reach tests: monkeypatch.delenv can't override a dotenv value.
+DOTENV = () if os.environ.get("CORTEX_DOTENV") == "0" else (ROOT / ".env",)
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=(ROOT / ".env",), extra="ignore")
+    model_config = SettingsConfigDict(env_file=DOTENV, extra="ignore")
 
     data_dir: Path = ROOT / ".cortex-data"
     public_url: str = "http://localhost:8000"
