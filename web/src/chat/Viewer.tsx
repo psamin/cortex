@@ -128,8 +128,8 @@ export function Viewer({
           <ToolbarTab active={replay} onClick={() => setMode("replay")}>
             Replays
           </ToolbarTab>
-          <ToolbarTab active={showGpu} onClick={() => setMode("gpu")} title="Trained policies running live on a cluster GPU">
-            <Cpu className="h-3.5 w-3.5" /> GPU
+          <ToolbarTab active={showGpu} onClick={() => setMode("gpu")} title="Run the trained policies live on a cluster GPU">
+            <Cpu className="h-3.5 w-3.5" /> Inference
           </ToolbarTab>
         </div>
         {replay && (
@@ -199,7 +199,7 @@ export function Viewer({
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <DashedOrbit r={200} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-70" />
         {showGpu ? (
-          <GpuStage />
+          <GpuStage hint={goal} />
         ) : showLive ? (
           <LiveStage pid={pid} job={liveJob} />
         ) : rollouts.isLoading ? (

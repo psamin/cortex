@@ -18,17 +18,19 @@ cd "$JOB_DIR"
 SCR="/dev/shm/cortex-${SLURM_JOB_ID}"
 mkdir -p "$SCR" "$JOB_DIR/live"
 trap 'rm -rf "$SCR"' EXIT INT TERM
-export UV_CACHE_DIR="$SCR/uv" HF_HOME="$SCR/hf" HF_LEROBOT_HOME="$SCR/lerobot" PATH="$SCR/bin:$HOME/.local/bin:$PATH"
+SIM_DIR="${SIM_DIR:-$(dirname "$JOB_DIR")/cortex-sim}"  # sim-trained policies (sim_task.sbatch) and cortex code
+export UV_CACHE_DIR="$SCR/uv" HF_HOME="$SCR/hf" HF_LEROBOT_HOME="$SCR/lerobot" PATH="$SCR/bin:$HOME/.local/bin:$PATH" \
+       MUJOCO_GL=egl PYOPENGL_PLATFORM=egl PYTHONPATH="$SIM_DIR/code"
 PORT=$((20000 + SLURM_JOB_ID % 20000))  # unique per job: several jobs can share the node
 
 if ! command -v uv >/dev/null; then
   curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$SCR/bin" UV_NO_MODIFY_PATH=1 sh
 fi
 echo "[live] Installing LeRobot on $(hostname -s) ($(nvidia-smi --query-gpu=name --format=csv,noheader | head -1))"
-cp prepare_dataset.py serve_policy.py "$SCR/"
+cp prepare_dataset.py serve_policy.py serve_sim.py "$SCR/"
 uv venv -q --python 3.12 "$SCR/venv"
 source "$SCR/venv/bin/activate"
-uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1"
+uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1" "mujoco>=3.3.7"
 
 for t in conveyor suture jenga; do  # held-out episodes for every task that has a checkpoint
   ls -d "$JOB_DIR/output/$t"/*_[0-9]* >/dev/null 2>&1 || continue
@@ -47,4 +49,4 @@ for f in sorted(scr.glob("data-*/split.json")):
 EOF
 echo "[live] Loading the policies onto the GPU"
 echo "{\"node\": \"$(hostname -s)\", \"port\": $PORT, \"job\": $SLURM_JOB_ID}" > "$JOB_DIR/live/server.json"
-python "$SCR/serve_policy.py" "$JOB_DIR" "$SCR/data" "$PORT"
+python "$SCR/serve_policy.py" "$JOB_DIR" "$SCR/data" "$PORT" "$SIM_DIR"

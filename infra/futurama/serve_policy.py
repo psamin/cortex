@@ -1,6 +1,6 @@
 """Live GPU inference for trained SmolVLA policies (run inside a GPU job).
 
-    python serve_policy.py <job_dir> <data_root> <port>
+    python serve_policy.py <job_dir> <data_root> <port> [<sim_dir>]
 
 Loads the newest checkpoint per task from <job_dir>/output/<task>/ and that task's held-out episodes
 (prepared by prepare_dataset.py under <data_root>/<task>). Serves:
@@ -11,6 +11,8 @@ Loads the newest checkpoint per task from <job_dir>/output/<task>/ and that task
                               human's, and the measured inference time
   POST /act                   {task, state:[6], images:{camera: base64 JPEG}} -> {action:[6], ms}
                               for a real SO-101 client
+  GET  /sim/<task>/<seed>     MJPEG: a sim-trained policy runs closed loop in MuJoCo on the GPU, on a
+                              layout it never saw (serve_sim.py); listed under "sim" in /policies.json
 """
 
 import base64
@@ -56,6 +58,13 @@ for task, stage in STAGE.items():
     print(f"[serve] {task}: {ck.name} on {stage}, held-out episodes {split['held_out']}", flush=True)
 
 
+SIM: dict = {}
+if len(sys.argv) > 4 and Path(sys.argv[4]).is_dir():
+    import serve_sim
+
+    SIM = serve_sim.load(Path(sys.argv[4]))
+
+
 def act(p: dict, obs: dict, task_text: str) -> tuple[np.ndarray, float]:
     batch = {p["rename"].get(k, k): (v[None] if torch.is_tensor(v) else v) for k, v in obs.items()}
     batch["task"] = [task_text]
@@ -95,7 +104,9 @@ class Handler(BaseHTTPRequestHandler):
         if parts == ["policies.json"]:
             body = json.dumps({"gpu": torch.cuda.get_device_name(0), "policies": {
                 t: {"checkpoint": p["checkpoint"], "stage": p["stage"], "held_out": p["held_out"]}
-                for t, p in POLICIES.items()}}).encode()
+                for t, p in POLICIES.items()}, "sim": {
+                t: {k: p[k] for k in ("variant", "step", "success_rate", "eval_episodes", "eval_seeds", "instruction")}
+                for t, p in SIM.items()}}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -112,6 +123,8 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
+        if len(parts) == 3 and parts[0] == "sim" and parts[1] in SIM and parts[2].isdigit():
+            return self.stream_sim(SIM[parts[1]], int(parts[2]))
         if len(parts) == 3 and parts[0] == "live" and parts[1] in POLICIES:
             return self.stream(POLICIES[parts[1]], parts[1], int(parts[2]))
         self.send_error(404)
@@ -136,6 +149,17 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 time.sleep(max(0.0, 1 / 30 - (time.perf_counter() - t0)))  # real time (30 fps recordings)
 
+    def stream_sim(self, p: dict, seed: int) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
+        self.end_headers()
+        with LOCK:
+            for jpg, _step, _ms, _ok in serve_sim.stream(p, seed):
+                try:
+                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+                except (BrokenPipeError, ConnectionResetError):
+                    return
+
     def do_POST(self):
         if self.path != "/act":
             return self.send_error(404)
@@ -154,5 +178,5 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-print(f"[serve] READY port={port} policies={list(POLICIES)}", flush=True)
+print(f"[serve] READY port={port} policies={list(POLICIES)} sim={list(SIM)}", flush=True)
 ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
