@@ -25,7 +25,7 @@
       "mcpTools": [
         "cortex.create_project"
       ],
-      "description": "Create a robot-learning project from a natural-language task; returns task spec, success criteria and an initial demonstration plan.",
+      "description": "Create a project for the built-in cube task only (for any other object use start_intake); returns task spec, success criteria and an initial demonstration plan.",
       "inputSchema": {
         "$defs": {
           "Mode": {
@@ -125,7 +125,7 @@
       "mcpTools": [
         "cortex.record_demonstrations"
       ],
-      "description": "Record scripted-expert demonstrations in MuJoCo for the given conditions (simulation only).",
+      "description": "Record scripted-expert demonstrations in MuJoCo for the given conditions (simulation only; cube_region applies to the built-in cube task only).",
       "inputSchema": {
         "$defs": {
           "ConditionCount": {
@@ -1003,7 +1003,7 @@
       "mcpTools": [
         "cortex.robot_start_episode"
       ],
-      "description": "Start a simulated SO-101 episode you will control yourself (fresh seed; optional cube region/lighting). Returns session_id.",
+      "description": "Simulated arm (MuJoCo, no hardware): start an SO-101 episode you will control yourself (fresh seed; optional cube region/lighting). Returns session_id.",
       "inputSchema": {
         "properties": {
           "project_id": {
@@ -1073,7 +1073,7 @@
         "cortex.robot_place",
         "cortex.robot_check_success"
       ],
-      "description": "Run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, move_end_effector, set_gripper, verify_grasp, place_object, check_task_success).",
+      "description": "Simulated arm (MuJoCo, no hardware): run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, move_end_effector, set_gripper, verify_grasp, place_object, check_task_success).",
       "inputSchema": {
         "properties": {
           "session_id": {
@@ -1112,7 +1112,7 @@
       "mcpTools": [
         "cortex.robot_finish_episode"
       ],
-      "description": "End your episode; the simulator judges success and successes become demonstrations.",
+      "description": "Simulated arm (MuJoCo, no hardware): end your episode; the simulator judges success and successes become demonstrations.",
       "inputSchema": {
         "properties": {
           "session_id": {
@@ -1220,7 +1220,7 @@
           },
           "patch": {
             "additionalProperties": true,
-            "description": "Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name.",
+            "description": "Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table.",
             "type": "object"
           }
         },
@@ -1278,7 +1278,7 @@
       "mcpTools": [
         "cortex.capture_frame"
       ],
-      "description": "Render a scene camera (top, front, wrist_cam) so you can check the sim matches the real setup you described.",
+      "description": "Render a scene camera (valid: top, front, wrist_cam) so you can check the sim matches the real setup you described.",
       "inputSchema": {
         "properties": {
           "project_id": {
