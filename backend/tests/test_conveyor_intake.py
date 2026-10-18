@@ -113,6 +113,24 @@ def test_skill_intercepts_the_moving_object_and_places_it(line_env):
         assert phases[:4] == ["hover", "lower", "wait", "close"] and skill.intercept is not None
 
 
+def test_skill_intercepts_on_a_fast_belt(tmp_path):
+    spec = _spec(speed_mps=0.08)  # 8 cm/s: a late close grabs the trailing edge and the object slips out
+    env = SceneEnv(build_scene(spec, tmp_path))
+    try:
+        obs = env.reset(0)
+        skill = PickPlaceSkill(env, height=spec.objects[0].height, grasp_width=spec.objects[0].grasp_width)
+        skill.plan(obs["agent_pos"])
+        for _ in range(1500):
+            env.step(skill.act(), render=False)
+            if skill.done:
+                break
+        for _ in range(30):
+            env.step(np.asarray(env.world.joint_state(), dtype=np.float32), render=False)
+        assert skill.failed is None and env.in_box(), env.cube_pos()
+    finally:
+        env.close()
+
+
 def test_feasibility_reports_the_intercept_window(line_env):
     spec, env = line_env
     rep = feasibility.check(spec, env.info, env)

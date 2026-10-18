@@ -50,7 +50,7 @@ HOVER_DZ = 0.043  # hover this far above the grasp height
 ENTRY_CLEAR = 0.04  # the object's centre is at least this far upstream when the jaws are down
 END_MARGIN = 0.05  # intercept at least this far before the belt's end
 INTERCEPT_STEP = 0.01  # candidate intercept points along the belt
-CLOSE_LEAD_STEPS = 4  # control steps before the object's centre reaches the jaws that the close starts
+CLOSE_LEAD_STEPS = 8  # close this many steps early: ~6 to contact from open at 8/step, ~2 to switch targets
 MOVE_MARGIN = 30  # steps allowed for the rate-limited approach on top of the transit estimate
 
 
