@@ -78,7 +78,7 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
         <span className="font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-3">{s.gpu}</span>
         {sims.map(([task, p]) => (
           <button key={task} type="button" onClick={() => run(task)}
-            title={`${p.variant.toUpperCase()} step ${p.step}: ${Math.round(p.success_rate * 100)}% on ${p.eval_episodes} unseen layouts`}
+            title={`${p.variant.toUpperCase()} step ${p.step}: ${p.success_rate == null ? "score pending" : `${Math.round(p.success_rate * 100)}% on ${p.eval_episodes} unseen layouts`}`}
             className={cn("h-6 rounded-full border px-2.5", cur?.kind === "sim" && cur.task === task ? "border-ink bg-ink text-bench" : "border-line-strong text-ink-2 hover:text-ink")}>
             {SIM_TITLE[task] ?? task} · sim
           </button>
@@ -101,7 +101,7 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
       {curSim && cur?.kind === "sim" && (
         <div className="flex items-center gap-3 px-4 pt-2 text-xs text-ink-2">
           <span>{curSim.instruction}</span>
-          <span className="text-ink-3">{curSim.variant.toUpperCase()} · {Math.round(curSim.success_rate * 100)}% success on {curSim.eval_episodes} unseen layouts</span>
+          <span className="text-ink-3">{curSim.variant.toUpperCase()} · {curSim.success_rate == null ? "score pending (evaluation running)" : `${Math.round(curSim.success_rate * 100)}% success on ${curSim.eval_episodes} unseen layouts`}</span>
           <button type="button" onClick={() => run(cur.task)} className="ml-auto h-7 rounded-full bg-ink px-3 font-medium text-bench">
             Run on a new layout
           </button>
