@@ -2,11 +2,12 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, resolveMediaUrl } from "../api/client";
 import { useEpisodes, useEvaluations } from "../api/hooks";
-import { agentLabel, isImported, type Condition, type Episode, type EvaluationWithBranches, type Iteration } from "../api/types";
+import { splitError } from "../components/ui";
+import { agentLabel, isImported, type Condition, type RemoteRollout, type Episode, type EvaluationWithBranches, type Iteration } from "../api/types";
 
 /** One playable MuJoCo episode: a demonstration or an evaluation rollout. */
 export interface Rollout {
-  kind: "demo" | "eval";
+  kind: "demo" | "eval" | "attempt";
   id: string;
   label: string;
   success: boolean | null;
@@ -27,6 +28,24 @@ export interface Rollout {
   task: string | null;
   /** cameras this rollout actually has, in the backend's order and wording */
   cameras: CameraInfo[];
+  /** who produced it, for filtering and labels */
+  origin: RolloutOrigin;
+  /** "Claude Code agent", "Scripted oracle", "Human (imported)", "Human (real teleop)", "Eval · policy v1" */
+  who: string;
+  frames: number | null;
+  durationS: number | null;
+}
+
+export type RolloutOrigin = "agent" | "oracle" | "imported" | "teleop" | "eval" | "attempt";
+
+/** Classify a rollout by kind + planner (+ the episode when known). */
+function classify(kind: string, planner: string | null | undefined, ep?: Episode, policy?: string | null): { origin: RolloutOrigin; who: string } {
+  if (kind === "eval") return { origin: "eval", who: `Eval · ${policy && !/oracle/i.test(policy) ? `policy ${policy}` : "oracle reference"}` };
+  if (kind === "attempt") return { origin: "attempt", who: planner === "scripted_ik_oracle" ? "Scripted oracle" : agentLabel(planner) };
+  if ((ep && isImported(ep)) || /imported/i.test(planner ?? "")) return { origin: "imported", who: "Human (imported)" };
+  if (ep?.source === "real_teleop" || /teleop/i.test(planner ?? "")) return { origin: "teleop", who: "Human (real teleop)" };
+  if (planner === "scripted_ik_oracle" || ep?.source === "sim_scripted") return { origin: "oracle", who: "Scripted oracle" };
+  return { origin: "agent", who: agentLabel(planner) };
 }
 
 export type Camera = "presentation" | "front" | "wrist";
@@ -103,6 +122,9 @@ function fromEpisodes(eps: Episode[]): Rollout[] {
       iteration: null,
       createdAt: e.created_at,
       cameras: FALLBACK_DEMO_CAMERAS,
+      ...classify("demo", e.provenance?.planner, e),
+      frames: e.num_frames,
+      durationS: e.num_frames / (e.fps || 30),
       ...importedFields(e),
     }));
 }
@@ -130,11 +152,37 @@ function fromEvaluations(evs: EvaluationWithBranches[]): Rollout[] {
           createdAt: run.created_at,
           imported: false,
           cameras: FALLBACK_STUDIO_ONLY,
+          ...classify("eval", null, undefined, policy),
+          frames: null,
+          durationS: null,
           source: null,
           task: null,
         });
   }
   return out;
+}
+
+/** Fields of a remote rollout (the backend's /rollouts row), joined with its episode when known. */
+function rolloutFields(r: RemoteRollout, ep: Episode | undefined) {
+  return {
+    kind: r.kind,
+    id: r.id,
+    label: r.label,
+    success: r.success,
+    // a failed attempt's error can be technical: keep only a readable phrase
+    failureMode: r.failure_mode ?? (r.kind === "attempt" && r.failure ? splitError(r.failure, undefined, "ended with an error").text : null),
+    condition: parseCondition(r.condition),
+    seed: r.seed ?? null,
+    videoUrl: r.video_url ?? null,
+    cameras: parseCameras(r.cameras, r.kind === "demo"),
+    episodeId: r.kind === "demo" ? r.id : null,
+    videoKey: null,
+    evaluationId: r.evaluation_id ?? null,
+    policy: r.policy ?? plannerLabel(r.planner),
+    iteration: r.iteration ?? null,
+    createdAt: r.created_at ?? "",
+    ...(ep ? importedFields(ep) : { imported: /imported/i.test(r.planner ?? ""), source: null, task: null }),
+  };
 }
 
 /** GET /rollouts when available; otherwise assembled from real episodes + evaluation results. */
@@ -145,24 +193,17 @@ export function useRollouts(pid: string) {
   const data = useMemo<Rollout[] | undefined>(() => {
     const epById = new Map((episodes.data ?? []).map((e) => [e.id, e]));
     if (remote.data)
-      return remote.data.map((r) => ({
-        kind: r.kind,
-        id: r.id,
-        label: r.label,
-        success: r.success,
-        failureMode: r.failure_mode ?? null,
-        condition: parseCondition(r.condition),
-        seed: r.seed ?? null,
-        videoUrl: r.video_url ?? null,
-        cameras: parseCameras(r.cameras, r.kind === "demo"),
-        episodeId: r.kind === "demo" ? r.id : null,
-        videoKey: null,
-        evaluationId: r.evaluation_id ?? null,
-        policy: r.policy ?? plannerLabel(r.planner),
-        iteration: r.iteration ?? null,
-        createdAt: r.created_at ?? "",
-        ...(epById.get(r.id) ? importedFields(epById.get(r.id)!) : { imported: /imported/i.test(r.planner ?? ""), source: null, task: null }),
-      }));
+      return remote.data
+        .map((r) => {
+          const ep = epById.get(r.id);
+          return {
+            ...classify(r.kind, r.planner, ep, r.policy),
+            frames: ep?.num_frames ?? null,
+            durationS: ep ? ep.num_frames / (ep.fps || 30) : null,
+            ...rolloutFields(r, ep),
+          };
+        })
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     if (remote.isLoading || !episodes.data || !evals.data) return undefined;
     return [...fromEvaluations(evals.data), ...fromEpisodes(episodes.data)].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   }, [remote.data, remote.isLoading, episodes.data, evals.data]);

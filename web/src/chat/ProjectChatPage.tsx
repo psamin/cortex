@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { useProjectState } from "../api/hooks";
 import { useChat } from "./ChatProvider";
 import { Conversation } from "./Conversation";
+import { ViewerFocusContext } from "./focus";
 import { prefixOf, toolLabel } from "./model";
 import { Pipeline } from "./Pipeline";
 import { Viewer, type RolloutFilter, type ViewerSelection } from "./Viewer";
@@ -41,6 +42,17 @@ export function ProjectChatPage() {
   const [filter, setFilter] = useState<RolloutFilter>("all");
   const [evaluationId, setEvaluationId] = useState<string | null>(null);
   const sel: ViewerSelection = { selectedId, setSelectedId, filter, setFilter, evaluationId, setEvaluationId };
+  // "Watch in viewer" from a chat row: clear filters and select the first of those rollouts
+  const focus = useMemo(
+    () => ({
+      focus: (ids: string[]) => {
+        setEvaluationId(null);
+        setFilter("all");
+        setSelectedId(ids[0] ?? null);
+      },
+    }),
+    [],
+  );
 
   // first message from the landing page
   const autoSent = useRef(false);
@@ -81,13 +93,15 @@ export function ProjectChatPage() {
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1">
         <div className="w-[35%] min-w-[380px] max-w-[620px] shrink-0 border-r border-line">
-          <Conversation pid={pid} />
+          <ViewerFocusContext.Provider value={focus}>
+            <Conversation pid={pid} />
+          </ViewerFocusContext.Provider>
         </div>
         <div className="min-w-0 flex-1">
           <Viewer pid={pid} goal={state.data?.project.spec.goal ?? state.data?.project.task_prompt ?? "…"}
             asked={
               // the simulator only has the cube-and-bowl scene: say so when the request was about something else
-              state.data && !state.data.project.spec.objects.every((o) => state.data!.project.task_prompt.toLowerCase().includes(o.toLowerCase()))
+              state.data && state.data.project.spec.objects[0] && !state.data.project.task_prompt.toLowerCase().includes(state.data.project.spec.objects[0].toLowerCase())
                 ? state.data.project.task_prompt
                 : null
             } activity={activity} sel={sel} />

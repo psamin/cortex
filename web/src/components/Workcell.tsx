@@ -103,11 +103,14 @@ export function Footprint({ keys, tone = "servo" }: { keys: string[]; tone?: "se
   );
 }
 
+/** "cube left, dim light": the condition in plain words. */
+export const conditionWords = (c: Condition, sep = ", ") => `cube ${c.cube_region}${sep}${c.lighting} light`;
+
 export function ConditionLabel({ c, className }: { c: Condition; className?: string }) {
   return (
-    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap text-xs capitalize text-ink-2", className)}>
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap text-xs text-ink-2", className)}>
       <LightGlyph lighting={c.lighting} />
-      {c.cube_region} · {c.lighting}
+      {conditionWords(c, " · ")}
     </span>
   );
 }

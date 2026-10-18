@@ -687,7 +687,9 @@ export interface PlannerBudget {
 
 // ---------------------------------------------------------------- viewer / pipeline (new endpoints; may 404)
 export interface RemoteRollout {
-  kind: "demo" | "eval";
+  kind: "demo" | "eval" | "attempt";
+  /** failed attempts: why it failed (may be technical) */
+  failure?: string | null;
   id: string;
   label: string;
   success: boolean | null;

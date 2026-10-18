@@ -3,11 +3,37 @@ import { CircleDashed, Columns2, Pause, Play, Radio, VideoOff } from "lucide-rea
 import { api } from "../api/client";
 import { isJobActive, useJobs } from "../api/events";
 import type { Job } from "../api/types";
-import { LightGlyph } from "../components/Workcell";
+import { conditionWords } from "../components/Workcell";
 import { cn } from "../lib/format";
-import { useRolloutVideo, useRollouts, type Camera, type CameraInfo, type Rollout } from "./rollouts";
+import { useRolloutVideo, useRollouts, type Camera, type CameraInfo, type Rollout, type RolloutOrigin } from "./rollouts";
 
-export type RolloutFilter = "all" | "demo" | "eval" | "failed";
+export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
+
+const ORIGIN_LABEL: Record<RolloutOrigin, string> = {
+  agent: "Agent",
+  oracle: "Scripted oracle",
+  imported: "Human imported",
+  teleop: "Real teleop",
+  eval: "Evaluations",
+  attempt: "Failed attempts",
+};
+const ORIGIN_ORDER: RolloutOrigin[] = ["agent", "oracle", "imported", "teleop", "eval", "attempt"];
+
+/** ✓ / ✗ failure / "not judged" */
+const mark = (r: Rollout) => (r.success === null ? "not judged" : r.success ? "✓" : `✗${r.failureMode ? ` ${r.failureMode.replace(/_/g, " ")}` : ""}`);
+
+/** "#27 · Claude Code · cube center, bright light · ✓" */
+function chipText(r: Rollout): string {
+  const num = r.kind === "demo" ? r.label.replace(/^Demo\s*/, "") : r.kind === "attempt" ? "Attempt" : r.who;
+  const who =
+    r.origin === "agent" ? r.who.replace(/ agent$/, "") : r.origin === "oracle" ? "Oracle" : r.origin === "imported" ? "Human (imported)" : r.origin === "teleop" ? "Human (teleop)" : r.origin === "attempt" ? r.who.replace(/ agent$/, "") : "";
+  const where = r.imported ? shortSource(r.source) : r.condition ? conditionWords(r.condition) : "";
+  return [num, who, where, mark(r)].filter(Boolean).join(" · ");
+}
+const shortSource = (s: string | null) => {
+  const x = (s ?? "imported dataset").replace(/^(hf|upload):/, "");
+  return x.length > 20 ? `${x.slice(0, 19)}…` : x;
+};
 
 export interface ViewerSelection {
   selectedId: string | null;
@@ -50,8 +76,8 @@ export function Viewer({
     let xs = rollouts.data ?? [];
     if (sel.evaluationId) xs = xs.filter((r) => r.evaluationId === sel.evaluationId);
     if (sel.filter === "demo") xs = xs.filter((r) => r.kind === "demo");
-    if (sel.filter === "eval") xs = xs.filter((r) => r.kind === "eval");
-    if (sel.filter === "failed") xs = xs.filter((r) => r.success === false);
+    else if (sel.filter === "failed") xs = xs.filter((r) => r.success === false);
+    else if (sel.filter !== "all") xs = xs.filter((r) => r.origin === sel.filter);
     return xs;
   }, [rollouts.data, sel.filter, sel.evaluationId]);
 
@@ -71,7 +97,10 @@ export function Viewer({
 
   const counts = useMemo(() => {
     const xs = rollouts.data ?? [];
-    return { all: xs.length, demo: xs.filter((r) => r.kind === "demo").length, eval: xs.filter((r) => r.kind === "eval").length, failed: xs.filter((r) => r.success === false).length };
+    const by = Object.fromEntries(ORIGIN_ORDER.map((o) => [o, xs.filter((r) => r.origin === o).length])) as Record<RolloutOrigin, number>;
+    // name the agent chip after its planner when there is only one ("Claude Code agent")
+    const agentNames = [...new Set(xs.filter((r) => r.origin === "agent").map((r) => r.who))];
+    return { all: xs.length, by, agentLabel: agentNames.length === 1 ? agentNames[0] : "Agent" };
   }, [rollouts.data]);
 
   return (
@@ -95,10 +124,9 @@ export function Viewer({
           <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-thin">
             {(
               [
-                ["all", "All", counts.all],
-                ["demo", "Demos", counts.demo],
-                ["eval", "Eval rollouts", counts.eval],
-                ["failed", "Failures", counts.failed],
+                ["all", "All", counts.all] as const,
+                ...ORIGIN_ORDER.filter((o) => counts.by[o] > 0 || sel.filter === o).map((o) => [o, o === "agent" ? counts.agentLabel : ORIGIN_LABEL[o], counts.by[o]] as const),
+                ...(sel.filter === "failed" || sel.filter === "demo" ? [[sel.filter, sel.filter === "failed" ? "Failures" : "Demos", filtered.length] as const] : []),
               ] as const
             ).map(([k, label, n]) => (
               <button
@@ -179,7 +207,10 @@ export function Viewer({
       {/* selector */}
       {!showLive && filtered.length > 0 && (
         <div className="border-t border-white/[.07]">
-          <div className="flex gap-1.5 overflow-x-auto px-4 py-2.5 scroll-thin">
+          <p className="px-4 pt-2 text-[11px] text-white/40">
+            Newest first · ✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict
+          </p>
+          <div className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 pt-1.5 scroll-thin">
             {filtered.slice(0, 80).map((r) => (
               <button
                 key={r.id}
@@ -191,14 +222,7 @@ export function Viewer({
                 )}
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", r.success === null ? "bg-white/30" : r.success ? "bg-[#4ac480]" : "bg-[#ec6060]")} />
-                <span className="whitespace-nowrap">{r.kind === "demo" ? r.label : `Eval · ${r.label}`}</span>
-                {r.imported && <span className="whitespace-nowrap rounded bg-white/[.08] px-1.5 text-[10.5px] text-white/60">human · imported</span>}
-                {r.condition && !r.imported && (
-                  <span className="inline-flex items-center gap-1 whitespace-nowrap capitalize text-white/40">
-                    <LightGlyph lighting={r.condition.lighting} />
-                    {r.condition.cube_region}
-                  </span>
-                )}
+                <span className="whitespace-nowrap">{chipText(r)}</span>
               </button>
             ))}
           </div>
@@ -424,33 +448,21 @@ function Hud({
         </div>
       </div>
       {rollout && (
-        <div className="flex shrink-0 flex-col items-end gap-1 pt-0.5 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-white/60">
-              {rollout.kind === "demo" ? "Demonstration" : "Evaluation rollout"}
-              {rollout.policy ? ` · ${rollout.policy}` : ""}
-            </span>
-            {rollout.imported && <span className="rounded-full bg-white/[.1] px-2 py-0.5 font-medium text-white/80">Human demo · imported</span>}
-            {rollout.success !== null && (
-              <span className={cn("rounded-full px-2 py-0.5 font-medium", rollout.success ? "bg-[#4ac480]/15 text-[#7ddca5]" : "bg-[#ec6060]/15 text-[#f39a9a]")}>
-                {rollout.success ? "Success · simulator-verified" : `Failed${rollout.failureMode ? ` · ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
-              </span>
-            )}
-          </div>
-          {rollout.imported ? (
-            <span className="max-w-[360px] truncate text-white/50" title={[rollout.source, rollout.task].filter(Boolean).join(" · ")}>
-              {rollout.source ?? "imported dataset"}
-              {rollout.task ? ` · “${rollout.task}”` : ""} · no simulator verdict
-            </span>
-          ) : rollout.condition && (
-            <span className="inline-flex items-center gap-1.5 text-white/50">
-              <LightGlyph lighting={rollout.condition.lighting} />
-              <span className="capitalize">
-                cube {rollout.condition.cube_region} · {rollout.condition.lighting} light
-              </span>
-              {rollout.seed !== null && <span className="font-mono text-white/35">seed {rollout.seed}</span>}
-            </span>
-          )}
+        <div className="flex min-w-0 shrink-0 flex-col items-end gap-0.5 pt-0.5 text-right text-xs">
+          <span className="text-white/80">
+            Recorded by <span className="font-medium text-white">{rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who}</span>
+          </span>
+          <span className="max-w-[420px] truncate text-white/55" title={[rollout.source, rollout.task].filter(Boolean).join(" · ") || undefined}>
+            {rollout.imported ? `${rollout.source ?? "imported dataset"}${rollout.task ? ` · “${rollout.task}”` : ""}` : rollout.condition ? conditionWords(rollout.condition) : ""}
+          </span>
+          <span className={cn("font-medium", rollout.success === null ? "text-white/60" : rollout.success ? "text-[#7ddca5]" : "text-[#f39a9a]")}>
+            {rollout.success === null ? "Not judged by the simulator" : rollout.success ? "Success, verified by the simulator" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
+          </span>
+          <span className="font-mono text-[11px] text-white/40">
+            {[rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null, rollout.frames ? `${rollout.frames} frames` : null, rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
           {cam && (
             <span className="max-w-[360px] truncate text-white/40" title={cam.detail}>
               {cam.label}
