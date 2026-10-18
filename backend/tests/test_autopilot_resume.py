@@ -10,19 +10,29 @@ from cortex.models import (
 from cortex.services import agent_orchestrator as orch
 from cortex.services import autopilot
 from cortex.services.agent_collection_service import _empty_totals
+from cortex.services.jobs import Job, JobManager
 
 
-async def test_autopilot_resumes_an_interrupted_collection(tmp_path):
+@pytest.mark.parametrize("persisted", [False, True], ids=["job_never_persisted", "job_restored_as_interrupted"])
+async def test_autopilot_resumes_an_interrupted_collection(tmp_path, persisted):
     ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
     p = await orch.create_project(ctx, CreateProjectRequest(
         task_prompt="pick up the cube and place it in the bowl", demo_budget=3,
         autopilot=AutopilotPolicy(collector="oracle", max_iterations=1, demos_per_round=2)))
-    # State as a crashed backend left it: a collection 'running' under a job this process never saw.
-    col = AgentCollection(project_id=p.id, collector="oracle", status="running", job_id="job_from_dead_process",
+    job_id = "job_from_dead_process"
+    if persisted:  # the job was on disk as running; a new JobManager (the restart) restores it as failed
+        job = Job(kind="agent_collection", project_id=p.id, status="running")
+        ctx.jobs.jobs[job.id] = job
+        ctx.jobs._save()
+        ctx.jobs = JobManager(ctx.bus, persist=tmp_path / "jobs.json")
+        job_id = job.id
+        assert ctx.jobs.get(job_id).status == "failed"
+    # State as a crashed backend left it: a collection 'running' under a job that will never finish.
+    col = AgentCollection(project_id=p.id, collector="oracle", status="running", job_id=job_id,
                           request=StartAgentCollectionRequest(num_demos=2, collector="oracle"), totals=_empty_totals(0))
     await ctx.repo.save("agent_collections", col)
     run = AutopilotRun(project_id=p.id, collector="oracle", state="AGENT_COLLECTING", iteration=1,
-                       context={"collection_id": col.id, "collection_job_id": "job_from_dead_process"})
+                       context={"collection_id": col.id, "collection_job_id": job_id})
     await ctx.repo.save("autopilot_runs", run)
 
     assert await autopilot.resume_all(ctx) == 1

@@ -175,7 +175,8 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
             elif st == "AGENT_COLLECTING":
                 status = await _wait_job(ctx, c.get("collection_job_id"))
                 col = await agent_collection_service.get_collection(ctx, c["collection_id"])
-                if status == "lost" and col.status == "running":
+                # A job lost or restored as interrupted after a restart never finishes its collection.
+                if status != "succeeded" and col.status == "running":
                     col.status = "failed"
                     col.error = "interrupted by backend restart; kept the attempts recorded before it"
                     await ctx.repo.save("agent_collections", col)
