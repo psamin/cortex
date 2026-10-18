@@ -18,6 +18,7 @@ Loads the newest checkpoint per task from <job_dir>/output/<task>/ and that task
 """
 
 import base64
+import faulthandler
 import io
 import json
 import sys
@@ -25,7 +26,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import quote
+from urllib.parse import parse_qs, quote, urlparse
 
 import numpy as np
 import torch
@@ -37,6 +38,7 @@ CAMS = {"jenga": ["main", "secondary_0", "secondary_1"], "conveyor": ["top", "wr
         "surgical": ["front", "side"], "needle": ["external", "wrist"]}
 STAGE = {"jenga": "jenga", "conveyor": "conveyor", "suture": "needle"}
 JOINTS = ["pan", "lift", "elbow", "wrist flex", "wrist roll", "gripper"]
+faulthandler.enable(all_threads=True)  # a native crash prints every thread's Python stack to the log
 LOCK = threading.Lock()  # one GPU, one stream at a time
 # The newest stream wins: a new request bumps the generation, the running stream sees it on its next frame,
 # stops and releases the lock (abandoned streams used to hold it until their episode ended).
@@ -46,34 +48,29 @@ GEN = {"n": 0}
 def _newer(mine: int) -> bool:
     return GEN["n"] != mine
 
-job_dir, data_root, port = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
-POLICIES = {}
-for task, stage in STAGE.items():
-    cks = sorted((c for c in (job_dir / "output" / task).glob("*_[0-9]*") if (c / "config.json").exists()),
-                 key=lambda p: p.stat().st_mtime)  # skip half-copied checkpoints
-    if not cks or not (data_root / stage).exists():
-        continue
-    ck = cks[-1]
-    if task == "suture" and not ck.name.startswith("needle"):
-        stage = "surgical"  # only the first stage finished: serve that one honestly
-    policy = get_policy_class(json.loads((ck / "config.json").read_text())["type"]).from_pretrained(str(ck))
-    policy = policy.to("cuda").eval()
-    pre, post = make_pre_post_processors(policy.config, pretrained_path=str(ck),
-                                         preprocessor_overrides={"device_processor": {"device": "cuda"}})
-    split = json.loads((data_root / "split.json").read_text())[stage]
-    POLICIES[task] = {"policy": policy, "pre": pre, "post": post, "stage": stage, "checkpoint": ck.name,
-                      "held_out": split["held_out"],
-                      "rename": {f"observation.images.{c}": f"observation.images.camera{i + 1}"
-                                 for i, c in enumerate(CAMS[stage])}}
-    print(f"[serve] {task}: {ck.name} on {stage}, held-out episodes {split['held_out']}", flush=True)
+POLICIES: dict = {}
+SIMS = None  # serve_sim.Sims: the sim-trained policies, in their own process
 
 
-SIM: dict = {}
-if len(sys.argv) > 4 and Path(sys.argv[4]).is_dir():
-    import serve_sim
-
-    SIM = serve_sim.load(Path(sys.argv[4]))
-    serve_sim.start_worker(SIM)
+def load_policies(job_dir: Path, data_root: Path) -> None:
+    for task, stage in STAGE.items():
+        cks = sorted((c for c in (job_dir / "output" / task).glob("*_[0-9]*") if (c / "config.json").exists()),
+                     key=lambda p: p.stat().st_mtime)  # skip half-copied checkpoints
+        if not cks or not (data_root / stage).exists():
+            continue
+        ck = cks[-1]
+        if task == "suture" and not ck.name.startswith("needle"):
+            stage = "surgical"  # only the first stage finished: serve that one honestly
+        policy = get_policy_class(json.loads((ck / "config.json").read_text())["type"]).from_pretrained(str(ck))
+        policy = policy.to("cuda").eval()
+        pre, post = make_pre_post_processors(policy.config, pretrained_path=str(ck),
+                                             preprocessor_overrides={"device_processor": {"device": "cuda"}})
+        split = json.loads((data_root / "split.json").read_text())[stage]
+        POLICIES[task] = {"policy": policy, "pre": pre, "post": post, "stage": stage, "checkpoint": ck.name,
+                          "held_out": split["held_out"],
+                          "rename": {f"observation.images.{c}": f"observation.images.camera{i + 1}"
+                                     for i, c in enumerate(CAMS[stage])}}
+        print(f"[serve] {task}: {ck.name} on {stage}, held-out episodes {split['held_out']}", flush=True)
 
 
 def act(p: dict, obs: dict, task_text: str) -> tuple[np.ndarray, float]:
@@ -125,7 +122,7 @@ class Handler(BaseHTTPRequestHandler):
                 t: {"checkpoint": p["checkpoint"], "stage": p["stage"], "held_out": p["held_out"]}
                 for t, p in POLICIES.items()}, "sim": {
                 t: {k: p[k] for k in ("variant", "step", "success_rate", "eval_episodes", "eval_seeds", "instruction")}
-                for t, p in SIM.items()}}).encode()
+                for t, p in (SIMS.info if SIMS else {}).items()}}).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
             self.end_headers()
@@ -142,8 +139,9 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(body)
             return
-        if len(parts) == 3 and parts[0] == "sim" and parts[1] in SIM and parts[2].isdigit():
-            return self.stream_sim(SIM[parts[1]], int(parts[2]))
+        if len(parts) == 3 and parts[0] == "sim" and SIMS and parts[1] in SIMS.info and parts[2].isdigit():
+            view = parse_qs(urlparse(self.path).query).get("view", ["both"])[0]
+            return self.stream_sim(SIMS.info[parts[1]], int(parts[2]), view)
         if len(parts) == 3 and parts[0] == "live" and parts[1] in POLICIES:
             return self.stream(POLICIES[parts[1]], parts[1], int(parts[2]))
         self.send_error(404)
@@ -175,29 +173,22 @@ class Handler(BaseHTTPRequestHandler):
                     return
                 time.sleep(max(0.0, 1 / 30 - (time.perf_counter() - t0)))  # real time (30 fps recordings)
 
-    def stream_sim(self, p: dict, seed: int) -> None:
+    def stream_sim(self, p: dict, seed: int, view: str) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
-        frames, cancel = serve_sim.submit(p["task"], seed)  # runs on the sim worker thread; cancels any older run
-        while True:
-            try:
-                item = frames.get(timeout=120)
-            except Exception:  # noqa: BLE001 - nothing for 2 minutes: give up on this run
-                cancel.set()
-                return
-            if item is None:
-                return
-            jpg, step, ms, ok = item
-            head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
-                    f"X-Frame: {step}/{p['max_steps']}\r\nX-Inference-Ms: {ms:.2f}\r\n"
-                    f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
-                    f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
-            try:
+        run = SIMS.run(p["task"], seed, view)  # in the sim process; any older run stops
+        try:
+            for jpg, step, ms, ok in run:
+                head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
+                        f"X-Frame: {step}/{p['max_steps']}\r\nX-Inference-Ms: {ms:.2f}\r\n"
+                        f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
+                        f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
                 self.wfile.write(head + jpg + b"\r\n")
-            except (BrokenPipeError, ConnectionResetError):
-                cancel.set()
-                return
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        finally:
+            run.close()  # stops the run if the viewer left
 
     def do_POST(self):
         if self.path != "/act":
@@ -217,5 +208,12 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
 
-print(f"[serve] READY port={port} policies={list(POLICIES)} sim={list(SIM)}", flush=True)
-ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
+if __name__ == "__main__":  # the sim process (spawn) imports this file too: only the server runs this
+    job_dir, data_root, port = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
+    load_policies(job_dir, data_root)
+    if len(sys.argv) > 4 and Path(sys.argv[4]).is_dir():
+        import serve_sim
+
+        SIMS = serve_sim.Sims(Path(sys.argv[4]))
+    print(f"[serve] READY port={port} policies={list(POLICIES)} sim={list(SIMS.info if SIMS else [])}", flush=True)
+    ThreadingHTTPServer(("0.0.0.0", port), Handler).serve_forever()
