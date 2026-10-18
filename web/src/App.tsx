@@ -10,6 +10,8 @@ import { ImprovePage } from "./pages/improve/Improve";
 import { ProjectChatPage } from "./chat/ProjectChatPage";
 import { RobotPage } from "./pages/Robot";
 import { SetupPage } from "./pages/Setup";
+import { useThemeSync } from "./lib/theme";
+import { useGlowPointer } from "./components/ui/spotlight-card";
 
 // Public landing page at /. Lazy so the studio bundle never pulls in its fonts or sections; the landing page in turn
 // lazy-loads its 3D hero and falls back to a still image when three.js or WebGL is missing (see landing/hero/HeroSection).
@@ -30,12 +32,12 @@ class LandingFallback extends Component<{ children: ReactNode }, { failed: boole
   render() {
     if (!this.state.failed) return this.props.children;
     return (
-      <main className="flex min-h-full flex-col items-start justify-center gap-4 bg-white px-6 py-24 text-[#171717] sm:px-10">
+      <main className="flex min-h-full flex-col items-start justify-center gap-4 bg-bench px-6 py-24 text-ink sm:px-10">
         <h1 className="text-2xl font-medium">Cortex</h1>
-        <p className="max-w-md text-[15px] leading-relaxed text-[#555]">
+        <p className="max-w-md text-[15px] leading-relaxed text-ink-2">
           The landing page failed to render. The studio is unaffected.
         </p>
-        <Link to="/studio" className="inline-flex h-11 items-center rounded-full bg-[#171717] px-6 text-[13.5px] font-medium text-white">
+        <Link to="/studio" className="inline-flex h-11 items-center rounded-full bg-ink px-6 text-[13.5px] font-medium text-bench">
           Open studio
         </Link>
       </main>
@@ -44,6 +46,8 @@ class LandingFallback extends Component<{ children: ReactNode }, { failed: boole
 }
 
 export function App() {
+  useThemeSync();
+  useGlowPointer();
   return (
     <Routes>
       <Route

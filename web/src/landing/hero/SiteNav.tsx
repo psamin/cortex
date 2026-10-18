@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import { BRAND, STUDIO_ENTRY } from "../brand";
 import { scrollToSection } from "../scroll";
+import { ThemeToggle } from "../../components/ThemeToggle";
 
 const LINKS: [string, string][] = [
   ["How it works", "platform"],
@@ -35,7 +36,8 @@ export function SiteNav() {
             </li>
           ))}
         </ul>
-        <div className="flex items-center gap-5">
+        <div className="flex items-center gap-3">
+          <ThemeToggle />
           <Link
             to={STUDIO_ENTRY}
             className="inline-flex h-9 items-center rounded-full bg-[#171717] px-4 kn-sans text-[12.5px] font-medium text-white hover:bg-black"
