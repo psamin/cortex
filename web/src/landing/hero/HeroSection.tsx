@@ -50,6 +50,7 @@ export function HeroSection({ copy }: { copy: ReactNode }) {
       aria-labelledby="hero-title"
       className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-bench lg:block lg:h-[100svh] lg:min-h-[720px]"
     >
+      <div aria-hidden className="kn-splash" />
       {/* Copy layer (left on desktop, top on mobile). Plain DOM; never waits for WebGL. */}
       <div className="relative z-20 lg:absolute lg:inset-y-0 lg:left-0 lg:w-[46%]">{copy}</div>
 

@@ -73,3 +73,51 @@
 .kn-gutter { padding-left: 1.5rem; padding-right: 1.5rem; }
 @media (min-width: 640px) { .kn-gutter { padding-left: 2.5rem; padding-right: 2.5rem; } }
 @media (min-width: 1024px) { .kn-gutter { padding-left: clamp(2.5rem, 5.5vw, 6rem); padding-right: clamp(2.5rem, 5.5vw, 6rem); } }
+
+/*
+  Splashes of colour (owner: "it looks slightly too white"). Soft, blurred washes behind the hero and the final
+  call to action, and gradient rule lines on section labels. Kept low-contrast so the line art stays the subject.
+*/
+:root,
+[data-theme="light"] {
+  --kn-splash-mint: 122 196 170;
+  --kn-splash-peach: 248 190 150;
+  --kn-splash-sky: 150 190 235;
+  --kn-splash-a: 0.42;
+}
+[data-theme="dark"] {
+  --kn-splash-mint: 70 140 120;
+  --kn-splash-peach: 160 105 70;
+  --kn-splash-sky: 70 105 150;
+  --kn-splash-a: 0.22;
+}
+.kn-splash {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(42% 46% at 72% 52%, rgb(var(--kn-splash-mint) / var(--kn-splash-a)), transparent 70%),
+    radial-gradient(30% 34% at 14% 18%, rgb(var(--kn-splash-peach) / calc(var(--kn-splash-a) * 0.8)), transparent 70%),
+    radial-gradient(34% 30% at 46% 96%, rgb(var(--kn-splash-sky) / calc(var(--kn-splash-a) * 0.75)), transparent 70%);
+  filter: blur(24px);
+}
+.kn-splash-band {
+  position: relative;
+  isolation: isolate;
+}
+.kn-splash-band::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background:
+    radial-gradient(40% 70% at 18% 40%, rgb(var(--kn-splash-mint) / calc(var(--kn-splash-a) * 0.7)), transparent 70%),
+    radial-gradient(36% 70% at 86% 60%, rgb(var(--kn-splash-peach) / calc(var(--kn-splash-a) * 0.7)), transparent 70%);
+  filter: blur(30px);
+}
+.kn-page .kn-label-rule::before {
+  height: 2px;
+  background: linear-gradient(90deg, rgb(var(--servo)), rgb(var(--kn-splash-peach)));
+}
