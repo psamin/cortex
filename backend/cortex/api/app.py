@@ -932,3 +932,69 @@ async def call_tool(name: str, args: dict[str, Any], request: Request):
         return await orch.call_tool(ctx(), name, args, who)
     except ValidationError as e:
         raise HTTPException(422, e.errors(include_url=False)) from e
+
+
+# ------------------------------------------------------------------ RL sandboxes (#80)
+class RLProposeReq(BaseModel):
+    checkpoint_id: str | None = None
+    max_sandboxes: int = 3
+    budget: dict[str, Any] | None = None
+
+
+class RLAcceptReq(BaseModel):
+    ids: list[str]
+    budget_cap: float = 0.0
+    max_cpu_hours: float | None = None
+
+
+@app.get("/api/projects/{pid}/rl/weaknesses")
+async def rl_weaknesses(pid: str, checkpoint_id: str | None = None, target: float = 0.8):
+    from ..services import rl_service
+    ws = await rl_service.weaknesses(ctx(), await orch.get_project(ctx(), pid), checkpoint_id, target)
+    return [w.model_dump(mode="json") for w in ws]
+
+
+@app.post("/api/projects/{pid}/rl/sandboxes")
+async def rl_propose(pid: str, req: RLProposeReq, request: Request):
+    from ..rl import SandboxBudget
+    from ..services import rl_service
+    budget = SandboxBudget.model_validate(req.budget) if req.budget else None
+    sbs = await rl_service.propose_sandboxes(ctx(), await orch.get_project(ctx(), pid), budget, req.checkpoint_id,
+                                             req.max_sandboxes, actor(request))
+    return [rl_service.proposal_view(s) for s in sbs]
+
+
+@app.post("/api/projects/{pid}/rl/sandboxes/accept")
+async def rl_accept(pid: str, req: RLAcceptReq, request: Request):
+    from ..services import rl_service
+    sbs = await rl_service.accept(ctx(), await orch.get_project(ctx(), pid), req.ids, req.budget_cap,
+                                  req.max_cpu_hours, actor(request))
+    return [rl_service.status_view(s) for s in sbs]
+
+
+@app.get("/api/projects/{pid}/rl/sandboxes")
+async def rl_list(pid: str):
+    from ..services import rl_service
+    return [rl_service.status_view(s) for s in await rl_service.list_sandboxes(ctx(), pid)]
+
+
+@app.get("/api/rl/sandboxes/{sid}")
+async def rl_get(sid: str):
+    from ..services import rl_service
+    return rl_service.status_view(await rl_service.get(ctx(), sid))
+
+
+@app.post("/api/rl/sandboxes/{sid}/stop")
+async def rl_stop(sid: str, request: Request):
+    from ..services import rl_service
+    return rl_service.status_view(await rl_service.stop(ctx(), sid, actor(request)))
+
+
+@app.get("/api/rl/sandboxes/{sid}/live.jpg")
+async def rl_live(sid: str):
+    from ..services import rl_service
+    sb = await rl_service.get(ctx(), sid)
+    path = ctx().local(f"projects/{sb.project_id}/rl/{sb.id}/live/live.jpg")
+    if not path.exists():
+        raise HTTPException(404, "no live frame yet")
+    return Response(path.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})

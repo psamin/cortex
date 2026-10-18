@@ -616,6 +616,93 @@ const TOOLS: Def[] = [
     }),
     annotations: READ,
   },
+  // ---------------------------------------------------------------- RL sandboxes (#80)
+  {
+    name: "get_policy_weaknesses",
+    title: "Get policy weaknesses",
+    description:
+      "Where the trained policy is weak, measured from its latest sim evaluation (never the scripted oracle). For each " +
+      "condition below target: success rate with a Wilson 95% interval and n, failure modes from sim telemetry " +
+      "(grasp_failed, dropped_before_target, released_outside_target), start-state clusters, and VLM hypotheses " +
+      "(unverified). Ranked by the gap that holds even at the interval's upper bound. Needs a finished " +
+      "cortex.evaluate_learned_policy run.",
+    inputSchema: z.object({
+      project_id: projectId,
+      checkpoint_id: z.string().optional().describe("A trained checkpoint (ck_...); default: the latest evaluated one"),
+      target: z.number().min(0).max(1).optional().describe("Success rate a condition should reach (default 0.8)"),
+    }),
+    annotations: READ,
+  },
+  {
+    name: "propose_rl_sandboxes",
+    title: "Propose RL sandboxes",
+    description:
+      "Propose one RL sandbox per top weakness. Method cem_skill: CEM tunes 4-5 corrections (grasp offset, depth, yaw, " +
+      "close timing, carry/release height) of the validated IK pick-and-place skill under domain randomization " +
+      "centred on the weak condition; successful rollouts become targeted demos for retraining ACT. Each sandbox runs " +
+      "a measured pilot as a background job (base skill + a short CEM pilot). Once its status is 'ready' it reports: " +
+      "pilot{n, successes, wilson_95}, predicted_sandbox_success, predicted_policy_uplift, predicted_regression_elsewhere " +
+      "(each {mean, ci90, source: measured|prior|learned}), p_improve_ge_delta, uplift_per_hour, cost{episodes, " +
+      "cpu_hours, gpu_hours, wall_clock_est_min, usd} and assumptions[]. Everything predicted is an estimate. " +
+      "Pilots take ~1-5 min; poll cortex.get_rl_sandbox_status.",
+    inputSchema: z.object({
+      project_id: projectId,
+      checkpoint_id: z.string().optional(),
+      max_sandboxes: z.number().int().min(1).max(6).optional().describe("Default 3"),
+      budget: z
+        .object({
+          iterations: z.number().int().min(1).max(15).optional(),
+          population: z.number().int().min(4).max(128).optional(),
+          pilot_episodes: z.number().int().min(4).max(100).optional(),
+          demos: z.number().int().min(0).max(200).optional(),
+          heldout_episodes: z.number().int().min(5).max(200).optional(),
+          max_parallel: z.number().int().min(1).max(16).optional(),
+        })
+        .optional()
+        .describe("Overrides of the sandbox budget (defaults: 12 iterations, population 32, 30 demos)"),
+      wait_s: waitS(300, "Pilots take about 1-5 minutes."),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "accept_rl_sandboxes",
+    title: "Accept RL sandboxes",
+    description:
+      "Start sandboxes whose pilot finished (status 'ready'). Local CPU sandboxes cost $0, and you may accept them " +
+      "within budget_cap and the project's standing budget. GPU or paid sandboxes come back approval_required: a " +
+      "human approves those in the Cortex studio. Each sandbox trains, evaluates base vs tuned skill on matched " +
+      "held-out seeds (McNemar), then saves successful demos with provenance rl_sandbox:<id>.",
+    inputSchema: z.object({
+      project_id: projectId,
+      ids: z.array(z.string()).min(1).describe("Sandbox ids (rl_...) from cortex.propose_rl_sandboxes"),
+      budget_cap: z.number().min(0).describe("The most these sandboxes may cost, in USD (local CPU = $0)"),
+      max_cpu_hours: z.number().positive().optional().describe("Optional cap on the estimated CPU hours"),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "get_rl_sandbox_status",
+    title: "Get RL sandbox status",
+    description:
+      "Live progress of one sandbox (sandbox_id) or all of a project's (project_id): status, phase (pilot | train | " +
+      "heldout | demos), CEM iteration, episodes, success with its interval, elite parameters, the current " +
+      "randomization ranges (they widen once the tuned skill passes 80%), elapsed time and cost so far. When it has " +
+      "finished: the measured result (base vs tuned success on matched held-out seeds, McNemar p, stop reason, demos).",
+    inputSchema: z.object({
+      project_id: z.string().optional().describe("All sandboxes of this project"),
+      sandbox_id: z.string().optional().describe("One sandbox (rl_...)"),
+    }),
+    annotations: READ,
+  },
+  {
+    name: "stop_rl_sandbox",
+    title: "Stop RL sandbox",
+    description:
+      "Stop a sandbox. A proposed or ready one is dismissed and a piloting one is cancelled. A running one stops " +
+      "after its current CEM iteration, still evaluates what it has on held-out seeds, and reports why it stopped.",
+    inputSchema: z.object({ sandbox_id: z.string().describe("Sandbox id (rl_...)") }),
+    annotations: WRITE,
+  },
 ];
 
 /** Registers every backend tool as `cortex.<name>`. */
