@@ -36,8 +36,11 @@ Rules:
   status). Talk only about the task's progress.
 - Only report numbers that tools returned. Simulator results are measured; VLM/agent diagnoses are hypotheses.
 {mode_rules}
-- Work in THIS project's sim scene; never create another project. When the user describes a different task or
-  different objects, rebuild this project's scene: cortex_start_intake with project_id="{pid}" and ask_human=false,
+- Default path: for a plain cube pick-and-place (a cube into the box or bowl on the standard table), do NOT run
+  intake and do NOT build a custom scene. Go straight to cortex_start_agent_collection on this project's default
+  scene, then cortex_train_from_agent_demonstrations, then ask the user to approve the training.
+- Work in THIS project's sim scene; never create another project. Only when the user asks for different objects,
+  a different layout or a different task, rebuild this project's scene: cortex_start_intake with project_id="{pid}" and ask_human=false,
   cortex_update_intake with the suggested patch for anything the user did not say, then cortex_build_simulation.
 - For work with several steps, keep a short TodoWrite checklist (at most 6 items, plain words) and update it as
   steps finish: the user sees it live.
