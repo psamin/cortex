@@ -52,6 +52,8 @@ class Settings(BaseSettings):
     cortex_approval_secret: str | None = None
     # Shared secret between the hosted MCP server and this backend (when tunneled)
     cortex_mcp_key: str | None = None
+    # Real SO-101 arm: set only on the machine wired to the robot (spec section 5)
+    cortex_enable_hardware: bool = False
 
     @property
     def insforge_enabled(self) -> bool:

@@ -109,7 +109,7 @@ async def _404(_, e: KeyError):
 @app.exception_handler(PermissionError)
 async def _403(_, e: PermissionError):
     return JSONResponse({"detail": str(e), "code": getattr(e, "code", "approval_required"),
-                         "approval_required": True}, 403)
+                         "approval_required": getattr(e, "approval_required", True)}, 403)
 
 
 @app.exception_handler(RuntimeError)
@@ -548,6 +548,50 @@ async def import_upload(pid: str, request: Request, max_episodes: int = 10):
     job = await import_service.start_import(ctx(), await orch.get_project(ctx(), pid), {"path": str(root)},
                                             max(1, min(max_episodes, 50)), actor(request))
     return job.model_dump()
+
+
+# ------------------------------------------------------------------ real SO-101 arm (local studio only)
+def _local_human(request: Request) -> None:
+    """Hardware endpoints are never tools: agents and remote callers cannot reach them."""
+    from ..hardware import setup as hw_setup
+
+    remote = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for")
+    if remote or request.client is None or request.client.host not in LOCAL:
+        raise hw_setup.HardwareRefused("Real-robot controls are only available in the local studio.")
+
+
+@app.get("/api/hardware")
+async def hardware_status():
+    from ..hardware import setup as hw
+    return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
+
+
+@app.put("/api/hardware/config")
+async def hardware_config(request: Request):
+    from ..hardware import setup as hw
+    _local_human(request)
+    hw.save_config(ctx().data_dir, hw.HardwareConfig.model_validate(await request.json()))
+    await ctx().audit(actor(request), "hardware_config", None, {}, "ok", "hardware setup saved; disarmed")
+    return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
+
+
+@app.post("/api/hardware/arm")
+async def hardware_arm(request: Request):
+    from ..hardware import setup as hw
+    _local_human(request)
+    a = hw.arm(settings().cortex_enable_hardware, hw.ArmRequest.model_validate(await request.json()))
+    await ctx().audit(actor(request), "hardware_arm", None, {"operator": a.operator}, "ok",
+                      f"armed until {a.expires_at.isoformat()}")
+    return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
+
+
+@app.post("/api/hardware/disarm")
+async def hardware_disarm(request: Request):
+    from ..hardware import setup as hw
+    _local_human(request)
+    hw.disarm()
+    await ctx().audit(actor(request), "hardware_disarm", None, {}, "ok", "disarmed")
+    return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
 
 
 # ------------------------------------------------------------------ studio read models
