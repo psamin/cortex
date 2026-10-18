@@ -8,26 +8,28 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
-import { AlertTriangle, CircleDashed, PlugZap, X } from "lucide-react";
+import { CircleDashed, PlugZap, X } from "lucide-react";
 import { ApiError, API_BASE } from "../api/client";
 import type { JobStatus } from "../api/types";
 import { cn, errorMessage } from "../lib/format";
+import { IsoIcon, SketchScene, type IsoIconName } from "../sketch";
 
 // ------------------------------------------------------------------ Button
 type BtnVariant = "primary" | "secondary" | "ghost" | "danger";
 type BtnSize = "sm" | "md";
 
+// Kinetic pills: primary is a black pill, secondary a white pill with a hairline. Both sit on an
+// isometric base plate that compresses on press (.sk-pill in sketch/sketch.css).
 const btnBase =
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded font-medium select-none " +
-  "transition-[background-color,color,box-shadow,transform] duration-150 ease-out active:scale-[0.97] " +
-  "disabled:opacity-40 disabled:pointer-events-none";
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium select-none " +
+  "transition-colors duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none";
 const btnVariants: Record<BtnVariant, string> = {
-  primary: "bg-servo text-servo-ink hover:bg-servo/90 shadow-[inset_0_1px_0_rgba(255,255,255,.2)]",
-  secondary: "bg-rail text-ink hover:bg-rail/70 shadow-[0_0_0_1px_var(--line)]",
+  primary: "sk-pill sk-pill-primary",
+  secondary: "sk-pill sk-pill-secondary",
   ghost: "text-ink-2 hover:text-ink hover:bg-rail",
-  danger: "text-fault hover:bg-fault/10 shadow-[0_0_0_1px_rgb(var(--fault)/.35)]",
+  danger: "sk-pill sk-pill-danger",
 };
-const btnSizes: Record<BtnSize, string> = { sm: "h-7 px-2.5 text-xs", md: "h-8 px-3 text-sm" };
+const btnSizes: Record<BtnSize, string> = { sm: "h-7 px-3 text-xs", md: "h-8 px-4 text-[13px]" };
 
 export const Button = forwardRef<
   HTMLButtonElement,
@@ -50,11 +52,11 @@ export const Button = forwardRef<
 // ------------------------------------------------------------------ Badge
 export type Tone = "neutral" | "servo" | "pass" | "fault" | "caution" | "hypothesis" | "fallback";
 const tones: Record<Tone, string> = {
-  neutral: "text-ink-2 bg-rail shadow-[0_0_0_1px_var(--line)]",
-  servo: "text-servo bg-servo/10 shadow-[0_0_0_1px_rgb(var(--servo)/.3)]",
-  pass: "text-pass bg-pass/10 shadow-[0_0_0_1px_rgb(var(--pass)/.25)]",
-  fault: "text-fault bg-fault/10 shadow-[0_0_0_1px_rgb(var(--fault)/.25)]",
-  caution: "text-caution bg-caution/10 shadow-[0_0_0_1px_rgb(var(--caution)/.25)]",
+  neutral: "text-ink-2 bg-plate border border-line-strong",
+  servo: "text-servo bg-plate border border-servo/40",
+  pass: "text-pass bg-plate border border-pass/35",
+  fault: "text-fault bg-plate border border-fault/35",
+  caution: "text-caution bg-plate border border-caution/40",
   hypothesis: "text-ink-2 prov-hypothesis",
   fallback: "text-caution prov-fallback",
 };
@@ -76,7 +78,7 @@ export function Badge({
     <span
       title={title}
       className={cn(
-        "inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-sm px-1.5 text-2xs font-medium",
+        "inline-flex h-5 items-center gap-1 whitespace-nowrap rounded-sm px-1.5 font-mono text-[10px] font-medium uppercase tracking-[0.08em]",
         tones[tone],
         className,
       )}
@@ -105,7 +107,10 @@ export function Panel({
   className,
   bodyClassName,
   id,
+  icon,
 }: {
+  /** Optional isometric glyph before the title (section-header style). */
+  icon?: IsoIconName;
   title?: ReactNode;
   meta?: ReactNode;
   actions?: ReactNode;
@@ -115,17 +120,18 @@ export function Panel({
   id?: string;
 }) {
   return (
-    <section id={id} className={cn("rounded-md bg-plate shadow-[0_0_0_1px_var(--line)]", className)}>
+    <section id={id} className={cn("sk-depth relative rounded bg-plate border border-line-strong", className)}>
       {(title || actions) && (
-        <header className="flex min-h-10 items-center gap-3 border-b border-line-soft px-3.5 py-2">
-          <div className="flex min-w-0 flex-1 items-baseline gap-2">
-            {title && <h2 className="truncate text-sm font-semibold tracking-[-0.005em]">{title}</h2>}
+        <header className="flex min-h-11 items-center gap-3 border-b border-line px-4 py-2">
+          <div className="flex min-w-0 flex-1 items-center gap-2.5">
+            {icon ? <IsoIcon name={icon} size={18} /> : title ? <span aria-hidden className="h-px w-6 shrink-0 bg-ink" /> : null}
+            {title && <h2 className="truncate font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink">{title}</h2>}
             {meta && <span className="truncate text-xs text-ink-3">{meta}</span>}
           </div>
           {actions && <div className="flex shrink-0 items-center gap-1.5">{actions}</div>}
         </header>
       )}
-      <div className={bodyClassName ?? "p-3.5"}>{children}</div>
+      <div className={bodyClassName ?? "p-4"}>{children}</div>
     </section>
   );
 }
@@ -146,7 +152,7 @@ export function SkeletonRows({ rows = 4 }: { rows?: number }) {
 }
 
 export function EmptyState({
-  icon,
+  icon: _icon,
   title,
   children,
   action,
@@ -160,10 +166,11 @@ export function EmptyState({
 }) {
   return (
     <div className={cn("flex flex-col items-center justify-center gap-2 px-6 py-8 text-center", className)}>
-      {icon && <div className="text-ink-4">{icon}</div>}
-      <p className="text-sm font-medium text-ink-2">{title}</p>
-      {children && <p className="max-w-sm text-xs text-ink-3">{children}</p>}
-      {action && <div className="mt-1">{action}</div>}
+      {/* The isometric sketch stands in for the old flat icon (`icon` is still accepted). */}
+      <SketchScene width={200} className="mb-1" />
+      <p className="kn-display text-[22px] text-ink">{title}</p>
+      {children && <p className="max-w-sm text-xs leading-5 text-ink-3">{children}</p>}
+      {action && <div className="mt-2">{action}</div>}
     </div>
   );
 }
@@ -191,10 +198,10 @@ export function ErrorDetails({ detail }: { detail?: string }) {
   if (!detail) return null;
   return (
     <>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="mt-0.5 text-xs text-ink-3 hover:text-ink-2">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="mt-0.5 border-b border-line-strong text-xs text-ink-3 hover:border-ink hover:text-ink">
         {open ? "Hide details" : "Details"}
       </button>
-      {open && <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-rail px-2 py-1.5 font-mono text-[11px] text-ink-3 scroll-thin">{detail}</pre>}
+      {open && <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-line bg-well px-2 py-1.5 font-mono text-[11px] text-ink-3 scroll-thin">{detail}</pre>}
     </>
   );
 }
@@ -232,17 +239,17 @@ export function ErrorState({ error, onRetry, compact }: { error: unknown; onRetr
     <div
       role="alert"
       className={cn(
-        "flex items-start gap-2.5 rounded bg-fault/5 text-sm shadow-[0_0_0_1px_rgb(var(--fault)/.25)]",
+        "flex items-start gap-2.5 rounded border border-fault/30 bg-plate text-sm",
         compact ? "p-2.5" : "p-3.5",
       )}
     >
       {unreachable ? (
         <PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-fault" />
       ) : (
-        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-fault" />
+        <IsoIcon name="warning" size={18} className="mt-px" />
       )}
       <div className="min-w-0 flex-1">
-        <p className="font-medium text-ink">{unreachable ? "Backend unreachable" : "Request failed"}</p>
+        <p className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-fault">{unreachable ? "Backend unreachable" : "Request failed"}</p>
         <p className="mt-0.5 break-words text-xs text-ink-3">
           {unreachable ? (
             <>
@@ -288,8 +295,8 @@ export function inputClass(extra?: string) {
   return cn(hasH ? "" : "h-8", hasW ? "" : "w-full", inputCls, extra);
 }
 export const inputCls =
-  "rounded bg-well px-2.5 text-sm text-ink placeholder:text-ink-4 shadow-[inset_0_0_0_1px_var(--line)] " +
-  "focus:outline-none focus:shadow-[inset_0_0_0_1px_rgb(var(--servo)/.7)]";
+  "rounded-sm border border-line-strong bg-plate px-2.5 text-sm text-ink placeholder:text-ink-4 " +
+  "transition-colors focus:border-servo focus:outline-none";
 
 export const Input = forwardRef<HTMLInputElement, InputHTMLAttributes<HTMLInputElement>>(function Input(
   { className, ...rest },
@@ -314,7 +321,7 @@ const selectChevron = {
 export function Field({ label, hint, children }: { label: string; hint?: ReactNode; children: ReactNode }) {
   return (
     <label className="block space-y-1.5">
-      <span className="block text-xs font-medium text-ink-2">{label}</span>
+      <span className="block font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-3">{label}</span>
       {children}
       {hint && <span className="block text-2xs text-ink-3">{hint}</span>}
     </label>
@@ -339,12 +346,12 @@ export function Toggle({
         aria-hidden
         className={cn(
           "relative mt-0.5 h-4 w-7 shrink-0 rounded-full transition-colors duration-150 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-servo/70",
-          checked ? "bg-servo" : "bg-rail shadow-[inset_0_0_0_1px_var(--line-strong)]",
+          checked ? "bg-servo" : "bg-plate border border-line-strong",
         )}
       >
         <span
           className={cn(
-            "absolute top-0.5 h-3 w-3 rounded-full bg-white shadow transition-transform duration-150 ease-out",
+            "absolute top-0.5 h-3 w-3 rounded-full border border-black/15 bg-white transition-transform duration-150 ease-out",
             checked ? "translate-x-3.5" : "translate-x-0.5",
           )}
         />
@@ -372,7 +379,7 @@ export function Segmented<T extends string>({
   ariaLabel?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={ariaLabel} className="inline-flex rounded bg-well p-0.5 shadow-[inset_0_0_0_1px_var(--line)]">
+    <div role="radiogroup" aria-label={ariaLabel} className="inline-flex rounded-full border border-line-strong bg-plate p-0.5">
       {options.map((o) => (
         <button
           key={o.value}
@@ -381,9 +388,9 @@ export function Segmented<T extends string>({
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
           className={cn(
-            "rounded-sm px-2.5 font-medium capitalize transition-colors duration-100",
+            "rounded-full px-3 font-medium capitalize transition-colors duration-100",
             size === "sm" ? "h-6 text-2xs" : "h-7 text-xs",
-            o.value === value ? "bg-rail text-ink shadow-[0_0_0_1px_var(--line)]" : "text-ink-3 hover:text-ink-2",
+            o.value === value ? "bg-ink text-bench" : "text-ink-3 hover:text-ink",
           )}
         >
           {o.label}
@@ -422,18 +429,18 @@ export function Dialog({
       onClose={onClose}
       onClick={(e) => e.target === ref.current && onClose()}
       style={{ width }}
-      className="enter max-w-[calc(100vw-32px)] rounded-lg bg-plate p-0 text-ink shadow-[0_0_0_1px_var(--line-strong),0_24px_48px_-12px_rgba(0,0,0,.5)]"
+      className="enter max-w-[calc(100vw-32px)] rounded border border-line-strong bg-plate p-0 text-ink"
     >
       {open && (
         <div>
-          <header className="flex items-center justify-between border-b border-line-soft px-4 py-3">
-            <h2 className="text-base font-semibold">{title}</h2>
+          <header className="flex items-center justify-between border-b border-line px-5 py-3.5">
+            <h2 className="kn-display text-[24px]">{title}</h2>
             <button type="button" onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-rail hover:text-ink" aria-label="Close">
               <X className="h-4 w-4" />
             </button>
           </header>
-          <div className="max-h-[70vh] overflow-y-auto px-4 py-4 scroll-thin">{children}</div>
-          {footer && <footer className="flex justify-end gap-2 border-t border-line-soft px-4 py-3">{footer}</footer>}
+          <div className="max-h-[70vh] overflow-y-auto px-5 py-4 scroll-thin">{children}</div>
+          {footer && <footer className="flex justify-end gap-2 border-t border-line px-5 py-3">{footer}</footer>}
         </div>
       )}
     </dialog>
@@ -475,9 +482,9 @@ export function Meter({
       aria-valuemax={1}
       aria-valuenow={v}
       aria-label={label}
-      className={cn("h-1.5 w-full overflow-hidden rounded-full bg-rail", className)}
+      className={cn("h-1 w-full overflow-hidden bg-[var(--line)]", className)}
     >
-      <div className={cn("h-full rounded-full transition-[width] duration-300 ease-out", color)} style={{ width: `${v * 100}%` }} />
+      <div className={cn("h-full transition-[width] duration-300 ease-out", color)} style={{ width: `${v * 100}%` }} />
     </div>
   );
 }
@@ -512,10 +519,10 @@ export function StatusBadge({ status }: { status: JobStatus | string }) {
 
 export function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded-sm bg-rail px-1 font-mono text-2xs text-ink-3 shadow-[0_0_0_1px_var(--line)]">{children}</kbd>
+    <kbd className="rounded-sm border border-line-strong bg-plate px-1 font-mono text-2xs text-ink-3">{children}</kbd>
   );
 }
 
 export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
-  return <div className={cn("text-2xs font-medium uppercase tracking-[0.06em] text-ink-3", className)}>{children}</div>;
+  return <div className={cn("kn-label", className)}>{children}</div>;
 }
