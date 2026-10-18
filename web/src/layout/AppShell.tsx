@@ -65,7 +65,7 @@ function Popover({ button, children, align = "right" }: { button: (open: boolean
   );
 }
 
-/** One quiet pill; the popover names every provider and labels local fallbacks. */
+/** One quiet status pill, no dropdown; fallbacks are named in its tooltip. */
 function HealthSummary() {
   const q = useHealth();
   if (q.isLoading) return <span className="skeleton h-6 w-24 rounded-full" />;
@@ -79,29 +79,13 @@ function HealthSummary() {
   const subs = (["db", "storage", "vlm", "agent", "executor", "training"] as const).map((k) => [k, describeProvider(h[k])] as const);
   const fallbacks = subs.filter(([, d]) => d.fallback).length;
   return (
-    <Popover
-      button={(open) => (
-        <button type="button" className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-ink-3 hover:text-ink", statusLabel, open && "text-ink")}>
-          <span className={cn("h-1.5 w-1.5 rounded-full", fallbacks ? "bg-caution" : "bg-pass")} />
-          <span className="hidden whitespace-nowrap sm:inline">{fallbacks ? `${fallbacks} local fallback${fallbacks === 1 ? "" : "s"}` : "All services connected"}</span>
-          <ChevronDown className="h-3 w-3 text-ink-4" />
-        </button>
-      )}
+    <span
+      className={cn("inline-flex h-7 items-center gap-1.5 px-2.5 text-ink-3", statusLabel)}
+      title={fallbacks ? subs.filter(([, d]) => d.fallback).map(([k, d]) => `${k}: ${d.name}`).join("\n") : undefined}
     >
-      <ul className="space-y-0.5 p-1">
-        {subs.map(([k, d]) => (
-          <li key={k} className="flex items-center gap-2 rounded-sm px-2 py-1.5 text-xs">
-            <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", d.fallback ? "bg-caution" : "bg-pass")} />
-            <span className={cn("w-16 shrink-0 text-ink-3", statusLabel)}>{k}</span>
-            <span className="min-w-0 flex-1 truncate text-ink-2" title={d.name}>
-              {d.name}
-            </span>
-            {d.fallback && <span className={cn("text-caution", statusLabel)}>fallback</span>}
-          </li>
-        ))}
-      </ul>
-      {h.notes?.length > 0 && <div className="border-t border-line px-3 py-2 text-[11px] leading-relaxed text-ink-3">{h.notes.join(" ")}</div>}
-    </Popover>
+      <span className={cn("h-1.5 w-1.5 rounded-full", fallbacks ? "bg-caution" : "bg-pass")} />
+      <span className="hidden whitespace-nowrap sm:inline">{fallbacks ? `${fallbacks} local fallback${fallbacks === 1 ? "" : "s"}` : "All services connected"}</span>
+    </span>
   );
 }
 
