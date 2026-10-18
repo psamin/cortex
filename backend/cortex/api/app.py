@@ -873,17 +873,33 @@ async def ap_policy(pid: str, policy: dict, request: Request):
 # ------------------------------------------------------------------ agent
 class ChatReq(BaseModel):
     message: str
+    thread: str | None = None  # continue this chat thread; default: the latest
 
 
 @app.post("/api/projects/{pid}/agent")
 async def chat(pid: str, req: ChatReq):
-    return StreamingResponse(agent.chat(ctx(), pid, req.message), media_type="text/event-stream")
+    return StreamingResponse(agent.chat(ctx(), pid, req.message, req.thread), media_type="text/event-stream")
 
 
 @app.get("/api/projects/{pid}/agent/history")
-async def history(pid: str):
-    """Full chat log: [{kind: user|assistant|tool_call|tool_result|approval_required|done, ..., at}]."""
-    return agent.load_log(ctx(), pid)
+async def history(pid: str, thread: str | None = None):
+    """One chat thread (the latest unless `thread` is given):
+    [{kind: user|assistant|tool_call|tool_result|approval_required|done|job_done, ..., at}]."""
+    return await agent.load_log(ctx(), pid, thread)
+
+
+@app.get("/api/projects/{pid}/agent/threads")
+async def chat_threads(pid: str):
+    """Past chats, newest first: [{id, title, created_at, updated_at}]."""
+    from ..services import chat_store
+    return [{k: t[k] for k in ("id", "title", "created_at", "updated_at")} for t in await chat_store.threads(ctx(), pid)]
+
+
+@app.post("/api/projects/{pid}/agent/threads")
+async def chat_new_thread(pid: str):
+    from ..services import chat_store
+    t = await chat_store.new_thread(ctx(), pid)
+    return {k: t[k] for k in ("id", "title", "created_at", "updated_at")}
 
 
 @app.get("/api/agent/engine")
@@ -896,13 +912,10 @@ async def agent_engine():
 
 @app.post("/api/projects/{pid}/agent/reset")
 async def agent_reset(pid: str):
-    from ..services import claude_code_agent as cc
-    cc.reset(ctx(), pid)
-    p = agent._log_path(ctx(), pid)
-    if p.exists():
-        p.unlink()
-    agent.HISTORY.pop(pid, None)
-    return {"reset": True}
+    """'New chat': start a new thread; earlier chats stay in the history."""
+    from ..services import chat_store
+    t = await chat_store.new_thread(ctx(), pid)
+    return {"reset": True, "thread": t["id"]}
 
 
 # ------------------------------------------------------------------ tools (MCP)
