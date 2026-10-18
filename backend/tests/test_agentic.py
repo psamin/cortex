@@ -29,7 +29,7 @@ def session(env, seed=3, region="center", mode="camera"):
 def test_tool_schemas_are_valid_function_definitions():
     names = {t["function"]["name"] for t in tool_schemas()}
     assert names == {"observe_scene", "get_robot_state", "propose_grasp", "move_end_effector", "set_gripper",
-                     "verify_grasp", "place_object", "check_task_success", "finish_episode"}
+                     "verify_grasp", "place_object", "go_home", "check_task_success", "finish_episode"}
     for t in tool_schemas():
         assert t["function"]["parameters"]["type"] == "object"
     MoveArgs.model_validate({"target": {"x": 0.2, "y": 0.0, "z": 0.05}})
@@ -54,6 +54,32 @@ def test_gripper_range_and_preconditions(env):
     assert s.call("set_gripper", {"state": "half"})[0]["error"]["code"] == "invalid_arguments"
     assert s.call("place_object", {"target": {"x": 0.2, "y": 0.1, "z": 0.05}})[0]["error"]["code"] == "not_holding"
     assert s.call("propose_grasp", {"object_id": "red_cube"})[0]["error"]["code"] == "image_point_required"
+    assert s.call("propose_grasp", {"object_id": "blue_mug"})[0]["error"]["code"] == "unknown_object"
+    # the tabletop box has no task-spec geometry: in camera mode it must be pointed at
+    s.holding = True
+    assert s.call("place_object", {"zone": "box"})[0]["error"]["code"] == "image_point_required"
+    assert s.call("place_object", {"zone": "bin"})[0]["error"]["code"] == "unknown_zone"
+    s.holding = False
+
+
+def test_cube_prompt_and_tools_keep_naming_the_cube(env):
+    from cortex.agentic.astra import scene_prompt
+
+    s = session(env)
+    ctx = s.task_context()
+    assert ctx["object"] == "red_cube" and ctx["grasp_mode"] == "top" and ctx["scene"] == "tabletop"
+    scene, plan = scene_prompt(ctx)
+    assert "red cube" in scene and "go_home" in plan
+    desc = {t["function"]["name"]: t["function"]["description"] for t in tool_schemas("pixels", ctx)}
+    assert "red cube" in desc["check_task_success"] and "the box" in desc["check_task_success"]
+
+
+def test_go_home_is_a_recorded_validated_motion(env):
+    s = session(env)
+    s.call("observe_scene", {"camera": "overhead"})
+    n = len(s.rec)
+    out, _ = s.call("go_home", {})
+    assert out["ok"] and out["reached_home"] and out["sim_steps"] > 0 and len(s.rec) > n
 
 
 def fake_model(sess: ManipulationSession, env: PickPlaceEnv, bad_first_move: bool = False):
@@ -84,6 +110,7 @@ def fake_model(sess: ManipulationSession, env: PickPlaceEnv, bad_first_move: boo
             script.append(("move_end_effector", lambda: {"target": {**last["grasp"], "z": 0.075}}))
             script.append(("place_object", lambda: {"image_point": dict(zip(("u", "v"), sess.table_to_pixel(
                 env.box_pos())))}))
+            script.append(("go_home", lambda: {}))
             script.append(("check_task_success", lambda: {}))
             script.append(("finish_episode", lambda: {"believes_success": True, "summary": "done"}))
         for m in reversed(body["messages"]):  # read back the latest propose_grasp result
@@ -106,10 +133,11 @@ def test_planner_loop_records_a_real_successful_trajectory(env):
     events = []
     run = planner.run_episode(s, "pick the cube and place it in the bowl", events.append)
     assert run["finished"] and env.in_box()
-    assert run["usage"]["calls"] == 11 and run["usage"]["cost_usd"] == pytest.approx(11 * 0.0125)
+    assert run["usage"]["calls"] == 12 and run["usage"]["cost_usd"] == pytest.approx(12 * 0.0125)
     assert run["usage"]["cost_source"].startswith("provider-reported")
     phases = [t["phase"] for t in run["trace"]]
     assert phases[:2] == ["Observing scene", "Selecting grasp"] and "Closing gripper" in phases
+    assert "Returning home" in phases
     n = len(s.rec)
     assert n > 60 and len(s.rec.front) == len(s.rec.state) == len(s.rec.wrist) == n
     assert np.stack(s.rec.front).shape[1:] == (96, 128, 3)

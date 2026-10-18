@@ -1,7 +1,7 @@
 """Vision-language manipulation planner over the validated tool API.
 
-The model chooses semantic actions and waypoints (observe, point at the cube, move,
-grip, verify, place); ManipulationSession validates and executes them in MuJoCo
+The model chooses semantic actions and waypoints (observe, point at the object, move,
+grip, verify, place, go home); ManipulationSession validates and executes them in MuJoCo
 with IK. The model never emits motor commands. Each episode is bounded by a
 model-call budget, a dollar budget and the session's step limit.
 
@@ -39,19 +39,44 @@ You never send motor commands; you choose actions and targets, and a local IK co
 Frames and units:
 - Robot base frame in metres: +x forward (away from the base), +y to the robot's left, z = height above the table.
 - {image_text} Image up = +x, image left = +y.
-- The red cube is 3 cm wide. The green open box is the "bowl": place the cube inside it.
+- {scene_text}
 
 Planning mode: {mode_text}
 
-Typical plan: observe_scene(overhead) -> propose_grasp(image_point on the red cube) -> set_gripper(open) ->
-move_end_effector(pregrasp) -> move_end_effector(grasp) -> set_gripper(closed) -> verify_grasp ->
-move_end_effector(lift to z≈0.075) -> place_object(image_point at the centre of the green box) -> check_task_success
--> finish_episode.
+Typical plan (observe -> grasp -> place -> go home): {plan_text}
 Rules:
 - Point at the object's centre in the most recent overhead image. {point_text}
 - If a tool returns ok=false, read the error code and adjust (different point, lower/closer target) instead of repeating it.
 - If verify_grasp says holding_object=false: open the gripper, observe again, re-propose the grasp and retry.
 - Call one tool at a time. Be brief in text. Finish when check_task_success is true or you cannot make progress."""
+
+CUBE_SCENE = 'The red cube is 3 cm wide. The green open box is the "bowl": place the cube inside it.'
+CUBE_PLAN = """observe_scene(overhead) -> propose_grasp(image_point on the red cube) -> set_gripper(open) ->
+move_end_effector(pregrasp) -> move_end_effector(grasp) -> set_gripper(closed) -> verify_grasp ->
+move_end_effector(lift to z≈0.075) -> place_object(image_point at the centre of the green box) -> go_home ->
+check_task_success -> finish_episode."""
+TOP_PLAN = """observe_scene(overhead) -> propose_grasp(image_point on the {obj}) -> set_gripper(open) ->
+move_end_effector(pregrasp) -> move_end_effector(grasp) -> set_gripper(closed) -> verify_grasp ->
+move_end_effector(lift: the grasp pose raised 6 cm) -> place_object(zone='{zone}') -> go_home -> check_task_success
+-> finish_episode."""
+SIDE_PLAN = """observe_scene(overhead) -> propose_grasp(image_point on the {obj}) -> set_gripper(open) ->
+move_end_effector(transit) -> move_end_effector(pregrasp) -> move_end_effector(grasp) -> move_end_effector(slide)
+-> set_gripper(closed) -> verify_grasp -> move_end_effector(lift) -> place_object(zone='{zone}') -> go_home ->
+check_task_success -> finish_episode. It is a side grasp: pass each pose exactly as propose_grasp returns it,
+including its approach axis."""
+
+
+def scene_prompt(ctx: dict[str, Any] | None) -> tuple[str, str]:
+    """(scene text, typical plan) naming the session's real object and zones; the cube text on the tabletop."""
+    if not ctx or ctx.get("scene") != "intake":
+        return CUBE_SCENE, CUBE_PLAN
+    obj = str(ctx["object"]).replace("_", " ")
+    zones = ", ".join(f"'{z}'" for z in ctx.get("zones") or [])
+    scene = (f"The object to pick is {ctx['object_text']}. Place zones on the table: {zones or 'none'}; "
+             f"place it in zone '{ctx['target_zone']}' (green marker).")
+    plan = (SIDE_PLAN if ctx.get("grasp_mode") == "side" else TOP_PLAN).format(obj=obj, zone=ctx["target_zone"])
+    return scene, plan
+
 
 MODE_TEXT = {
     "camera": "camera-grounded. You only get camera images and robot proprioception; locate objects by pointing at "
@@ -71,7 +96,7 @@ PHASES = {
     "observe_scene": "Observing scene", "get_robot_state": "Reading robot state",
     "propose_grasp": "Selecting grasp", "set_gripper": None, "verify_grasp": "Verifying grasp",
     "place_object": "Moving to bowl and releasing", "check_task_success": "Verifying task success",
-    "finish_episode": "Finishing",
+    "go_home": "Returning home", "finish_episode": "Finishing",
 }
 
 
@@ -156,6 +181,7 @@ class AstraPlanner:
     def __init__(self, cfg: PlannerConfig, transport: httpx.BaseTransport | None = None):
         self.cfg = cfg
         self.http = httpx.Client(timeout=cfg.timeout_s, transport=transport)
+        self.ctx: dict[str, Any] | None = None  # the current session's task object and zones
 
     def _complete(self, messages: list[dict[str, Any]], usage: Usage) -> dict[str, Any]:
         if usage.calls >= self.cfg.max_calls:
@@ -163,7 +189,7 @@ class AstraPlanner:
         if usage.cost_usd >= self.cfg.max_usd:
             raise BudgetExceeded(f"episode cost budget ${self.cfg.max_usd:.2f} reached")
         body: dict[str, Any] = {"model": self.cfg.model, "messages": window_images(messages, self.cfg.max_images),
-                                "tools": tool_schemas(self.cfg.point_format), "tool_choice": "auto",
+                                "tools": tool_schemas(self.cfg.point_format, self.ctx), "tool_choice": "auto",
                                 "parallel_tool_calls": False}
         if self.cfg.openrouter_extras:
             body["max_completion_tokens"] = 600  # tool calls are ~100-300 tokens; OpenRouter reserves credit for the max
@@ -202,9 +228,11 @@ class AstraPlanner:
                     emit: Callable[[dict[str, Any]], None]) -> dict[str, Any]:
         usage = Usage()
         trace: list[dict[str, Any]] = []
+        self.ctx = session.task_context()
+        scene_text, plan_text = scene_prompt(self.ctx)
         messages: list[dict[str, Any]] = [
             {"role": "system", "content": SYSTEM.format(
-                task=task, mode_text=MODE_TEXT[self.cfg.mode],
+                task=task, mode_text=MODE_TEXT[self.cfg.mode], scene_text=scene_text, plan_text=plan_text,
                 image_text=POINT_TEXT[self.cfg.point_format][0].format(px=PLAN_PX),
                 point_text=POINT_TEXT[self.cfg.point_format][1])},
             {"role": "user", "content": "Begin. The arm is at its home pose with the gripper half open."},

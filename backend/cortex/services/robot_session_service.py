@@ -117,7 +117,7 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
     await ctx.audit(actor, "robot_start_episode", project.id, {"session_id": s.id, "seed": seed,
                                                                 "scenario": scenario.model_dump()}, "ok", s.id)
     return {"session_id": s.id, "attempt_id": attempt.id, "collection_id": col.id, "seed": seed,
-            "scenario": scenario.model_dump(), "image_px": [480, 480],
+            "scenario": scenario.model_dump(), "image_px": [480, 480], "task": out.get("task"),
             "frames": "robot base frame: +x forward, +y left, z up (metres); overhead image up=+x, left=+y"}
 
 
