@@ -178,14 +178,22 @@ async def health():
         lr = version("lerobot")
     except Exception:
         lr = None
+    from ..services import claude_code_agent as cc
     from ..sim.so101 import ENVHUB_URI
+
+    # Model work runs on the user's Claude Code when it is here; else the opt-in self-hosted route.
+    if cc.available() is None and s.agent_engine in ("auto", "claude_code"):
+        model_used = s.claude_code_model or "claude-code"
+        vlm = agent = {"provider": "Claude Code (your agent)", "model": model_used, "fallback": False}
+    else:
+        vlm = {"provider": c.vlm_source, "model": c.model.vlm_model if c.model else None, "fallback": not c.model}
+        agent = {"provider": c.model.label if c.model else "rule-based planner",
+                 "model": c.model.agent_model if c.model else None, "fallback": not c.model}
     return {
         "db": {"provider": c.store.name, "fallback": not s.insforge_enabled},
         "storage": {"provider": c.blobs.name, "fallback": not s.insforge_enabled},
-        "vlm": {"provider": c.vlm_source, "model": c.model.vlm_model if c.model else None,
-                "fallback": not c.model},
-        "agent": {"provider": c.model.label if c.model else "rule-based planner",
-                  "model": c.model.agent_model if c.model else None, "fallback": not c.model},
+        "vlm": vlm,
+        "agent": agent,
         "executor": {"provider": "parallel local worker processes", "fallback": False},
         "training": {"provider": f"futurama slurm ({s.futurama_ssh_host})" if s.futurama_ssh_host
                      else "manual command bundle", "fallback": not s.futurama_ssh_host},

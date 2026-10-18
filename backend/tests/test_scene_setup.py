@@ -156,6 +156,16 @@ def test_claude_code_is_found_where_the_desktop_app_installs_it(tmp_path, monkey
     assert cc.available() is None
 
 
+def test_health_names_claude_code_as_the_model(client, monkeypatch):
+    monkeypatch.setattr(cc, "available", lambda: None)
+    h = client.get("/api/health").json()
+    assert h["vlm"]["provider"] == h["agent"]["provider"] == "Claude Code (your agent)"
+    assert not h["vlm"]["fallback"] and not h["agent"]["fallback"]
+    monkeypatch.setattr(cc, "available", lambda: "Claude Code not found")
+    assert client.get("/api/health").json()["agent"] == {"provider": "rule-based planner", "model": None,
+                                                         "fallback": True}
+
+
 def test_photos_are_normalised_to_a_readable_jpeg():
     jpg = scene_setup.decode_photo("data:image/png;base64," + photo_b64())
     img = Image.open(io.BytesIO(jpg))
