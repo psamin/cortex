@@ -277,7 +277,10 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
   const feed = useMemo<FeedItem[]>(() => {
     const items: FeedItem[] = list.map((c) => (c.tool === "log_decision" ? { kind: "decision", at: c.started_at, call: c } : { kind: "call", at: c.started_at, call: c }));
     const milestones: FeedItem[] = skillEvents(list).map((e) => ({ kind: "event", ...e }));
-    const all = [...items, ...eventsOf(w).filter((e) => e.kind !== "event" || e.tone !== "bad"), ...milestones].filter((x) => !onlyDecisions || x.kind !== "call");
+    const everything = [...items, ...eventsOf(w).filter((e) => e.kind !== "event" || e.tone !== "bad"), ...milestones];
+    const overview = everything.filter((x) => x.kind !== "call");
+    // decisions-only is the overview; with no decisions or milestones yet, show the tool calls instead of nothing
+    const all = onlyDecisions && overview.length > 0 ? overview : everything;
     return all.sort((a, b) => (a.at < b.at ? 1 : -1)); // newest first
   }, [list, w, onlyDecisions]);
 
