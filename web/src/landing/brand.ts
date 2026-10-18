@@ -1,14 +1,14 @@
 /** Product brand. The single place the name and taglines live. */
 export const BRAND = {
   name: "Cortex",
-  tagline: "Let your agents train a robot",
+  tagline: "The robot-training MCP agents want",
   /** Page title: what it is, in the words people search with. */
-  title: "Cortex: let your agents train a robot. MCP server for robot policies with LeRobot and MuJoCo",
+  title: "Cortex: the MCP server that lets any agent train a physical robot, with no human in the training loop",
   description:
-    "Connect any agent to one MCP server and let it train your robot. It describes your arm, objects and layout; Cortex builds that environment in simulation, collects verified demonstrations, trains and tests a policy, then carries it to the physical arm to train further and deploy. A person approves every step that costs money or moves hardware.",
+    "Agents can write software, but they can't teach a robot. Cortex gives them the tools. Any agent describes the arm and its workspace, then builds the simulation, collects its own demonstrations, trains, tests and fixes the policy, and takes it to the physical arm. No teleoperation, no hand-labelled data, no engineer babysitting runs. People only approve spend and hardware.",
   /** Entity definition for search and answer engines: the exact names people and agents search for. */
   definition:
-    "Cortex is an open-source MCP server that lets any AI agent train a robot policy for a custom environment and layout, in MuJoCo simulation and then on the physical arm, built on LeRobot, ACT and the SO-101.",
+    "Cortex is an open-source MCP server that lets any AI agent train a physical robot policy end to end, from a custom environment through simulation, demonstrations, training and evaluation to deployment, with no human in the training loop. Built on LeRobot, MuJoCo, ACT and the SO-101.",
 } as const;
 
 /** Where the landing page's primary calls to action lead (the studio's chat-first entry). */

@@ -21,9 +21,9 @@ export function FinalCta() {
           <span className="text-ink">Start</span>
         </div>
         <h2 id="start-title" className="kn-display mt-6 max-w-[48rem] text-[clamp(2.4rem,4.6vw,4.6rem)] text-ink">
-          Let your agent train your robot.
+          Give your agent a robot.
           <br />
-          <span className="kn-second">Start in simulation.</span>
+          <span className="kn-second">It handles the training.</span>
         </h2>
         <div className="mt-10 flex flex-wrap items-center gap-3">
           <Link
@@ -44,7 +44,7 @@ export function FinalCta() {
           </a>
         </div>
         <p className="mt-10 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-          MVP · the loop runs in MuJoCo today · training and deploying on the physical arm is supervised
+          MVP · the loop runs in MuJoCo today · people approve spend and anything that moves hardware
         </p>
       </div>
     </section>
@@ -60,7 +60,7 @@ export function SiteFooter() {
           <BrandMark size={18} />
           <span className="kn-sans text-[14px] font-medium">{BRAND.name}</span>
           <span className="ml-3 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-            MCP server for agent-trained robots
+            The robot-training MCP agents want
           </span>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-7 gap-y-3 kn-sans text-[13px] text-ink-2">

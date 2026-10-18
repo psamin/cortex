@@ -19,7 +19,7 @@ export const STEPS: LayerStep[] = [
     glyph: "describe",
     readout: "MCP · UPDATE_INTAKE",
     tag: "Agent · MCP",
-    body: "Any agent connects over MCP and describes the arm, cameras, objects, zones and layout: your environment, not a fixed demo scene. Typed questions come back for whatever is still open.",
+    body: "The agent tells Cortex the arm, cameras, objects and layout in a chat over MCP: any environment, no CAD or config files. Cortex asks typed questions about whatever is still open.",
   },
   {
     n: "02",
@@ -27,7 +27,7 @@ export const STEPS: LayerStep[] = [
     glyph: "simulate",
     readout: "JAW · TORQUE · REACH MEASURED",
     tag: "Sim",
-    body: "Cortex builds that exact layout as a MuJoCo scene and measures feasibility from the model: jaw opening, holding torque, reach.",
+    body: "Cortex builds that exact layout as a MuJoCo scene and measures whether the arm can do the job: jaw opening, holding torque, reach.",
   },
   {
     n: "03",
@@ -35,7 +35,7 @@ export const STEPS: LayerStep[] = [
     glyph: "demonstrate",
     readout: "HOME → PICK → PLACE → HOME",
     tag: "Sim · verified",
-    body: "The agent drives the arm through validated tools: home, pick, place, home, then reset. Only simulator-verified successes become LeRobot episodes.",
+    body: "The agent drives the arm itself: home, pick, place, home, then it resets and goes again. No teleoperation. Only simulator-verified successes become LeRobot episodes.",
   },
   {
     n: "04",
@@ -43,7 +43,7 @@ export const STEPS: LayerStep[] = [
     glyph: "train",
     readout: "ACT · GPU SPEND APPROVED",
     tag: "Human approval",
-    body: "An ACT policy is trained on the demonstrations. A human approves the GPU spend before anything launches.",
+    body: "An ACT policy trains on the agent's own demonstrations. The one human step: approving the GPU spend.",
   },
   {
     n: "05",
@@ -51,7 +51,7 @@ export const STEPS: LayerStep[] = [
     glyph: "evaluate",
     readout: "SEEDED BRANCHES · WILSON 95% CI",
     tag: "Sim · measured",
-    body: "Seeded evaluation branches report success with Wilson confidence intervals. Measured, not claimed.",
+    body: "Seeded test runs measure success with confidence intervals. The agent reads the numbers, not a person.",
   },
   {
     n: "06",
@@ -59,14 +59,14 @@ export const STEPS: LayerStep[] = [
     glyph: "improve",
     readout: "WEAKEST CONDITION → MORE DEMOS",
     tag: "Sim",
-    body: "Cortex finds the weakest measured condition and collects targeted demos for it; RL sandboxes are next. The loop repeats.",
+    body: "The agent finds the weakest condition, collects more demos for it and retrains. The loop runs itself until the numbers hold.",
   },
   {
     n: "07",
     label: "Deploy",
     glyph: "deploy",
-    readout: "PHYSICAL ARM · OPERATOR + E-STOP",
+    readout: "PRODUCTION LINE · OPERATOR + E-STOP",
     tag: "Real · supervised",
-    body: "The policy moves to the physical arm, where it can keep training on real demonstrations and then run the task itself. Always with an operator present and an e‑stop in reach.",
+    body: "The policy goes to production: physical arms on the line run the task. An operator and an e‑stop stay on the floor.",
   },
 ];
