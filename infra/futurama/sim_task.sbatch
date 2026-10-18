@@ -1,6 +1,7 @@
 #!/bin/bash
 # Sim-only policies for the hand-built tasks (issue #161), on one GPU (EGL rendering + training).
 #   MODE=demos TASK=jenga EPISODES=200 sbatch -J sim-demos sim_task.sbatch <job_dir>
+#   (faster: PARTS=4 PART=0..3 on four GPUs, then MODE=merge with --dependency=afterok:<the four>)
 #       -> <job_dir>/<task>/dataset (oracle demos, LeRobotDataset v3) and <task>/examples/*.mp4
 #   MODE=train TASK=jenga VARIANT=act STEPS=30000 sbatch -J sim-act sim_task.sbatch <job_dir>
 #       -> <job_dir>/<task>/runs/<variant>/ checkpoints, then eval/<step>/ closed-loop metrics + videos
@@ -31,21 +32,38 @@ uv venv -q --python 3.12 "$SCR/venv"
 source "$SCR/venv/bin/activate"
 uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1" "mujoco>=3.3.7"
 
-if [ "$MODE" = demos ]; then  # SHARDS recorders in parallel (rendering is the bottleneck), then one dataset
-  rm -rf "$T/dataset" "$T/examples"
-  mkdir -p "$T"
-  N="${SHARDS:-8}"; pids=(); roots=()
+if [ "$MODE" = demos ]; then  # SHARDS recorders in parallel, then one dataset
+  # One GPU renders ~8 recorders well; more on the same GPU is slower. For more throughput, split the work
+  # across GPUs: PARTS jobs with PART=0..PARTS-1 each record into $T/parts/, then one MODE=merge job.
+  N="${SHARDS:-8}"; P="${PARTS:-1}"; K="${PART:-0}"; pids=(); roots=()
+  if [ "$P" = 1 ]; then rm -rf "$T/dataset" "$T/examples"; OUTS="$SCR"; else OUTS="$T/parts"; fi
+  [ "$K" = 0 ] && rm -rf "$T/examples"
+  mkdir -p "$T" "$OUTS"
   for i in $(seq 0 $((N - 1))); do
-    ex=(); [ "$i" = 0 ] && ex=(--examples "$T/examples")
-    python -m cortex.sim.tasks.run demos "$TASK" "$SCR/shard$i" --episodes "${EPISODES:-200}" \
-      --size "${SIZE:-240x320}" --shard "$i" --shards "$N" --noise-deg "${NOISE_DEG:-2.0}" "${ex[@]}" \
-      > "$SCR/shard$i.log" 2>&1 &
-    pids+=($!); roots+=("$SCR/shard$i")
+    g=$((K * N + i))
+    rm -rf "$OUTS/shard$g"
+    ex=(); [ "$g" = 0 ] && ex=(--examples "$T/examples")
+    python -m cortex.sim.tasks.run demos "$TASK" "$OUTS/shard$g" --episodes "${EPISODES:-200}" \
+      --size "${SIZE:-240x320}" --shard "$g" --shards $((N * P)) --noise-deg "${NOISE_DEG:-2.0}" "${ex[@]}" \
+      > "$OUTS/shard$g.log" 2>&1 &
+    pids+=($!); roots+=("$OUTS/shard$g")
   done
   fail=0
-  for i in "${!pids[@]}"; do wait "${pids[$i]}" || { fail=1; echo "[sim] shard $i failed:"; tail -5 "$SCR/shard$i.log"; }; done
+  for i in "${!pids[@]}"; do wait "${pids[$i]}" || { fail=1; echo "[sim] shard $i failed:"; tail -5 "${roots[$i]}.log"; }; done
   [ "$fail" = 0 ] || exit 1
-  python -m cortex.sim.tasks.run merge "$TASK" "$T/dataset" "${roots[@]}"
+  if [ "$P" = 1 ]; then
+    python -m cortex.sim.tasks.run merge "$TASK" "$T/dataset" "${roots[@]}"
+    echo "[sim] DEMOS_DONE"
+  else
+    echo "[sim] PART_DONE $K/$P"
+  fi
+  exit 0
+fi
+
+if [ "$MODE" = merge ]; then  # after all PARTS: one dataset from $T/parts/shard*
+  rm -rf "$T/dataset"
+  python -m cortex.sim.tasks.run merge "$TASK" "$T/dataset" $(ls -d "$T"/parts/shard* | grep -v "\.log$" | sort -V)
+  rm -rf "$T/parts"
   echo "[sim] DEMOS_DONE"
   exit 0
 fi
