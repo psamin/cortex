@@ -937,6 +937,11 @@ from . import mcp_views  # noqa: E402
 
 mcp_views.register(TOOLS, Tool)
 
+# Failure diagnosis by the MCP client's own model. Not for the studio agent: it has its own model route.
+from . import external_diagnosis  # noqa: E402
+
+TOOLS.update({n: Tool(n, d, a, f, agent_callable=False) for n, d, a, f in external_diagnosis.TOOLS})
+
 # Tools that start work the agent should not start without a human click.
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
 

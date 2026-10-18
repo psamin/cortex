@@ -5,6 +5,7 @@ import { registerPrompts } from "./src/prompts.js";
 import { registerRelay } from "./src/relay.js";
 import { registerResources } from "./src/resources.js";
 import { registerStages } from "./src/stages.js";
+import { registerSampling } from "./src/sampling.js";
 import { registerTools } from "./src/tools.js";
 import { registerViews } from "./src/views.js";
 
@@ -67,5 +68,6 @@ registerPrompts(server);
 registerRelay(server);
 registerResources(server);
 registerStages(server);
+registerSampling(server);
 
 export default server;

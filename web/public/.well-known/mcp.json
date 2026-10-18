@@ -1630,6 +1630,184 @@
       "needsApproval": false
     },
     {
+      "name": "get_diagnosis_inputs",
+      "mcpTools": [],
+      "description": "Bring your own model: run quality checks and measured failure analysis, then return the keyframe contact sheets, measured telemetry and fixed-taxonomy prompt for the episodes a VLM should review. Answer them with your model and call submit_failure_hypotheses with the analysis_id.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "max_targets": {
+            "default": 4,
+            "description": "episodes to review (failed evaluation rollouts first)",
+            "maximum": 6,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": false,
+      "needsApproval": false
+    },
+    {
+      "name": "submit_failure_hypotheses",
+      "mcpTools": [],
+      "description": "Store your model's failure hypotheses for an analysis from get_diagnosis_inputs. Validated against the fixed taxonomy (any invalid answer rejects the submission); stored as unverified VLM hypotheses with the route and the model you report, then failure clusters are rebuilt.",
+      "inputSchema": {
+        "$defs": {
+          "SubmittedHypothesis": {
+            "properties": {
+              "category": {
+                "description": "one of the fixed failure taxonomy categories",
+                "type": "string"
+              },
+              "confidence": {
+                "description": "the model's own confidence, 0-1 (not a probability)",
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "rationale": {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              "frame_indices": {
+                "description": "keyframes (0-5) that show it",
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 6,
+                "type": "array"
+              }
+            },
+            "required": [
+              "category",
+              "confidence",
+              "rationale"
+            ],
+            "type": "object"
+          },
+          "TargetAnswer": {
+            "additionalProperties": false,
+            "properties": {
+              "ref_id": {
+                "description": "target ref_id from get_diagnosis_inputs",
+                "type": "string"
+              },
+              "reply_text": {
+                "anyOf": [
+                  {
+                    "maxLength": 8000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "the model's raw reply; parsed and validated by Cortex"
+              },
+              "hypotheses": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/SubmittedHypothesis"
+                    },
+                    "maxItems": 3,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "structured hypotheses (instead of reply_text)"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "the client could not get an answer (declined, failed); recorded, never replaced by a guess"
+              }
+            },
+            "required": [
+              "ref_id"
+            ],
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "analysis_id": {
+            "description": "analysis_id from get_diagnosis_inputs",
+            "type": "string"
+          },
+          "route": {
+            "description": "'mcp_sampling' when the answers came from a sampling/createMessage request, 'mcp_agent' when you (the agent) looked at the contact sheets yourself",
+            "enum": [
+              "mcp_sampling",
+              "mcp_agent"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "the model that produced the answers, as reported by the MCP client (sampling result `model`)",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "MCP client name/version, if known"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/$defs/TargetAnswer"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "analysis_id",
+          "route",
+          "model",
+          "answers"
+        ],
+        "type": "object"
+      },
+      "agentCallable": false,
+      "needsApproval": false
+    },
+    {
       "name": "get_session_link",
       "mcpTools": [
         "cortex.get_session_link"
