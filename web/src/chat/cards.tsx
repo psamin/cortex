@@ -32,11 +32,11 @@ import {
   useRecommendations,
   useTraining,
 } from "../api/hooks";
-import { isImported, type AgentAttempt, type TrainingJob } from "../api/types";
+import { agentLabel, isAgent, isImported, type AgentAttempt, type TrainingJob } from "../api/types";
 import { AttemptDrawer, ScenarioChip } from "../components/AgentTrace";
-import { Skeleton } from "../components/ui";
+import { Skeleton, InlineError } from "../components/ui";
 import { refRoute } from "../components/refs";
-import { cn, errorMessage, num, pct, usd } from "../lib/format";
+import { cn, num, pct, usd } from "../lib/format";
 import { useChat } from "./ChatProvider";
 import { prefixOf } from "./model";
 
@@ -173,13 +173,13 @@ function CollectionCard({ pid, id, large }: { pid: string; id: string; large?: b
   const done = t.attempts ?? attempts.length;
   const total = c.request.num_demos;
   const recent = [...attempts].sort((a, b) => b.index - a.index).slice(0, large ? 8 : 4);
-  const who = c.collector === "astra" ? "GPT-6 Astra" : "Scripted oracle";
+  const who = isAgent(c.collector) ? agentLabel(c.model) : "Scripted oracle";
   return (
     <CardShell
       pid={pid}
       refId={id}
       large={large}
-      icon={c.collector === "astra" ? <Bot className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
+      icon={isAgent(c.collector) ? <Bot className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
       title="Demonstrations"
       meta={`${who} · ${total} attempts`}
       status={
@@ -195,7 +195,7 @@ function CollectionCard({ pid, id, large }: { pid: string; id: string; large?: b
       <div className="flex items-end gap-6">
         <Stat value={t.successes ?? 0} label="demos" tone="pass" large={large} />
         <Stat value={t.failures ?? 0} label="failed" large={large} />
-        {c.collector === "astra" && <Stat value={usd(t.cost_usd ?? 0)} label="model cost" large={large} />}
+        {isAgent(c.collector) && <Stat value={usd(t.cost_usd ?? 0)} label="model cost" large={large} />}
       </div>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-rail">
         <div className="h-full rounded-full bg-servo transition-[width] duration-500 ease-out" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
@@ -350,7 +350,7 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
       {t.backend === "manual" && t.status !== "succeeded" && (
         <div className="mt-1 text-xs text-ink-3">No GPU backend is connected; the training command is in Details › Improve › Training.</div>
       )}
-      {t.error && <div className="mt-1 text-xs text-fault">{t.error}</div>}
+      {t.error && <InlineError error={t.error} fallback="Training stopped with an error." className="mt-1" />}
     </CardShell>
   );
 }
@@ -457,7 +457,7 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
       <div className="h-1.5 overflow-hidden rounded-full bg-rail">
         <div className="h-full rounded-full bg-servo transition-[width] duration-500 ease-out" style={{ width: `${j.progress * 100}%` }} />
       </div>
-      {j.error && <div className="mt-1.5 text-xs text-fault">{j.error}</div>}
+      {j.error && <InlineError error={j.error} detail={j.error_detail} className="mt-1.5" />}
     </CardShell>
   );
 }
@@ -559,7 +559,7 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
           Not now
         </button>
       </div>
-      {m.error && <p className="mt-2 text-xs text-fault">{errorMessage(m.error)}</p>}
+      {m.error && <InlineError error={m.error} className="mt-2" />}
     </CardShell>
   );
 }
@@ -600,7 +600,7 @@ export function ApprovalItem({ pid, kind, refId, summary, args }: { pid: string;
             </button>
           )}
         </div>
-        {evalM.error && <p className="mt-2 text-xs text-fault">{errorMessage(evalM.error)}</p>}
+        {evalM.error && <InlineError error={evalM.error} className="mt-2" />}
       </CardShell>
     );
   }
@@ -647,7 +647,7 @@ export function BudgetCard({ pid, message }: { pid: string; message: string }) {
           {m.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {m.isSuccess ? "Raised" : `Raise to $${target}`}
         </button>
       </div>
-      {m.error && <p className="mt-2 text-xs text-fault">{errorMessage(m.error)}</p>}
+      {m.error && <InlineError error={m.error} className="mt-2" />}
     </CardShell>
   );
 }

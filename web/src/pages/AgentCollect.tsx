@@ -13,13 +13,14 @@ import {
   usePlanner,
   usePlannerBudget,
 } from "../api/hooks";
-import { conditionKey, type AgentCollection, type Collector, type CollectorStats, type PlannerStatus, type PlanningMode, type Project } from "../api/types";
+import { agentLabel, conditionKey, isAgent, type AgentCollection, type Collector, type CollectorStats, type PlannerStatus, type PlanningMode, type Project } from "../api/types";
 import { AttemptDrawer, PlanningModeBadge, ProvenanceBadge, ScenarioChip, ThoughtRow, TraceRow, Verdict } from "../components/AgentTrace";
-import { Badge, Button, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, SectionLabel, Segmented, Select, SkeletonRows, StatusBadge, Toggle } from "../components/ui";
+import { Badge, Button, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, SectionLabel, Segmented, Select, SkeletonRows, StatusBadge, Toggle, InlineError } from "../components/ui";
 import { WorkcellGrid } from "../components/Workcell";
-import { ago, cn, errorMessage, humanize, num, pct } from "../lib/format";
+import { ago, cn, humanize, num, pct } from "../lib/format";
 
-const COLLECTOR_LABEL: Record<Collector, string> = { astra: "GPT-6 Astra", oracle: "Scripted IK oracle" };
+/** "Claude Code agent", "GPT-6 Astra", … or "Scripted IK oracle". */
+const collectorName = (c: string, model?: string | null) => (isAgent(c) ? agentLabel(model) : "Scripted IK oracle");
 const ACTIVE = new Set(["queued", "running"]);
 
 function useElementWidth<T extends HTMLElement>() {
@@ -54,7 +55,7 @@ export function AgentCollect({ project, collector, onUseOracle }: { project: Pro
   const detail = useAgentCollection(current?.id, running);
   const col = detail.data?.collection ?? current;
 
-  const plannerDown = collector === "astra" && planner.data && !planner.data.available;
+  const plannerDown = isAgent(collector) && planner.data && !planner.data.available;
 
   // Rebuild the in-progress attempt on load and on every stream (re)connect, then SSE continues it.
   const hydrate = useHydrateLive();
@@ -75,9 +76,9 @@ export function AgentCollect({ project, collector, onUseOracle }: { project: Pro
 
   return (
     <div ref={wrapRef} className="space-y-4">
-      {collector === "astra" && planner.isLoading && <SkeletonRows rows={1} />}
+      {isAgent(collector) && planner.isLoading && <SkeletonRows rows={1} />}
       {plannerDown && planner.data && !planner.data.available && <PlannerUnavailable reason={planner.data.reason} onUseOracle={onUseOracle} />}
-      {planner.error && collector === "astra" && <ErrorState error={planner.error} compact onRetry={() => planner.refetch()} />}
+      {planner.error && isAgent(collector) && <ErrorState error={planner.error} compact onRetry={() => planner.refetch()} />}
 
       <StartForm
         project={project}
@@ -130,7 +131,7 @@ function PlannerUnavailable({ reason, onUseOracle }: { reason: string; onUseOrac
     <div className="flex flex-wrap items-start gap-3 rounded-md bg-caution/5 p-3.5 shadow-[0_0_0_1px_rgb(var(--caution)/.35)]">
       <Info className="mt-0.5 h-4 w-4 shrink-0 text-caution" />
       <div className="min-w-0 flex-1">
-        <p className="text-sm font-medium text-ink">GPT-6 Astra not configured. Add the InsForge key.</p>
+        <p className="text-sm font-medium text-ink">No planning model is available for the agent.</p>
         <p className="mt-0.5 text-xs text-ink-3">{reason} Cortex does not substitute another model.</p>
       </div>
       <Button size="sm" onClick={onUseOracle}>
@@ -181,7 +182,7 @@ function StartForm({
   const start = useMutation({
     mutationFn: async () => {
       const policyPatch =
-        collector === "astra"
+        isAgent(collector)
           ? { collector, planning_mode: mode, model_budget_usd: budget }
           : { collector };
       if (autopilot) {
@@ -189,13 +190,13 @@ function StartForm({
         await api.startAutopilot(pid);
         return null;
       }
-      if (collector === "astra" && budget !== project.autopilot.model_budget_usd) await api.setAutopilotPolicy(pid, { model_budget_usd: budget });
+      if (isAgent(collector) && budget !== project.autopilot.model_budget_usd) await api.setAutopilotPolicy(pid, { model_budget_usd: budget });
       return api.startAgentCollection(pid, {
         ...(taskOverride ? { task: taskOverride } : {}),
         num_demos: numDemos,
         diversity,
         collector,
-        mode: collector === "astra" ? mode : null,
+        mode: isAgent(collector) ? mode : null,
         max_calls_per_episode: maxCalls,
         max_usd_per_episode: maxUsdEp,
         max_total_usd: maxTotal === "" ? null : Number(maxTotal),
@@ -219,8 +220,8 @@ function StartForm({
 
   return (
     <Panel
-      title={collector === "astra" ? "Agent demonstrations" : "Scripted oracle demonstrations"}
-      meta={collector === "astra" ? "Astra plans · validated IK executes" : "privileged reference collector"}
+      title={isAgent(collector) ? "Agent demonstrations" : "Scripted oracle demonstrations"}
+      meta={isAgent(collector) ? `${agentLabel(planner?.model)} plans · validated IK executes` : "privileged reference collector"}
       actions={
         running && current ? (
           <Button size="sm" variant="danger" loading={stop.isPending} onClick={() => stop.mutate()}>
@@ -235,8 +236,8 @@ function StartForm({
       }
     >
       <p className="mb-3 text-xs text-ink-3">
-        {collector === "astra"
-          ? "GPT-6 Astra plans each step from the camera, a validator checks every command, IK executes it in MuJoCo, and only attempts the simulator verifies as successful become LeRobot demonstrations."
+        {isAgent(collector)
+          ? `${agentLabel(planner?.model)} plans each step from the camera, a validator checks every command, IK executes it in MuJoCo, and only attempts the simulator verifies as successful become LeRobot demonstrations.`
           : "The scripted oracle follows fixed IK waypoints computed from simulator ground truth. It is a reference collector with privileged state, not a learned or camera-grounded agent."}
       </p>
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
@@ -262,7 +263,7 @@ function StartForm({
         <Field label="Scene diversity">
           <Segmented size="md" value={diversity} onChange={setDiversity} ariaLabel="Scene diversity" options={[{ value: "plan", label: "plan" }, { value: "medium", label: "medium" }, { value: "high", label: "high" }]} />
         </Field>
-        {collector === "astra" && (
+        {isAgent(collector) && (
           <>
             <Field label="Planning mode">
               <Segmented size="md" value={mode} onChange={setMode} ariaLabel="Planning mode" options={[{ value: "camera", label: "camera" }, { value: "privileged", label: "privileged" }]} />
@@ -287,7 +288,7 @@ function StartForm({
         </div>
       </div>
 
-      {collector === "astra" && (
+      {isAgent(collector) && (
         <div className="mt-2">
           <button type="button" onClick={() => setLimitsOpen((o) => !o)} className="inline-flex items-center gap-1 text-2xs text-ink-3 hover:text-ink-2" aria-expanded={limitsOpen}>
             Per-attempt limits <ChevronDown className={cn("h-3 w-3 transition-transform", limitsOpen && "rotate-180")} />
@@ -315,12 +316,14 @@ function StartForm({
       )}
       {autopilot && (
         <p className="mt-2 text-2xs text-ink-3">
-          Autopilot uses the {COLLECTOR_LABEL[collector]} collector and runs the full loop under the project's standing approvals. Follow it on the Autopilot page.
+          Autopilot uses the {collectorName(collector, planner?.model)} collector and runs the full loop under the project's standing approvals. Follow it on the Autopilot page.
         </p>
       )}
-      {planner && planner.available && collector === "astra" && (
+      {planner && planner.available && isAgent(collector) && (
         <p className="mt-2 text-2xs text-ink-4">
-          Pricing: ${planner.pricing_per_m_tokens.input}/M input · ${planner.pricing_per_m_tokens.output}/M output tokens
+          {typeof planner.pricing_per_m_tokens === "string"
+            ? `Cost: ${planner.pricing_per_m_tokens}`
+            : `Pricing: $${planner.pricing_per_m_tokens.input}/M input · $${planner.pricing_per_m_tokens.output}/M output tokens`}
         </p>
       )}
 
@@ -340,7 +343,7 @@ function StartForm({
           }}
         />
       )}
-      {stop.error && <p className="mt-2 text-xs text-fault">{errorMessage(stop.error)}</p>}
+      {stop.error && <InlineError error={stop.error} className="mt-2" />}
       {start.isSuccess && autopilot && <p className="mt-2 text-xs text-pass">Autopilot started.</p>}
     </Panel>
   );
@@ -366,7 +369,7 @@ function RaiseBudget({ pid, current, message, onRaised }: { pid: string; current
       <Button size="sm" variant="primary" loading={m.isPending} disabled={value <= (current ?? 0)} onClick={() => m.mutate()}>
         Raise project budget
       </Button>
-      {m.error && <span className="w-full text-xs text-fault">{errorMessage(m.error)}</span>}
+      {m.error && <InlineError error={m.error} className="w-full" />}
     </div>
   );
 }
@@ -469,10 +472,10 @@ function ActionTimeline({
 
   return (
     <Panel
-      title={collector === "astra" ? "Agent actions" : "Attempts"}
+      title={isAgent(collector) ? "Agent actions" : "Attempts"}
       meta={att ? (collector === "oracle" ? `${indices.length}${live?.total ? ` of ${live.total}` : ""} seen live` : `attempt ${att.index + 1}${live?.total ? ` of ${live.total}` : ""}`) : undefined}
       actions={
-        collector === "astra" &&
+        isAgent(collector) &&
         indices.length > 1 && (
           <div className="flex items-center gap-0.5">
             <Button size="sm" variant="ghost" className="px-1.5" disabled={pos <= 0} onClick={() => setPick(indices[pos - 1])} aria-label="Previous attempt">
@@ -488,7 +491,7 @@ function ActionTimeline({
     >
       {!col ? (
         <EmptyState title="No collection yet">
-          {collector === "astra"
+          {isAgent(collector)
             ? "Start a collection. Every tool call the agent makes, accepted or rejected by the validator, appears here."
             : "Start a collection. Each attempt and its simulator verdict appears here."}
         </EmptyState>
@@ -574,7 +577,7 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
   const cap = t.budget_cap_usd ?? 0;
 
   return (
-    <Panel title="Dataset progress" meta={col ? COLLECTOR_LABEL[col.collector] : undefined}>
+    <Panel title="Dataset progress" meta={col ? collectorName(col.collector, col.model) : undefined}>
       {!col ? (
         <p className="text-xs text-ink-3">Totals appear once a collection starts.</p>
       ) : (
@@ -625,7 +628,7 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
             </div>
           </div>
 
-          {col.collector === "astra" && (
+          {isAgent(col.collector) && (
             <div className="space-y-2">
               <SectionLabel>Model usage</SectionLabel>
               <div className="flex items-baseline justify-between text-xs">
@@ -661,7 +664,7 @@ function DatasetProgress({ project, col, plannerRoute }: { project: Project; col
             {col.collector === "oracle" && <span className="text-2xs text-ink-3">reads simulator state</span>}
           </div>
           {t.stopped_reason && <p className="text-xs text-caution">{t.stopped_reason}</p>}
-          {col.error && <p className="text-xs text-fault">{col.error}</p>}
+          {col.error && <InlineError error={col.error} fallback="The collection stopped with an error." />}
 
           <div className="border-t border-line-soft pt-3">
             <SectionLabel className="mb-1">Next action</SectionLabel>
@@ -729,13 +732,13 @@ function AttemptsTable({ pid, onOpen, collectionId }: { pid: string; onOpen: (id
                     <tr key={a.id} onClick={() => onOpen(a.id)} className="cursor-pointer border-b border-line-soft last:border-0 hover:bg-rail/50">
                       <td className="px-3.5 py-2 font-mono text-xs text-ink-3">{a.index + 1}</td>
                       <td className="px-2 py-2">
-                        <ProvenanceBadge planner={a.collector} mode={a.mode} />
+                        <ProvenanceBadge planner={isAgent(a.collector) ? a.model ?? "agent" : "oracle"} mode={a.mode} />
                       </td>
                       <td className="px-2 py-2">
                         <ScenarioChip scenario={a.scenario} seed={a.seed} />
                       </td>
                       <td className="px-2 py-2">
-                        {a.status === "success" ? <Badge tone="pass">demo</Badge> : <Badge tone="fault" title={a.stop_reason ?? a.error ?? undefined}>failed · diagnostic</Badge>}
+                        {a.status === "success" ? <Badge tone="pass">demo</Badge> : <Badge tone="fault" title={a.stop_reason ?? (a.error ? "Ended with an error: open the attempt for details" : undefined)}>failed · diagnostic</Badge>}
                       </td>
                       <td className="num px-2 py-2 text-right font-mono text-xs">{a.usage.calls ?? 0}</td>
                       <td className="num px-2 py-2 text-right font-mono text-xs">{a.usage.cost_usd ? `$${Number(a.usage.cost_usd).toFixed(3)}` : "—"}</td>
@@ -769,20 +772,20 @@ const COMPARE_ROWS: { key: keyof CollectorStats; label: string; fmt: (v: number)
 export function CollectorComparisonCard({ pid }: { pid: string }) {
   const q = useCollectorComparison(pid);
   return (
-    <Panel title="Astra vs oracle" meta="measured over this project's attempts · no claims beyond the counts" bodyClassName="p-0">
+    <Panel title="Agent vs oracle" meta="measured over this project's attempts · no claims beyond the counts" bodyClassName="p-0">
       <QueryState q={q} skeleton={<div className="p-3.5"><SkeletonRows rows={3} /></div>}>
         {(c) => (
           <table className="w-full text-left text-sm">
             <thead className="text-2xs uppercase tracking-[0.05em] text-ink-3">
               <tr className="border-b border-line-soft">
                 <th className="px-3.5 py-2 font-medium" />
-                {(["astra", "oracle"] as const).map((side) => (
+                {(["agent", "oracle"] as const).map((side) => (
                   <th key={side} className="px-3.5 py-2 text-right font-medium">
                     <span className="inline-flex items-center gap-1">
-                      {side === "astra" ? <Bot className="h-3 w-3" /> : <Cog className="h-3 w-3" />}
-                      {side === "astra" ? "GPT-6 Astra" : "Scripted oracle"}
+                      {side === "agent" ? <Bot className="h-3 w-3" /> : <Cog className="h-3 w-3" />}
+                      {side === "agent" ? "Agent" : "Scripted oracle"}
                     </span>
-                    {!c[side] && <div className="mt-0.5 font-sans text-[10px] normal-case tracking-normal text-ink-4">not measured yet</div>}
+                    {!(side === "agent" ? c.agent ?? c.astra : c[side]) && <div className="mt-0.5 font-sans text-[10px] normal-case tracking-normal text-ink-4">not measured yet</div>}
                   </th>
                 ))}
               </tr>
@@ -791,8 +794,8 @@ export function CollectorComparisonCard({ pid }: { pid: string }) {
               {COMPARE_ROWS.map((r) => (
                 <tr key={r.key} className="border-b border-line-soft last:border-0">
                   <td className="px-3.5 py-1.5 text-xs text-ink-3">{r.label}</td>
-                  {(["astra", "oracle"] as const).map((side) => {
-                    const s = c[side];
+                  {(["agent", "oracle"] as const).map((side) => {
+                    const s = side === "agent" ? c.agent ?? c.astra : c[side];
                     return (
                       <td key={side} className="num px-3.5 py-1.5 text-right font-mono text-xs text-ink">
                         {s ? r.fmt(Number(s[r.key] ?? 0)) : <span className="text-ink-4">—</span>}

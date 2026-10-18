@@ -2,8 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { AlertOctagon, Bot, Check, Cog, Eye, UserRound, VideoOff, X } from "lucide-react";
 import { resolveMediaUrl } from "../api/client";
 import { useAgentAttempt } from "../api/hooks";
-import type { AgentAttempt, Condition, Episode, Scenario, TraceStep } from "../api/types";
-import { Badge, ErrorState, Skeleton } from "./ui";
+import { agentLabel, isAgent, type AgentAttempt, type Condition, type Episode, type Scenario, type TraceStep } from "../api/types";
+import { Badge, ErrorState, Skeleton, InlineError } from "./ui";
 import { LightGlyph } from "./Workcell";
 import { cn, evidenceValue, num } from "../lib/format";
 
@@ -22,7 +22,7 @@ export function PlanningModeBadge({ mode }: { mode: string | null | undefined })
   );
 }
 
-/** "GPT-6 Astra · camera" vs "Scripted IK oracle", from Episode.provenance / AgentAttempt.collector. */
+/** "Claude Code agent · camera" vs "Scripted IK oracle" vs "Human demo · imported". */
 export function ProvenanceBadge({
   planner,
   mode,
@@ -41,13 +41,14 @@ export function ProvenanceBadge({
         Human demo · imported
       </Badge>
     );
-  if (planner === "gpt-6-astra" || planner === "astra" || source === "sim_agent")
+  const oracle = planner === "scripted_ik_oracle" || planner === "oracle" || source === "sim_scripted";
+  if (!oracle && (source === "sim_agent" || (planner && !/teleop/i.test(planner))))
     return (
-      <Badge tone="servo" icon={<Bot className="h-3 w-3" />} title="Planned by GPT-6 Astra, executed by validated IK in MuJoCo">
-        GPT-6 Astra · {mode === "privileged" ? "privileged" : "camera"}
+      <Badge tone="servo" icon={<Bot className="h-3 w-3" />} title={`Planned by ${agentLabel(planner)}, executed by validated IK in MuJoCo`}>
+        {agentLabel(planner)} · {mode === "privileged" ? "privileged" : "camera"}
       </Badge>
     );
-  if (planner === "scripted_ik_oracle" || planner === "oracle" || source === "sim_scripted")
+  if (oracle)
     return (
       <Badge tone="neutral" icon={<Cog className="h-3 w-3" />} title="Fixed IK waypoints computed from simulator state (privileged)">
         Scripted IK oracle
@@ -198,7 +199,7 @@ export function AttemptDrawer({ attemptId, onClose }: { attemptId: string | null
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-base font-semibold">Attempt {a ? `#${a.index + 1}` : ""}</h2>
-                {a && <ProvenanceBadge planner={a.collector} mode={a.mode} />}
+                {a && <ProvenanceBadge planner={isAgent(a.collector) ? a.model ?? "agent" : "oracle"} mode={a.mode} />}
                 {a && <PlanningModeBadge mode={a.mode} />}
               </div>
               <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -252,13 +253,9 @@ export function AttemptDrawer({ attemptId, onClose }: { attemptId: string | null
                       </div>
                     ))}
                   </dl>
-                  {(a.stop_reason || a.error) && (
-                    <p className="text-xs text-fault">
-                      {a.stop_reason && <>Stopped: {a.stop_reason}. </>}
-                      {a.error}
-                    </p>
-                  )}
-                  {a.collector === "astra" && (
+                  {a.stop_reason && <p className="text-xs text-caution">Stopped: {a.stop_reason}</p>}
+                  {a.error && <InlineError error={a.error} fallback="The attempt ended with an error." />}
+                  {isAgent(a.collector) && (
                     <p className="text-2xs text-ink-3">
                       {a.provider ?? "provider unknown"} · <span className="font-mono">{a.model ?? "model unknown"}</span>
                       {a.endpoint && (

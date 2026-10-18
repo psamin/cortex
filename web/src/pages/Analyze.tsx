@@ -22,12 +22,13 @@ import {
   SkeletonRows,
   StatusBadge,
   Toggle,
+  InlineError,
 } from "../components/ui";
 import { ConditionLabel, Footprint } from "../components/Workcell";
 import { describeProvider } from "../components/HealthPills";
 import { AttemptDrawer, EpisodeProvenance, ImportedSource } from "../components/AgentTrace";
 import { QualityBadge, SuccessBadge } from "./Collect";
-import { ago, cn, errorMessage, evidenceValue, humanize, pct } from "../lib/format";
+import { ago, cn, evidenceValue, humanize, pct } from "../lib/format";
 
 export function AnalyzePage() {
   const { pid = "" } = useParams();
@@ -132,7 +133,7 @@ function RunAnalysis({ pid, analysis }: { pid: string; analysis?: Analysis }) {
             <span className="truncate text-2xs text-ink-3">{job.message}</span>
           </div>
         )}
-        {job?.status === "failed" && <p className="mt-1 text-xs text-fault">Analysis failed: {job.error ?? job.message}</p>}
+        {job?.status === "failed" && <InlineError prefix="Analysis failed: " error={job.error ?? job.message} detail={job.error_detail} className="mt-1" />}
       </div>
       <div className="flex items-center gap-4">
         <Toggle checked={useVlm} onChange={setUseVlm} label="VLM diagnosis" hint="Sends frames to the vision model" />
@@ -213,7 +214,7 @@ function EpisodeTable({
                     {e.source === "imported" ? (
                       <UserRound className="h-3.5 w-3.5 text-ink-3" aria-label="Human demo, imported" />
                     ) : e.source === "sim_agent" ? (
-                      <Bot className="h-3.5 w-3.5 text-servo" aria-label="GPT-6 Astra" />
+                      <Bot className="h-3.5 w-3.5 text-servo" aria-label="Agent demo" />
                     ) : e.source === "sim_scripted" ? (
                       <Cog className="h-3.5 w-3.5 text-ink-4" aria-label="Scripted IK oracle" />
                     ) : null}
@@ -395,7 +396,7 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
       meta={<span className="font-mono">{diag.model}</span>}
       actions={diag.status === "hypothesis" ? <HypothesisBadge /> : <StatusBadge status={diag.status} />}
     >
-      {diag.error && <p className="mb-2 text-xs text-fault">Model error: {diag.error}</p>}
+      {diag.error && <InlineError prefix="Diagnosis failed: " error={diag.error} fallback="the vision model returned an error." className="mb-2" />}
       {diag.hypotheses.length === 0 && !diag.error && <p className="text-xs text-ink-3">The model raised no hypotheses.</p>}
       <ul className="space-y-2">
         {diag.hypotheses.map((h, i) => (
@@ -433,7 +434,7 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
             Labelled <span className="font-mono text-ink-2">{diag.human_label}</span> by a human.
           </p>
         )}
-        {m.error && <p className="text-xs text-fault">{errorMessage(m.error)}</p>}
+        {m.error && <InlineError error={m.error} />}
       </div>
     </Panel>
   );

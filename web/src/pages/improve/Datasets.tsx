@@ -6,7 +6,7 @@ import { api } from "../../api/client";
 import { isJobActive, useJob, useTrackJob } from "../../api/events";
 import { useDatasets, useEpisodes } from "../../api/hooks";
 import type { Augmentation, AugmentationType, DatasetVersion, Job } from "../../api/types";
-import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, Select, SkeletonRows, Toggle } from "../../components/ui";
+import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, Select, SkeletonRows, Toggle, InlineError } from "../../components/ui";
 import { ago, cn } from "../../lib/format";
 
 export function augLabel(a: Augmentation) {
@@ -64,7 +64,7 @@ export function DatasetsTab() {
         <div className="flex items-center gap-3 rounded bg-plate px-3 py-2 text-xs shadow-[0_0_0_1px_var(--line)]">
           <span className="text-ink-2">Building dataset…</span>
           <Meter value={job.progress} className="max-w-[200px]" />
-          <span className="truncate text-ink-3">{job.status === "failed" ? <span className="text-fault">{job.error ?? job.message}</span> : job.message}</span>
+          <span className="truncate text-ink-3">{job.status === "failed" ? <InlineError error={job.error ?? job.message} detail={job.error_detail} /> : job.message}</span>
         </div>
       )}
       <QueryState q={q} skeleton={<SkeletonRows rows={3} />}>

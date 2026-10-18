@@ -5,7 +5,7 @@ import { RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { api } from "../../api/client";
 import { useRecommendations } from "../../api/hooks";
 import type { Evidence, Recommendation, RecommendationStatus } from "../../api/types";
-import { Badge, Button, EmptyState, ErrorState, Input, Panel, SkeletonRows } from "../../components/ui";
+import { Badge, Button, EmptyState, ErrorState, Input, Panel, SkeletonRows, InlineError } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
 import { RefChip } from "../../components/refs";
 import { cn, evidenceValue, humanize } from "../../lib/format";
@@ -189,7 +189,7 @@ function RecCard({ r, rank, pid, onChanged }: { r: Recommendation; rank: number;
               Mark done
             </Button>
           )}
-          {m.error && <span className="self-center text-xs text-fault">{(m.error as Error).message}</span>}
+          {m.error && <InlineError error={m.error} className="self-center" />}
         </div>
       </div>
       <div className="space-y-2">

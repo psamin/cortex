@@ -62,7 +62,17 @@ export interface AutopilotPolicy {
   allow_paid_jobs: boolean;
 }
 
-export type Collector = "astra" | "oracle";
+/** "agent" = a planning model drives the arm; "oracle" = scripted IK expert. "astra" is a legacy alias for "agent". */
+export type Collector = "agent" | "oracle";
+export const isAgent = (c: string | null | undefined) => c === "agent" || c === "astra";
+
+/** People-facing name of the planning model behind the agent collector. */
+export function agentLabel(model?: string | null): string {
+  if (!model || model === "agent" || model === "astra") return "Agent";
+  if (/claude[-_]?code/i.test(model)) return "Claude Code agent";
+  if (/gpt-6-astra/i.test(model)) return "GPT-6 Astra";
+  return model;
+}
 export type PlanningMode = "camera" | "privileged";
 
 export const DEFAULT_AUTOPILOT_POLICY: AutopilotPolicy = {
@@ -72,7 +82,7 @@ export const DEFAULT_AUTOPILOT_POLICY: AutopilotPolicy = {
   demos_per_round: 9,
   episodes_per_branch: 10,
   auto_approve_free_training: true,
-  collector: "astra",
+  collector: "agent",
   model_budget_usd: 10,
   planning_mode: "camera",
   max_gpu_hours_per_job: 1.5,
@@ -126,7 +136,7 @@ export interface AutopilotRun {
 // ------------------------------------------------------------------- episodes
 export type EpisodeSource = "sim_scripted" | "sim_agent" | "sim_teleop" | "real_teleop" | "imported";
 
-/** Who produced an episode's actions. planner: "gpt-6-astra" | "scripted_ik_oracle". */
+/** Who produced an episode's actions. planner: the agent's model (e.g. "claude-code") | "scripted_ik_oracle" | "human demonstration (imported)". */
 export interface EpisodeProvenance {
   planner?: string;
   provider?: string | null;
@@ -458,6 +468,8 @@ export interface Job {
   result_ref?: string | null;
   error?: string | null;
   idempotency_key?: string | null;
+  /** technical text for internal errors; `error` is the readable sentence */
+  error_detail?: string | null;
   created_at?: ISODate;
 }
 
@@ -528,7 +540,8 @@ export type PlannerStatus =
       model: string;
       provider: string;
       route: string;
-      pricing_per_m_tokens: { input: number; output: number };
+      /** numbers per million tokens, or a sentence (e.g. Claude Code subscription) */
+      pricing_per_m_tokens: { input: number; output: number } | string;
     }
   | { available: false; model?: string; provider?: null; reason: string };
 
@@ -646,6 +659,8 @@ export interface CollectorStats {
 }
 
 export interface CollectorComparison {
+  agent?: CollectorStats;
+  /** legacy key */
   astra?: CollectorStats;
   oracle?: CollectorStats;
 }

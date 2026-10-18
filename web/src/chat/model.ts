@@ -27,7 +27,7 @@ export type ChatItem =
   | { kind: "meta"; id: number; turns?: number | null; durationMs?: number | null; costUsd?: number | null; isError?: boolean | null }
   | { kind: "error"; id: number; text: string }
   /** A demo import started from this studio (not in agent history): upload progress, then the live job card. */
-  | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; jobId?: string }
+  | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; errorDetail?: string; jobId?: string }
   /** Written by Cortex (not the LLM) when a background job finishes. */
   | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[]; detail?: string | null; superseded?: boolean };
 

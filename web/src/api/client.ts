@@ -62,6 +62,11 @@ export class ApiError extends Error {
     const b = this.body as { code?: unknown } | undefined;
     return typeof b?.code === "string" ? b.code : undefined;
   }
+  /** Technical text the backend keeps out of the headline (`error_detail`), for a "Details" toggle. */
+  get technical(): string | undefined {
+    const b = this.body as { error_detail?: unknown } | undefined;
+    return typeof b?.error_detail === "string" && b.error_detail ? b.error_detail : undefined;
+  }
   /** True when the backend could not be reached at all (network / CORS). */
   get unreachable() {
     return this.status === 0;
