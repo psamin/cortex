@@ -1,4 +1,4 @@
-import type { CallToolResult } from "mcp-use";
+import type { CallToolResult, MCPServer } from "mcp-use";
 
 // The Cortex backend's tool registry is the single source of truth:
 //   GET  {CORTEX_API_URL}/tools        -> tool names + JSON Schemas
@@ -9,6 +9,75 @@ import type { CallToolResult } from "mcp-use";
 export const API_URL = (process.env.CORTEX_API_URL ?? "http://127.0.0.1:8000/api").replace(/\/+$/, "");
 export const STUDIO_URL = (process.env.CORTEX_STUDIO_URL ?? "http://localhost:5173").replace(/\/+$/, "");
 const MCP_KEY = process.env.CORTEX_MCP_KEY;
+// Agent key (ck_...) from the studio's Settings -> Agents: ties these calls to a person (#105).
+// A client can also send its own with `--header "X-Cortex-Agent-Key: ck_..."` (or `Authorization: Bearer ck_...`).
+const AGENT_KEY = process.env.CORTEX_AGENT_KEY;
+
+/** Who is calling, forwarded on every backend call so the studio can show the agent's session live. */
+export type Identity = { sessionId?: string; client?: string; agentKey?: string };
+
+type ClientInfo = { name?: unknown; version?: unknown } | undefined;
+const fmt = (i: ClientInfo) =>
+  i && typeof i.name === "string" && i.name ? (typeof i.version === "string" && i.version ? `${i.name}/${i.version}` : i.name) : undefined;
+
+/** MCP session id -> "name/version" from that connection's `initialize` (legacy clients send it only there). */
+const clients = new Map<string, string>();
+
+/**
+ * Give each connection a session id and remember its clientInfo.
+ *
+ * mcp-use v2 serves every request statelessly and assigns no `Mcp-Session-Id`, so on a 2025-era
+ * `initialize` this middleware assigns one (`cx-<uuid>`) in the response header. Streamable-HTTP
+ * clients (Claude Code, Cursor, VS Code, the Inspector) then send it on every later request, which
+ * is what lets the studio group one connection's calls into a session.
+ */
+export function trackClients(server: MCPServer) {
+  server.use("/mcp", async (c, next) => {
+    let info: string | undefined;
+    let isInit = false;
+    if (c.req.method === "POST") {
+      try {
+        const body: unknown = await c.req.raw.clone().json();
+        const init = (Array.isArray(body) ? body : [body]).find((m) => (m as { method?: string })?.method === "initialize") as
+          | { params?: { clientInfo?: ClientInfo } }
+          | undefined;
+        isInit = init !== undefined;
+        info = fmt(init?.params?.clientInfo);
+      } catch {
+        /* not JSON: nothing to learn */
+      }
+    }
+    await next();
+    let sid = c.res.headers.get("mcp-session-id");
+    if (isInit && !sid && c.res.ok) {
+      sid = `cx-${crypto.randomUUID()}`;
+      const headers = new Headers(c.res.headers);
+      headers.set("mcp-session-id", sid);
+      c.res = new Response(c.res.body, { status: c.res.status, statusText: c.res.statusText, headers });
+    }
+    if (info && sid) {
+      clients.set(sid, info);
+      if (clients.size > 5000) clients.delete(clients.keys().next().value as string);
+    }
+  });
+}
+
+type ToolCtx = {
+  request?: { header(name: string): string | undefined };
+  client: { info(): ClientInfo };
+};
+
+/** Identity for one tool call: MCP session id, clientInfo (per-request envelope, else from initialize), agent key. */
+export function identityOf(ctx: ToolCtx): Identity {
+  const header = (n: string) => ctx.request?.header(n)?.trim() || undefined;
+  const bearer = header("authorization")?.match(/^Bearer\s+(ck_\S+)$/i)?.[1];
+  const agentKey = header("x-cortex-agent-key") ?? bearer ?? AGENT_KEY;
+  let sessionId = header("mcp-session-id");
+  const client = fmt(ctx.client.info()) ?? (sessionId ? clients.get(sessionId) : undefined);
+  // 2026-era clients have no session at all: group their calls per client (and key) instead.
+  if (!sessionId && client) sessionId = `client-${client}-${agentKey ? agentKey.slice(0, 7) : "local"}`;
+  return { sessionId, client, agentKey };
+}
 
 type Json = Record<string, unknown>;
 
@@ -57,13 +126,16 @@ function approvalRequired(tool: string, args: Json, detail: string): CallToolRes
 }
 
 /** POST /tools/{tool} and turn the response into an MCP tool result. */
-export async function callTool(tool: string, args: Json, signal?: AbortSignal): Promise<CallToolResult> {
+export async function callTool(tool: string, args: Json, signal?: AbortSignal, who: Identity = {}): Promise<CallToolResult> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
     "X-Cortex-Actor": "mcp",
   };
-  if (MCP_KEY) headers.Authorization = `Bearer ${MCP_KEY}`;
+  if (MCP_KEY) headers.Authorization = `Bearer ${MCP_KEY}`; // tunnel guard, unrelated to the agent key
+  if (who.agentKey) headers["X-Cortex-Agent-Key"] = who.agentKey;
+  if (who.sessionId) headers["X-Cortex-Agent-Session"] = who.sessionId;
+  if (who.client) headers["X-Cortex-Client"] = who.client;
 
   let res: Response;
   try {
@@ -114,6 +186,9 @@ export async function callTool(tool: string, args: Json, signal?: AbortSignal): 
     };
   }
   if (res.status === 403 && data.approval_required === true) return approvalRequired(tool, args, detail);
+  if (res.status === 403 && data.code === "agent_key_invalid") {
+    return error(`Cortex refused this agent key: ${detail}`);
+  }
   if (res.status === 403) {
     return error(`Cortex backend refused access (403): ${detail}. When the backend is reached through a tunnel, set CORTEX_MCP_KEY on this MCP server to the backend's CORTEX_MCP_KEY.`);
   }

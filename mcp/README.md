@@ -28,6 +28,7 @@ Media is never streamed. Episodes and evaluations come back as ids and storage k
 | `cortex.get_intake_status` | `get_intake_status` | read-only |
 | `cortex.build_simulation` | `build_simulation` | builds the MuJoCo scene, checks feasibility; returns a preview image |
 | `cortex.capture_frame` | `capture_frame` | read-only; returns an image of `top`, `front` or `wrist_cam` |
+| `cortex.get_session_link` | `get_session_link` | read-only; the studio URL where the human watches this session live |
 
 There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an agent through the whole loop: create the project, record demonstrations, analyze, recommend, build a dataset version, propose training, ask the human for approval, evaluate in simulation, compare, and get the next actions.
 
@@ -50,9 +51,38 @@ There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an ag
 | `CORTEX_API_URL` | `http://127.0.0.1:8000/api` | Backend API base. It must be a **public** URL when the server is hosted. |
 | `CORTEX_MCP_KEY` | unset | Sent as `Authorization: Bearer ...`. Required whenever the backend is reached through a tunnel. |
 | `CORTEX_STUDIO_URL` | `http://localhost:5173` | Studio link included in approval messages. |
+| `CORTEX_AGENT_KEY` | unset | Agent key (`ck_...`) from the studio's **Agents → Settings · Agent keys**. Used when the client sends none of its own. |
 | `PORT` | `3000` | Listen port for `npm start`. |
 
 Every request also sends `X-Cortex-Actor: mcp`, so the backend audit log attributes the calls to MCP.
+
+## Agent observability: watch your agent in the studio
+
+Every backend call also carries who is calling, so the studio's **Agents** view (`/studio/agents`) shows each connection as a session with a live timeline of its tool calls (arguments, result summary, returned images, duration, status, approvals):
+
+| Header (MCP server → backend) | Value |
+|---|---|
+| `X-Cortex-Agent-Key` | the agent key: the client's own `X-Cortex-Agent-Key` header (or `Authorization: Bearer ck_...`) to this server, else `CORTEX_AGENT_KEY`. It ties the calls to the key's owner. |
+| `X-Cortex-Agent-Session` | the connection's MCP session id |
+| `X-Cortex-Client` | the client's `clientInfo` from `initialize`, as `name/version` (e.g. `claude-code/2.1.278`) |
+
+`Authorization: Bearer CORTEX_MCP_KEY` (server → backend) is still only the tunnel guard; the agent key never travels in it.
+
+mcp-use v2 serves every request statelessly and assigns no session id, so `index.ts` installs a small middleware (`trackClients` in `src/backend.ts`) that gives each `initialize` an `Mcp-Session-Id: cx-<uuid>` response header and remembers that connection's `clientInfo`. Streamable-HTTP clients send the id back on every call. Clients on the 2026 per-request protocol carry no session; their calls are grouped per client and key.
+
+Without a key, calls belong to the backend's implicit local owner (local mode is single-user). An unknown or revoked key is refused (`isError`, "Cortex refused this agent key"). Keys only attribute calls: they can never approve training or drive the real arm.
+
+Connect with a key (the studio shows these snippets with your key filled in):
+
+```bash
+claude mcp add --transport http cortex http://localhost:3000/mcp --header "X-Cortex-Agent-Key: ck_..."
+```
+
+```json
+{ "mcpServers": { "cortex": { "type": "http", "url": "http://localhost:3000/mcp", "headers": { "X-Cortex-Agent-Key": "ck_..." } } } }
+```
+
+Then ask the agent to call `cortex.get_session_link` and open the URL it returns.
 
 ## Run locally
 
@@ -136,7 +166,7 @@ Notes:
 
 ```
 index.ts         MCPServer setup (name "cortex"), registers tools and the prompt
-src/backend.ts   POST /tools/{name}: headers, error mapping, approval handling
+src/backend.ts   POST /tools/{name}: headers (incl. agent identity), error mapping, approval handling; trackClients
 src/tools.ts     zod input schemas mirroring GET /api/tools, descriptions, annotations
 src/prompts.ts   cortex.teach_task
 ```
