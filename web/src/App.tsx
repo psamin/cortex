@@ -12,6 +12,7 @@ import { RobotPage } from "./pages/Robot";
 import { SetupPage } from "./pages/Setup";
 import { useThemeSync } from "./lib/theme";
 import { useGlowPointer } from "./components/ui/spotlight-card";
+import { AgentsPage } from "./agents/AgentsPage";
 
 // Public landing page at /. Lazy so the studio bundle never pulls in its fonts or sections; the landing page in turn
 // lazy-loads its 3D hero and falls back to a still image when three.js or WebGL is missing (see landing/hero/HeroSection).
@@ -62,6 +63,7 @@ export function App() {
       />
       <Route element={<AppShell />}>
         <Route path="studio" element={<HomePage />} />
+        <Route path="studio/agents" element={<AgentsPage />} />
         <Route path="p/:pid" element={<ProjectLayout />}>
           <Route index element={<ProjectChatPage />} />
           <Route path="overview" element={<PlanPage />} />

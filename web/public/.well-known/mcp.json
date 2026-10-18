@@ -1628,6 +1628,19 @@
       },
       "agentCallable": false,
       "needsApproval": false
+    },
+    {
+      "name": "get_session_link",
+      "mcpTools": [
+        "cortex.get_session_link"
+      ],
+      "description": "The Cortex studio URL where your human can watch this agent session live (every tool call, its arguments, results, images and approvals). Share it when you start working.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
     }
   ]
 }

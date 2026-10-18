@@ -62,6 +62,8 @@ class Settings(BaseSettings):
     cortex_mcp_key: str | None = None
     # Real SO-101 arm: set only on the machine wired to the robot (spec section 5)
     cortex_enable_hardware: bool = False
+    # Where the studio is served; get_session_link points agents' humans here (#105)
+    cortex_studio_url: str = "http://localhost:5173"
 
     @property
     def insforge_enabled(self) -> bool:

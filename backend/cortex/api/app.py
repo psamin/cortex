@@ -151,6 +151,10 @@ async def _409(_, e: FileNotFoundError):
 
 
 def actor(request: Request) -> str:
+    from ..services.agent_obs import has_agent_headers
+
+    if has_agent_headers(request.headers):  # an agent key or session is never a human click (#105)
+        return "mcp"
     a = request.headers.get("x-cortex-actor", "gui")
     return a if a in ("gui", "agent", "mcp") else "gui"
 
@@ -627,6 +631,10 @@ def _local_human(request: Request) -> None:
     remote = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for")
     if remote or request.client is None or request.client.host not in LOCAL:
         raise hw_setup.HardwareRefused("Real-robot controls are only available in the local studio.")
+    from ..services.agent_obs import has_agent_headers
+
+    if has_agent_headers(request.headers) or request.headers.get("x-cortex-actor") in ("mcp", "agent"):
+        raise hw_setup.HardwareRefused("Real-robot controls are a human click in the studio; agents cannot use them.")
 
 
 @app.get("/api/hardware")
@@ -927,9 +935,12 @@ async def list_tools():
 
 @app.post("/api/tools/{name}")
 async def call_tool(name: str, args: dict[str, Any], request: Request):
+    from ..services import agent_obs
+
     who = "mcp" if request.headers.get("x-cortex-actor", "mcp") != "agent" else "agent"
+    caller = await agent_obs.resolve(ctx(), request.headers, who)  # agent key, MCP session, client (#105)
     try:
-        return await orch.call_tool(ctx(), name, args, who)
+        return await orch.call_tool(ctx(), name, args, who, caller)
     except ValidationError as e:
         raise HTTPException(422, e.errors(include_url=False)) from e
 
@@ -998,3 +1009,9 @@ async def rl_live(sid: str):
     if not path.exists():
         raise HTTPException(404, "no live frame yet")
     return Response(path.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+# ------------------------------------------------------------------ agent observability (#105)
+from .agents import router as agents_router  # noqa: E402
+
+app.include_router(agents_router)
