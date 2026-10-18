@@ -197,8 +197,12 @@ async def create_project(req: CreateProjectRequest, request: Request) -> Project
 
 
 @app.get("/api/projects")
-async def list_projects() -> list[Project]:
-    return list(reversed(await ctx().repo.list("projects", Project)))
+async def list_projects(history: bool = False) -> list[Project]:
+    """Newest first. `history=true`: only projects with history (Home); empty ones past their grace period are
+    deleted on the way (services/project_cleanup.py)."""
+    from ..services import project_cleanup
+    projects = await project_cleanup.listed(ctx())
+    return await project_cleanup.with_history(ctx(), projects) if history else projects
 
 
 @app.get("/api/projects/{pid}")

@@ -130,10 +130,11 @@ async def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any], tid: str | None
 
 async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:
     """Stream one agent turn and record it to the chat thread (the latest unless `tid` is given)."""
-    from . import chat_store
+    from . import chat_store, project_cleanup
 
     tid = (await chat_store.current(ctx, pid, tid))["id"]
     yield _sse("thread", {"id": tid})
+    await project_cleanup.restore(ctx, pid)  # a chat is history: an empty project deleted earlier comes back
     await _append_log(ctx, pid, {"kind": "user", "text": message}, tid)
     before = await _counts(ctx, pid)
     text: list[str] = []
@@ -320,6 +321,9 @@ JOB_LABELS = {"record": "Recording demonstrations", "agent_collect": "Demonstrat
 async def post_job_done(ctx: Ctx, job) -> None:
     """When a job finishes, Cortex (not the LLM) posts a fixed status line into the chat."""
     from ..models import AgentCollection, DatasetVersion
+    from . import project_cleanup
+
+    await project_cleanup.restore(ctx, job.project_id)  # a job ran: an empty project deleted earlier comes back
 
     label = JOB_LABELS.get(job.kind, job.kind)
     detail = ""

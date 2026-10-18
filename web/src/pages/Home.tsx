@@ -3,7 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowUp, CircleDashed } from "lucide-react";
 import { api } from "../api/client";
-import { useProjects } from "../api/hooks";
+import { useProjectsWithHistory } from "../api/hooks";
 import { ErrorState } from "../components/ui";
 import { DashedOrbit, IsoIcon } from "../sketch";
 import { ago } from "../lib/format";
@@ -15,7 +15,7 @@ const EXAMPLES = ["Pick up the cube and place it in the bowl", "Push the cube to
 export function HomePage() {
   const nav = useNavigate();
   const qc = useQueryClient();
-  const projects = useProjects();
+  const projects = useProjectsWithHistory();
   const [prompt, setPrompt] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
   useEffect(() => {

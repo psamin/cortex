@@ -127,6 +127,8 @@ export const api = {
 
   // projects
   listProjects: () => get<Project[]>("/projects"),
+  /** Only projects with history (chat, demos, datasets, jobs, …); the server deletes stale empty ones. */
+  listProjectsWithHistory: () => get<Project[]>("/projects?history=true"),
   createProject: (req: CreateProjectRequest) => post<Project>("/projects", req),
   projectState: (pid: string) => get<ProjectState>(`/projects/${pid}/state`),
   audit: (pid: string) => get<AuditRow[]>(`/projects/${pid}/audit`),
