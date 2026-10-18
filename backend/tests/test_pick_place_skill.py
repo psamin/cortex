@@ -1,7 +1,6 @@
 """The generic scripted skill completes home -> pick -> place -> home on intake scenes (real pinned model)."""
 
 import numpy as np
-import pytest
 
 from cortex import intake
 from cortex.sim.pick_place_skill import PickPlaceSkill
@@ -41,7 +40,6 @@ def test_cube_top_grasp_home_to_home(tmp_path):
     assert r["failed"] is None, r
     assert r["success"], r
     assert r["phases"][0] == "hover" and r["phases"][-1] == "home" and r["home_err"] < 2.0
-
 
 
 def test_small_bottle_side_grasp_home_to_home(tmp_path):
