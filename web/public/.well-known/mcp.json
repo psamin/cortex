@@ -1306,6 +1306,128 @@
       },
       "agentCallable": true,
       "needsApproval": false
+    },
+    {
+      "name": "collection_snapshot",
+      "mcpTools": [],
+      "description": "Live snapshot of an agent demonstration collection for the MCP App view: status, successes/attempts, model calls and spend, recent attempts and the latest sim frame.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "collection_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "defaults to the project's latest collection"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "evaluation_report",
+      "mcpTools": [],
+      "description": "Evaluation of a policy per condition, with Wilson 95% intervals, measured failure modes and the weakest condition.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "evaluation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "defaults to the project's latest evaluation"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "review_training_job",
+      "mcpTools": [],
+      "description": "Show a proposed training job (cost, GPU hours, dataset, rationale) for a human to review and approve. Does not approve anything.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "training_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "defaults to the latest proposed training job"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "approve_training_from_view",
+      "mcpTools": [],
+      "description": "Human-only: approve a training job with the single-use nonce from the review view. Agents never have the nonce.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "training_job_id": {
+            "type": "string"
+          },
+          "nonce": {
+            "description": "single-use approval nonce given only to the review view",
+            "type": "string"
+          },
+          "decision": {
+            "const": "approve",
+            "default": "approve",
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "training_job_id",
+          "nonce"
+        ],
+        "type": "object"
+      },
+      "agentCallable": false,
+      "needsApproval": false
     }
   ]
 }
