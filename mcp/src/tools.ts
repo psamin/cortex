@@ -22,6 +22,10 @@ const waitS = (max: number, typical: string) =>
 
 const READ: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+/** Overwrites earlier state (replaces derived results or settings); same input, same outcome. */
+const REPLACE: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
+/** May call an external model provider (agent planner / VLM) and spend the project's model budget. */
+const WRITE_EXTERNAL: ToolAnnotations = { ...WRITE, openWorldHint: true };
 
 type Def = {
   name: string;
@@ -136,7 +140,7 @@ const TOOLS: Def[] = [
       use_vlm: z.boolean().optional().describe("Also ask a vision-language model for failure hypotheses (default true). VLM output is a hypothesis, not evidence."),
       wait_s: waitS(600, "Without the VLM it finishes in about a second; VLM review takes longer."),
     }),
-    annotations: WRITE,
+    annotations: { ...WRITE_EXTERNAL, destructiveHint: true },
   },
   {
     name: "get_failure_clusters",
@@ -159,7 +163,7 @@ const TOOLS: Def[] = [
       project_id: projectId,
       budget: z.number().int().nullish().describe("Demonstrations you can still afford to collect (default: the plan budget + 12 minus accepted episodes)"),
     }),
-    annotations: WRITE,
+    annotations: { ...WRITE, destructiveHint: true },
   },
   {
     name: "create_dataset_version",
@@ -296,7 +300,7 @@ const TOOLS: Def[] = [
       ),
       model_budget_usd: z.number().positive().optional().describe("Planner spend cap in USD (may only lower the default)"),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
   {
     name: "start_agent_collection",
@@ -325,7 +329,7 @@ const TOOLS: Def[] = [
         "camera (default): the planner only sees images + proprioception. privileged: also simulator object poses (labelled as such).",
       ),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
   {
     name: "get_collection_progress",
@@ -368,8 +372,10 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       sources: z.array(z.enum(["sim_agent", "sim_scripted"])).optional().describe("Demo sources (default ['sim_agent'])"),
-      augmentation_preset: z.enum(["lighting_robustness"]).nullish(),
-      policy_type: z.enum(["act", "smolvla"]).optional(),
+      augmentation_preset: z.enum(["lighting_robustness"]).nullish().describe(
+        "Optional image augmentation: 'lighting_robustness' adds darker, brighter, warmer and shadowed copies (default none)",
+      ),
+      policy_type: z.enum(["act", "smolvla"]).optional().describe("'act' (default; fast, single-task) or 'smolvla' (language-conditioned, slower)"),
     }),
     annotations: WRITE,
   },
@@ -385,7 +391,7 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       checkpoint_id: z.string().regex(/^ck_/).describe("Checkpoint id from get_project_state training_jobs[].checkpoint_ids"),
-      episodes_per_branch: z.number().int().min(1).max(50).optional(),
+      episodes_per_branch: z.number().int().min(1).max(50).optional().describe("Held-out episodes per condition (1-50, default 10)"),
     }),
     annotations: WRITE,
   },
@@ -401,10 +407,10 @@ const TOOLS: Def[] = [
       "after they confirm, cortex_launch_training_job.",
     inputSchema: z.object({
       project_id: projectId,
-      max_new_demos: z.number().int().min(1).max(20).optional(),
-      max_usd: z.number().positive().nullish(),
+      max_new_demos: z.number().int().min(1).max(20).optional().describe("Targeted demonstrations to collect in the weakest condition (1-20)"),
+      max_usd: z.number().positive().nullish().describe("Planner spend cap in USD for this round (within the project budget)"),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
 
   {
@@ -421,7 +427,7 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       repo_id: z.string().describe("Hugging Face dataset repo id"),
-      max_episodes: z.number().int().min(1).max(50).optional(),
+      max_episodes: z.number().int().min(1).max(50).optional().describe("Import at most this many episodes (1-50)"),
     }),
     annotations: { ...WRITE, openWorldHint: true },
   },
@@ -445,9 +451,9 @@ const TOOLS: Def[] = [
       planner: z.enum(["auto", "claude_code", "model"]).optional(),
       training_backend: z.enum(["auto", "futurama_slurm", "manual"]).optional(),
       training_gres: z.enum(["gpu:l40s:1", "gpu:l40:1", "gpu:l4:1", "gpu:h200:1"]).optional(),
-      training_walltime_min: z.number().int().min(15).max(1440).optional(),
+      training_walltime_min: z.number().int().min(15).max(1440).optional().describe("Cluster walltime limit for training, in minutes (15-1440)"),
     }),
-    annotations: WRITE,
+    annotations: REPLACE,
   },
   // ---- drive the simulated arm yourself (Cortex validates + executes every command; the simulator judges success)
   {
@@ -494,7 +500,7 @@ const TOOLS: Def[] = [
     description:
       "Simulated arm (MuJoCo, no hardware): point at the red cube's centre in the most recent overhead image. Cortex back-projects the pixel through the " +
       "calibrated camera, refines it in the image, estimates the cube's yaw, and returns validated pregrasp/grasp poses.",
-    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
+    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint.describe("Pixel at the red cube's centre in the latest overhead image") }),
     annotations: ROBOT,
     backend: act("propose_grasp", (i) => ({ object_id: "red_cube", image_point: i.image_point })),
   },
@@ -502,7 +508,11 @@ const TOOLS: Def[] = [
     name: "robot_move",
     title: "Simulated arm: move gripper",
     description: "Simulated arm (MuJoCo, no hardware): move the gripper tip to a pose (use the poses from cortex_robot_propose_grasp). Validated before it moves.",
-    inputSchema: z.object({ session_id: sessionId, target: pose, reason: z.string().max(200).optional() }),
+    inputSchema: z.object({
+      session_id: sessionId,
+      target: pose.describe("Gripper-tip target pose in metres (world frame), e.g. a pose from cortex_robot_propose_grasp"),
+      reason: z.string().max(200).optional().describe("Why you are moving there (logged with the episode)"),
+    }),
     annotations: ROBOT,
     backend: act("move_end_effector", (i) => ({ target: i.target, reason: i.reason ?? "" })),
   },
@@ -526,7 +536,7 @@ const TOOLS: Def[] = [
     name: "robot_place",
     title: "Simulated arm: place",
     description: "Simulated arm (MuJoCo, no hardware): carry the held cube to the point you mark at the green box's centre (overhead image) and release it.",
-    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
+    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint.describe("Pixel at the green box's centre in the latest overhead image") }),
     annotations: ROBOT,
     backend: act("place_object", (i) => ({ image_point: i.image_point })),
   },
@@ -543,7 +553,11 @@ const TOOLS: Def[] = [
     title: "Simulated arm: finish episode",
     description:
       "Simulated arm (MuJoCo, no hardware): end the episode. The simulator (not you) decides success; successes are saved as demonstrations, failures as diagnostics.",
-    inputSchema: z.object({ session_id: sessionId, believes_success: z.boolean(), summary: z.string().max(400).optional() }),
+    inputSchema: z.object({
+      session_id: sessionId,
+      believes_success: z.boolean().describe("Whether you think the cube ended in the box (the simulator decides)"),
+      summary: z.string().max(400).optional().describe("Short account of the episode, kept with the demonstration"),
+    }),
     annotations: ROBOT,
     backend: (i) => ["robot_finish_episode", { session_id: i.session_id, believes_success: i.believes_success, summary: i.summary ?? "" }],
   },
@@ -585,7 +599,7 @@ const TOOLS: Def[] = [
         "Partial intake. Sizes in metres (cylinder size = [diameter, height], not radius); positions in the world frame (+x forward from the arm base, +y to its left). e.g. {objects:[{name:'cup', mass_kg:0.2}], zones:[{name:'coaster', center:[0.3,0.1]}], task:{pick:'cup', place:['coaster']}, environment:{lighting:'dim', obstacles:[...]}}",
       ),
     }),
-    annotations: WRITE,
+    annotations: REPLACE,
   },
   {
     name: "get_intake_status",
@@ -605,7 +619,7 @@ const TOOLS: Def[] = [
       "NEXT: check the scene with cortex_capture_frame, fix any infeasible items with cortex_update_intake, then collect demos " +
       "with cortex_start_agent_collection.",
     inputSchema: z.object({ project_id: projectId }),
-    annotations: WRITE,
+    annotations: { ...WRITE, idempotentHint: true },
   },
   {
     name: "capture_frame",
