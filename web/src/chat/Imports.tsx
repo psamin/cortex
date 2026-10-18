@@ -39,7 +39,7 @@ export function useImporter(pid: string) {
           status: "started",
           jobId: job.id,
           loaded: file.size,
-          ...(again ? { title: `Already imported: ${file.name}`, detail: "This dataset was imported earlier with the same settings, so nothing new was added." } : {}),
+          ...(again ? { title: `Already imported: ${file.name}`, detail: "Imported earlier with the same settings; nothing added." } : {}),
         });
       })
       .catch((e) => {
@@ -59,7 +59,7 @@ export function useImporter(pid: string) {
         chat.patchImport(id, {
           status: "started",
           jobId: job.id,
-          ...(again ? { title: `Already imported: ${repoId}`, detail: "This dataset was imported earlier with the same settings, so nothing new was added." } : {}),
+          ...(again ? { title: `Already imported: ${repoId}`, detail: "Imported earlier with the same settings; nothing added." } : {}),
         });
       })
       .catch((e) => {
@@ -166,7 +166,7 @@ export function ImportSheet({
           />
         </label>
         <p className="min-w-0 flex-1 pb-1.5 text-[11px] leading-snug text-ink-4">
-          {mode === "file" ? "A LeRobot dataset folder as .zip or .tar.gz, up to 2 GB." : "Any public LeRobot dataset on the Hub."} Imported demos are human demonstrations, not simulator-verified.
+          {mode === "file" ? ".zip / .tar.gz · ≤ 2 GB" : "Public LeRobot dataset"} · imported, not sim-verified
         </p>
         <button type="submit" className="sk-pill sk-pill-primary inline-flex h-8 shrink-0 items-center gap-1.5 px-4 text-[13px] font-medium">
           <Upload className="h-3.5 w-3.5" /> Import
