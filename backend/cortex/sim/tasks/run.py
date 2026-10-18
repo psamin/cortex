@@ -4,6 +4,11 @@
     python -m cortex.sim.tasks.run merge <task> <dataset_root> <shard_root> [<shard_root> ...]
     python -m cortex.sim.tasks.run evaluate <task> <checkpoint_dir> <out_dir> --episodes 50 [--device cuda]
 
+Demos are recorded with DART-style exploration (``--noise-deg``): smooth noise is added to the arm command
+that is *executed*, while the expert's clean command is what gets *recorded*. The oracles command
+absolute joint targets, so from every nudged state the label points back to the plan, and the policy
+learns to recover instead of only ever seeing the perfect path. Episodes the noise breaks are dropped.
+
 Recording is parallel: n shard processes take seeds shard, shard + n, ... and ``merge`` joins their
 datasets into one (the rendering, not the physics, is the bottleneck, so this scales with processes).
 
@@ -29,6 +34,22 @@ from . import make
 JOINTS = ["shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper"]
 EVAL_SEED0 = 100_000
 SETTLE = 30  # control steps held after the motion ends, so the verifier sees things at rest
+GRIP_HALF = 30.0  # gripper command above this is open (expert.GRIP_OPEN = 60, GRIP_CLOSED = 0)
+
+
+class Nudge:
+    """Smooth (Ornstein-Uhlenbeck) noise on the five arm joints, in degrees: full size while the gripper is
+    open (reaching), 30% while it is closed (holding / turning), so contact phases are not wrecked."""
+
+    def __init__(self, rng: np.random.Generator, deg: float, theta: float = 0.15):
+        self.rng, self.deg, self.theta = rng, deg, theta
+        self.x = np.zeros(5)
+
+    def __call__(self, action: np.ndarray) -> np.ndarray:
+        self.x += -self.theta * self.x + self.deg * np.sqrt(2 * self.theta) * self.rng.standard_normal(5)
+        out = np.array(action, dtype=np.float32, copy=True)
+        out[:5] += (1.0 if out[5] > GRIP_HALF else 0.3) * self.x
+        return out
 
 
 def _size(s: str) -> tuple[int, int]:
@@ -67,8 +88,10 @@ class Presenter:
         self.cam.close()
 
 
-def episode(env, policy, seed: int, record: bool, presenter: Presenter | None = None) -> dict[str, Any]:
+def episode(env, policy, seed: int, record: bool, presenter: Presenter | None = None,
+            noise_deg: float = 0.0) -> dict[str, Any]:
     obs = env.reset(seed)
+    nudge = Nudge(np.random.default_rng(seed + 7919), noise_deg) if noise_deg > 0 else None
     policy.reset(env, obs, seed)
     render = record or presenter is not None or getattr(policy, "needs_pixels", True)
     rows: list[tuple] = []
@@ -81,7 +104,7 @@ def episode(env, policy, seed: int, record: bool, presenter: Presenter | None = 
                          np.asarray(obs["agent_pos"], np.float32), action))
         if presenter is not None:
             video.append(presenter.frame(obs))
-        nxt, _, success, _, _ = env.step(action, render=render)
+        nxt, _, success, _, _ = env.step(nudge(action) if nudge else action, render=render)
         obs = nxt if nxt is not None else obs
         finished = getattr(policy, "done", False) or success
         held = held + 1 if finished else 0
@@ -114,7 +137,9 @@ def demos(args: argparse.Namespace) -> None:
         env.reset(0)  # the presentation renderer needs the model
         presenter = Presenter(env)
     while len(kept) < want and seed < args.episodes * 2:
-        ep = episode(env, oracle, seed, record=True, presenter=presenter if len(kept) < args.n_examples else None)
+        example = presenter is not None and len(kept) < args.n_examples  # example videos show the clean expert
+        ep = episode(env, oracle, seed, record=True, presenter=presenter if example else None,
+                     noise_deg=0.0 if example else args.noise_deg)
         if ep["success"]:
             for front, wrist, state, action in ep["rows"]:
                 ds.add_frame({"observation.images.front": front, "observation.images.wrist": wrist,
@@ -129,7 +154,8 @@ def demos(args: argparse.Namespace) -> None:
         seed += args.shards
     ds.finalize()
     (root / "meta" / "cortex_sim.json").write_text(json.dumps({
-        "task": args.task, "instruction": env.instruction, "size": args.size, "kept_seeds": kept,
+        "task": args.task, "instruction": env.instruction, "size": args.size, "noise_deg": args.noise_deg,
+        "kept_seeds": kept,
         "failed_seeds": failed, "oracle_success_rate": len(kept) / max(1, len(kept) + len(failed))}, indent=1))
     if presenter:
         presenter.close()
@@ -147,7 +173,8 @@ def merge(args: argparse.Namespace) -> None:
     kept = sorted(s for m in metas for s in m["kept_seeds"])
     failed = sorted(s for m in metas for s in m["failed_seeds"])
     (Path(args.root) / "meta" / "cortex_sim.json").write_text(json.dumps({
-        **{k: metas[0][k] for k in ("task", "instruction", "size")}, "kept_seeds": kept, "failed_seeds": failed,
+        **{k: metas[0].get(k) for k in ("task", "instruction", "size", "noise_deg")}, "kept_seeds": kept,
+        "failed_seeds": failed,
         "oracle_success_rate": len(kept) / max(1, len(kept) + len(failed)), "shards": len(roots)}, indent=1))
     print(json.dumps({"merged_episodes": len(kept), "failed": len(failed)}), flush=True)
 
@@ -194,6 +221,7 @@ def main() -> None:
     d.add_argument("--size", default="240x320")
     d.add_argument("--examples")
     d.add_argument("--n-examples", type=int, default=3)
+    d.add_argument("--noise-deg", type=float, default=0.0, help="DART exploration noise on the executed arm command")
     d.add_argument("--shard", type=int, default=0)
     d.add_argument("--shards", type=int, default=1)
     m = sub.add_parser("merge")
