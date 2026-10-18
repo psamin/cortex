@@ -122,3 +122,25 @@ def test_api_lists_all_live_projects_and_home_gets_only_those_with_history(clien
     client.portal.call(chat_store.append, ctx, used.id, t["id"], {"kind": "user", "text": "train a policy"})
     assert [p["id"] for p in client.get("/api/projects").json()] == [used.id, empty.id]
     assert [p["id"] for p in client.get("/api/projects", params={"history": "true"}).json()] == [used.id]
+
+
+def test_an_unreadable_history_check_keeps_the_project(tmp_path, monkeypatch):
+    async def go():
+        ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+        old = await make(ctx, "Unreadable", age_min=600)
+        empty = await make(ctx, "Empty index", age_min=600)
+        ctx.local(chat_store._key(empty.id, "index.json")).parent.mkdir(parents=True, exist_ok=True)
+        ctx.local(chat_store._key(empty.id, "index.json")).write_text("")  # an interrupted write
+        assert await chat_store.threads(ctx, empty.id) == []
+
+        real = project_cleanup.has_history
+
+        async def broken(c, pid):
+            if pid == old.id:
+                raise ValueError("Expecting value: line 1 column 1 (char 0)")
+            return await real(c, pid)
+
+        monkeypatch.setattr(project_cleanup, "has_history", broken)
+        shown = await project_cleanup.with_history(ctx, await project_cleanup.listed(ctx))
+        assert [p.id for p in shown] == [old.id] and await status(ctx, old.id) == "active"
+    run(go())

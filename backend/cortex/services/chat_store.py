@@ -71,6 +71,8 @@ async def threads(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
     raw = await _fetch(ctx, _key(pid, "index.json"))
     if raw is None:
         return await _adopt_legacy(ctx, pid)
+    if not raw.strip():  # an interrupted write leaves an empty index: no threads yet
+        return []
     return json.loads(raw)
 
 
