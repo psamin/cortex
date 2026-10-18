@@ -87,6 +87,7 @@ def test_weaknesses_and_approval_gates(client):
     assert [w["key"] for w in ws["weaknesses"]] == ["shifted_object"]  # baseline 9/10 passes the 0.8 target
     w = ws["weaknesses"][0]
     assert w["dominant_failure"] == "grasp_failed" and w["n"] == 10 and w["ci95"][0] < 0.3 < w["ci95"][1]
+    assert client.get(f"/api/projects/{pid}/rl/weaknesses").json()[0]["key"] == "shifted_object"
 
     from cortex.rl.weakness import find_weaknesses
     from cortex.services.simulation_runner import list_evaluations
@@ -147,8 +148,9 @@ def test_propose_accept_run_status_end_to_end(client):
     assert res["kind"] == "measured" and len(res["heldout_seeds"]) == 5 and 0 <= res["p_value"] <= 1
     assert st["current_ranges"]["offset_jitter_m"] >= 0.02 and st["cost_so_far"]["usd"] == 0
 
-    listed = tool(client, "get_rl_sandbox_status", project_id=pid)["sandboxes"]
+    listed = client.get(f"/api/projects/{pid}/rl/sandboxes").json()
     assert [s["id"] for s in listed] == [sb["id"]]
+    assert client.get(f"/api/rl/sandboxes/{sb['id']}/live.jpg").headers["content-type"] == "image/jpeg"
 
     from cortex.services.rl_service import RLRound
 
