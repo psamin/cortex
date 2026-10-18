@@ -935,8 +935,9 @@ async def planner_budget(pid: str):
     from ..services import agent_collection_service as acs
     p = await orch.get_project(ctx(), pid)
     spent = await acs.spent_usd(ctx(), pid)
+    held = await acs.reserved_usd(ctx(), pid)
     return {"budget_usd": p.autopilot.model_budget_usd, "spent_usd": spent,
-            "remaining_usd": round(p.autopilot.model_budget_usd - spent, 4)}
+            "remaining_usd": round(p.autopilot.model_budget_usd - spent - held, 4)}
 
 
 @app.get("/api/projects/{pid}/agent-attempts")
@@ -983,19 +984,26 @@ async def infra_get(pid: str):
 async def infra_put(pid: str, request: Request):
     from ..models import InfraChoice
     from ..services import infra_service
-    p = await orch.get_project(ctx(), pid)
-    choice = InfraChoice.model_validate({**p.infra.model_dump(), **(await request.json())})
-    await infra_service.set_choice(ctx(), p, choice, actor(request))
-    return await infra_service.options(ctx(), p)
+    from ..services.intake_service import project_lock
+
+    body = await request.json()
+    async with project_lock(pid):
+        p = await orch.get_project(ctx(), pid)
+        choice = InfraChoice.model_validate({**p.infra.model_dump(), **body})
+        await infra_service.set_choice(ctx(), p, choice, actor(request))
+        return await infra_service.options(ctx(), p)
 
 
 @app.put("/api/projects/{pid}/autopilot/policy")
 async def ap_policy(pid: str, policy: dict, request: Request):
-    p = await orch.get_project(ctx(), pid)
-    p.autopilot = p.autopilot.model_validate({**p.autopilot.model_dump(), **policy})
-    await ctx().repo.save("projects", p, status="active")
-    await ctx().audit(actor(request), "set_autopilot_policy", pid, policy, "ok", "policy updated")
-    return p.autopilot
+    from ..services.intake_service import project_lock
+
+    async with project_lock(pid):
+        p = await orch.get_project(ctx(), pid)
+        p.autopilot = p.autopilot.model_validate({**p.autopilot.model_dump(), **policy})
+        await ctx().repo.save("projects", p, status="active")
+        await ctx().audit(actor(request), "set_autopilot_policy", pid, policy, "ok", "policy updated")
+        return p.autopilot
 
 
 # ------------------------------------------------------------------ agent

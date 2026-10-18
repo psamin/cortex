@@ -157,9 +157,14 @@ async def build_simulation(ctx: Ctx, p: Project, actor: str) -> dict[str, Any]:
         info = await asyncio.to_thread(build_scene, spec, out_dir)
         report = await _on_gl(_feasibility, spec, info)
         # Patches wait on the lock, so the intake saved here is the one the scene was built from.
-        p.scene = {**info.to_dict(ctx.data_dir), "feasibility": report, "intake_digest": intake_digest(spec)}
-        p.spec.goal = instruction_for(p)  # the studio, the agents and datasets name the scene's task, not the cube's
-        await ctx.repo.save("projects", p, status="active")
+        # Copy only the scene (and the task it names) onto a row re-read now: a policy or infra write
+        # that did not take this lock during the build must not be replaced by the project loaded at the start.
+        scene = {**info.to_dict(ctx.data_dir), "feasibility": report, "intake_digest": intake_digest(spec)}
+        fresh = await _reload(ctx, p)
+        fresh.scene = scene
+        fresh.spec.goal = instruction_for(fresh)  # the studio, the agents and datasets name the scene's task, not the cube's
+        await ctx.repo.save("projects", fresh, status="active")
+        p = fresh
     preview = await capture_frame(ctx, p, "top")
     await ctx.audit(actor, "build_simulation", p.id, {}, "ok", f"scene {info.digest}: {report['summary']}")
     return {"scene": p.scene, "feasibility": report, "preview": preview}
