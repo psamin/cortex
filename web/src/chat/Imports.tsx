@@ -8,6 +8,7 @@ import { IsoIcon } from "../sketch";
 import { ResultCard } from "./cards";
 import { useChat } from "./ChatProvider";
 import type { ChatItem } from "./model";
+import { GlowEdge } from "../components/ui/spotlight-card";
 
 const MB = 1024 * 1024;
 const fmtSize = (b: number) => (b >= 1024 * MB ? `${(b / (1024 * MB)).toFixed(2)} GB` : `${(b / MB).toFixed(1)} MB`);
@@ -75,6 +76,7 @@ export function ImportRow({ it, pid }: { it: Extract<ChatItem, { kind: "import" 
   return (
     <div className="enter space-y-2.5">
       <div className="sk-depth relative flex items-start gap-2.5 rounded border border-line-strong bg-plate px-3 py-2.5">
+        <GlowEdge />
         <IsoIcon name="dataset" size={20} accent={it.status === "uploading"} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-ink">{it.title}</p>
@@ -127,6 +129,7 @@ export function ImportSheet({
       }}
       className="enter sk-depth relative mb-3 rounded border border-line-strong bg-plate p-3.5"
     >
+      <GlowEdge />
       <div className="mb-2 flex items-center justify-between">
         <span className="flex items-center gap-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink"><IsoIcon name="dataset" size={18} />{mode === "file" ? "Import demonstrations" : "Import from Hugging Face"}</span>
         <button type="button" onClick={onClose} className="rounded-full p-1 text-ink-3 hover:bg-rail hover:text-ink" aria-label="Cancel import">

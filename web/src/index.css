@@ -159,12 +159,12 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
 :root,
 [data-theme="light"] {
   --glow: 23 23 23;
-  --glow-edge-a: 0.5;
+  --glow-edge-a: 0.65;
   --glow-surface-a: 0.025;
 }
 [data-theme="dark"] {
   --glow: 255 255 255;
-  --glow-edge-a: 0.55;
+  --glow-edge-a: 0.75;
   --glow-surface-a: 0.035;
 }
 .glow-edge,
