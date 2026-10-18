@@ -47,7 +47,7 @@ export function CollectPage() {
     <div className="space-y-4 px-5 py-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-[-0.01em]">Collect demonstrations</h1>
+          <h1 className="kn-display text-[36px] leading-tight">Collect demonstrations</h1>
           <p className="mt-0.5 text-sm text-ink-3">Only simulator-verified successes become LeRobot demonstrations.</p>
         </div>
         {mode && (
@@ -566,8 +566,8 @@ function EpisodeCard({
   return (
     <div
       className={cn(
-        "group overflow-hidden rounded bg-well shadow-[0_0_0_1px_var(--line)]",
-        highlight && "shadow-[0_0_0_1.5px_rgb(var(--servo))]",
+        "group overflow-hidden rounded bg-well border border-line",
+        highlight && "border border-servo",
         e.status === "rejected" && "opacity-55",
       )}
     >
@@ -693,7 +693,7 @@ function BatchDialog({
           const on = sel.has(k);
           return (
             <div className={cn("flex items-center gap-2 px-2 py-2", on && "bg-servo/10")}>
-              <span className={cn("flex h-3.5 w-3.5 items-center justify-center rounded-sm", on ? "bg-servo text-servo-ink" : "shadow-[inset_0_0_0_1px_var(--line-strong)]")}>
+              <span className={cn("flex h-3.5 w-3.5 items-center justify-center rounded-sm", on ? "bg-servo text-servo-ink" : "border border-line-strong")}>
                 {on && <Check className="h-2.5 w-2.5" />}
               </span>
               <span className="num text-2xs text-ink-3">

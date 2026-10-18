@@ -23,7 +23,7 @@ export function RobotPage() {
   return (
     <div className="space-y-4 px-5 py-5">
       <div>
-        <h1 className="text-xl font-semibold tracking-[-0.01em]">Real SO-101 arm</h1>
+        <h1 className="kn-display text-[36px] leading-tight">Real SO-101 arm</h1>
         <p className="mt-0.5 text-sm text-ink-3">
           Teleop recording and policy runs on the physical arm. Every run needs a human approval here and a held deadman; nothing moves on its own.
         </p>
@@ -71,7 +71,7 @@ function Checklist({ hw }: { hw: HardwareStatus }) {
   return (
     <Panel title="Readiness" actions={hw.ready_for_motion ? <Badge tone="pass">ready for motion</Badge> : <Badge tone="fault">not ready</Badge>}>
       {!hw.enabled && (
-        <div className="mb-3 rounded-lg bg-caution/10 px-3 py-2 text-sm text-ink shadow-[0_0_0_1px_rgb(var(--caution)/.3)]">
+        <div className="mb-3 rounded bg-caution/10 px-3 py-2 text-sm text-ink border border-caution/30">
           Hardware is off on this machine. On the computer wired to the arm, set <code className="font-mono text-xs">CORTEX_ENABLE_HARDWARE=1</code> in{" "}
           <code className="font-mono text-xs">.env</code> and restart the backend.
         </div>
@@ -214,7 +214,7 @@ function ProcessView({ p, onEnter, onRecalibrate, busy }: { p: HardwareProcess; 
         {p.kind}
       </div>
       {p.prompt && p.state === "waiting_for_operator" && (
-        <div className="rounded-lg bg-servo/10 p-3 shadow-[0_0_0_1px_rgb(var(--servo)/.4)]">
+        <div className="rounded bg-servo/10 p-3 border border-servo/40">
           <p className="text-sm font-medium text-ink">{p.prompt}</p>
           <div className="mt-2 flex gap-2">
             <Button size="sm" variant="primary" loading={busy} onClick={onEnter}>
@@ -441,7 +441,7 @@ function RunPanel({ run, pid }: { run: HardwareRun; pid: string }) {
   return (
     <Panel title={run.kind === "teleop" ? "Teleop run" : "Policy run"} actions={<Badge tone={run.state === "holding" ? "caution" : live ? "servo" : "neutral"}>{run.state}</Badge>}>
       {run.warnings.length > 0 && (
-        <ul className="mb-3 space-y-1 rounded-lg bg-caution/10 p-3 shadow-[0_0_0_1px_rgb(var(--caution)/.35)]">
+        <ul className="mb-3 space-y-1 rounded bg-caution/10 p-3 border border-caution/35">
           {run.warnings.map((w) => (
             <li key={w} className="flex items-start gap-1.5 text-sm text-ink">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-caution" /> {w}
@@ -461,8 +461,8 @@ function RunPanel({ run, pid }: { run: HardwareRun; pid: string }) {
             onContextMenu={(e) => e.preventDefault()}
             disabled={run.state !== "running"}
             className={cn(
-              "flex h-24 w-full select-none items-center justify-center gap-2 rounded-xl text-lg font-semibold transition-colors disabled:opacity-50",
-              dead.held ? "bg-pass text-white" : "bg-rail text-ink shadow-[0_0_0_1px_var(--line-strong)]",
+              "flex h-24 w-full select-none items-center justify-center gap-2 rounded text-lg font-semibold transition-colors disabled:opacity-50",
+              dead.held ? "bg-pass text-white" : "bg-rail text-ink border border-line-strong",
             )}
           >
             <Hand className="h-6 w-6" /> {dead.held ? "Moving: release to stop" : "Hold to move (mouse or space bar)"}

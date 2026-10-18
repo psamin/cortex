@@ -59,7 +59,7 @@ export function DatasetsTab() {
         </Button>
       </div>
       {job && (isJobActive(job) || job.status === "failed") && (
-        <div className="flex items-center gap-3 rounded bg-plate px-3 py-2 text-xs shadow-[0_0_0_1px_var(--line)]">
+        <div className="flex items-center gap-3 rounded bg-plate px-3 py-2 text-xs border border-line">
           <span className="text-ink-2">Building dataset…</span>
           <Meter value={job.progress} className="max-w-[200px]" />
           <span className="truncate text-ink-3">{job.status === "failed" ? <InlineError error={job.error ?? job.message} detail={job.error_detail} /> : job.message}</span>
@@ -104,9 +104,9 @@ function VersionRow({ d, depth, parentName, eps }: { d: DatasetVersion; depth: n
   return (
     <div className="flex gap-2" style={{ paddingLeft: Math.min(depth, 4) * 24 }}>
       {depth > 0 && <CornerDownRight className="mt-3 h-4 w-4 shrink-0 text-ink-4" />}
-      <div className="min-w-0 flex-1 rounded-md bg-plate p-3 shadow-[0_0_0_1px_var(--line)]">
+      <div className="min-w-0 flex-1 rounded-md bg-plate p-3 border border-line">
         <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-          <span className="text-sm font-semibold">{d.name}</span>
+          <span className="text-sm font-medium">{d.name}</span>
           <span className="font-mono text-2xs text-ink-3">{d.id}</span>
           {parentName && <span className="text-2xs text-ink-3">from {parentName}</span>}
           <span className="ml-auto text-2xs text-ink-4">{ago(d.created_at)}</span>
@@ -233,7 +233,7 @@ function CreateVersionDialog({
         <div>
           <div className="mb-1 text-xs font-medium text-ink-2">Augmentations</div>
           <p className="mb-2 text-2xs text-ink-3">Each enabled transform adds one augmented copy of every training episode.</p>
-          <div className="divide-y divide-[var(--line-soft)] rounded bg-well px-3 shadow-[inset_0_0_0_1px_var(--line)]">
+          <div className="divide-y divide-[var(--line-soft)] rounded bg-well px-3 border border-line">
             {AUG_OPTIONS.map((o) => (
               <div key={o.key} className="flex items-center gap-3 py-1.5">
                 <div className="flex-1">

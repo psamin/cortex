@@ -35,7 +35,7 @@ export function EvidenceList({ evidence, pid, compact }: { evidence: Evidence[];
             <span
               className={cn(
                 "mt-px w-[68px] shrink-0 rounded-sm px-1 text-center font-mono text-[10px] leading-4",
-                measured ? "bg-rail text-ink-2 shadow-[0_0_0_1px_var(--line)]" : "prov-hypothesis text-ink-3",
+                measured ? "bg-rail text-ink-2 border border-line" : "prov-hypothesis text-ink-3",
               )}
               title={measured ? "measured" : "model hypothesis"}
             >
@@ -153,7 +153,7 @@ function RecCard({ r, rank, pid, onChanged }: { r: Recommendation; rank: number;
       className={cn(
         "grid grid-cols-[36px_minmax(0,1fr)_minmax(0,300px)] gap-x-4 gap-y-2 rounded-md bg-plate p-3.5",
         r.support === "hypothesis" ? "prov-hypothesis" : "prov-measured",
-        top && r.support === "evidence_backed" && "shadow-[0_0_0_1px_rgb(var(--servo)/.4)]",
+        top && r.support === "evidence_backed" && "border border-servo/40",
       )}
     >
       <div className={cn("num pt-0.5 font-mono text-lg font-semibold", top ? "text-servo" : "text-ink-4")}>{rank}</div>
@@ -166,7 +166,7 @@ function RecCard({ r, rank, pid, onChanged }: { r: Recommendation; rank: number;
             <SupportBadge support={r.support} />
             {r.status !== "proposed" && <Badge>{r.status}</Badge>}
           </div>
-          <h3 className="mt-1.5 text-base font-semibold tracking-[-0.005em]">{r.title}</h3>
+          <h3 className="kn-display mt-1.5 text-[22px]">{r.title}</h3>
           <div className="mt-0.5 flex flex-wrap items-center gap-2 text-xs text-ink-3">
             {r.condition && <ConditionLabel c={r.condition} />}
             {r.count > 0 && <span className="num">× {r.count}</span>}
@@ -195,7 +195,7 @@ function RecCard({ r, rank, pid, onChanged }: { r: Recommendation; rank: number;
       <div className="space-y-2">
         <div className="flex items-baseline justify-between">
           <span className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Score</span>
-          <span className="num font-mono text-2xl font-semibold leading-none">{r.score.toFixed(2)}</span>
+          <span className="num font-mono text-2xl font-medium leading-none">{r.score.toFixed(2)}</span>
         </div>
         <ComponentBars components={r.components} />
       </div>

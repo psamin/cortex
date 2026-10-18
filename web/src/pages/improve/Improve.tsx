@@ -16,7 +16,7 @@ export function ImprovePage() {
     <div className="space-y-4 px-5 py-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-xl font-semibold tracking-[-0.01em]">Improve</h1>
+          <h1 className="kn-display text-[36px] leading-tight">Improve</h1>
           <p className="mt-0.5 text-sm text-ink-3">Decide what to collect, version the data, train with approval, and measure.</p>
         </div>
         <Segmented

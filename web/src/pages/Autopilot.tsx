@@ -106,10 +106,10 @@ function StateMachine({ run }: { run: AutopilotRun }) {
                   "inline-flex h-5 items-center gap-1 rounded-sm px-1.5 font-mono tracking-tight",
                   cur
                     ? run.status === "waiting_approval"
-                      ? "bg-caution/15 text-caution shadow-[0_0_0_1px_rgb(var(--caution)/.45)]"
+                      ? "bg-caution/15 text-caution border border-caution/45"
                       : run.status === "failed"
-                        ? "bg-fault/10 text-fault shadow-[0_0_0_1px_rgb(var(--fault)/.4)]"
-                        : "bg-servo/15 text-servo shadow-[0_0_0_1px_rgb(var(--servo)/.45)]"
+                        ? "bg-fault/10 text-fault border border-fault/40"
+                        : "bg-servo/15 text-servo border border-servo/45"
                     : past
                       ? "text-ink-2"
                       : "text-ink-4",
@@ -154,7 +154,7 @@ export function AutopilotHero({ project }: { project: Project }) {
   const [showPolicy, setShowPolicy] = useState(false);
 
   return (
-    <section className="overflow-hidden rounded-md bg-plate shadow-[0_0_0_1px_var(--line)]">
+    <section className="sk-depth relative rounded bg-plate border border-line-strong">
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-soft px-4 py-3">
         <div className="flex items-center gap-2">
           <span
@@ -163,7 +163,7 @@ export function AutopilotHero({ project }: { project: Project }) {
               run?.status === "running" ? "bg-servo live-dot" : run?.status === "waiting_approval" ? "bg-caution live-dot" : "bg-ink-4",
             )}
           />
-          <h2 className="text-base font-semibold tracking-[-0.01em]">Autopilot</h2>
+          <h2 className="font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink">Autopilot</h2>
           {run && <Badge tone={runTone[run.status]}>{humanize(run.status)}</Badge>}
         </div>
         {run && (
@@ -344,7 +344,7 @@ function ApproveTraining({ tid, pid, cost, paid }: { tid: string; pid: string; c
     onSuccess: () => qc.invalidateQueries({ queryKey: ["training", pid] }),
   });
   return (
-    <div className="mt-2 flex flex-wrap items-center gap-2 rounded bg-caution/5 p-2 shadow-[0_0_0_1px_rgb(var(--caution)/.3)]">
+    <div className="mt-2 flex flex-wrap items-center gap-2 rounded bg-caution/5 p-2 border border-caution/30">
       <ShieldAlert className="h-3.5 w-3.5 text-caution" />
       <Input value={approver} onChange={(e) => setApprover(e.target.value)} placeholder="Your name" className="h-7 w-40" aria-label="Approver name" />
       <Button size="sm" variant="primary" disabled={!approver.trim()} loading={m.isPending} onClick={() => m.mutate()}>
@@ -371,7 +371,7 @@ export function ManualTraining({ pid, tid }: { pid: string; tid: string }) {
     },
   });
   return (
-    <div className="mt-2 space-y-2 rounded bg-well p-2.5 shadow-[inset_0_0_0_1px_var(--line)]">
+    <div className="mt-2 space-y-2 rounded bg-well p-2.5 border border-line">
       <div className="flex items-center justify-between text-2xs text-ink-3">
         <span>Run this on a GPU machine</span>
         {cmd.data && (
