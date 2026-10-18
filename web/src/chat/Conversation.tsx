@@ -56,6 +56,15 @@ export function Conversation({ pid }: { pid: string }) {
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
+  // the name the agent gave itself on connecting (cortex.register_agent); its turns are labelled with it
+  const agentName = useMemo(() => {
+    for (const it of chat.items) {
+      if (it.kind === "tool" && it.tool === "register_agent" && typeof it.args?.name === "string" && it.args.name.trim()) {
+        return it.args.name.trim();
+      }
+    }
+    return null;
+  }, [chat.items]);
   const importer = useImporter(pid);
   const [sheet, setSheet] = useState<{ mode: "file" | "hub"; file: File | null } | null>(null);
   // drop a dataset archive anywhere on the chat column
@@ -196,7 +205,8 @@ export function Conversation({ pid }: { pid: string }) {
                 {isAgentBlock(b) && !(i > 0 && isAgentBlock(blocks[i - 1])) && (
                   <div className="kn-label kn-label-rule -mb-2">
                     <span>
-                      <span className="text-ink">Agent</span>
+                      <span className="text-ink">{agentName ?? "Agent"}</span>
+                      {agentName && <span className="text-ink-3">&nbsp;&nbsp;agent</span>}
                     </span>
                   </div>
                 )}
@@ -271,21 +281,44 @@ function isAgentBlock(b: Block) {
   return b.type === "tools" || (b.item.kind !== "user" && b.item.kind !== "meta");
 }
 
+const PLAN_WORD: Record<string, string> = { plan: "Plan", decision: "Decision", observation: "Noticed", question: "Question" };
+
+/** One planning step the agent logged with cortex.log_decision, in its own words. */
+function PlanLine({ it }: { it: ToolItem }) {
+  const kind = String(it.args?.kind ?? "plan");
+  const text = String(it.args?.text ?? it.summary ?? "").trim();
+  if (!text) return null;
+  return (
+    <div className="enter flex gap-3 border-l-2 border-ink/70 pl-3">
+      <span className={cn("shrink-0 pt-[3px] font-mono text-[10px] uppercase tracking-[0.14em]", kind === "question" ? "text-caution" : "text-ink-3")}>
+        {PLAN_WORD[kind] ?? kind}
+      </span>
+      <p className="text-[15px] leading-relaxed text-ink">{text}</p>
+    </div>
+  );
+}
+
 function BlockView({ b, pid }: { b: Block; pid: string }) {
-  if (b.type === "tools")
+  if (b.type === "tools") {
+    const plans = b.tools.filter((t) => t.tool === "log_decision");
+    const rest = b.tools.filter((t) => t.tool !== "log_decision");
     return (
       <div className="space-y-2.5">
-        {b.tools.length === 1 ? <ToolRow it={b.tools[0]} /> : <ToolGroup tools={b.tools} />}
+        {plans.map((t) => (
+          <PlanLine key={t.id} it={t} />
+        ))}
+        {rest.length === 1 ? <ToolRow it={rest[0]} /> : rest.length > 1 ? <ToolGroup tools={rest} /> : null}
         {b.budgetError && <BudgetCard pid={pid} message={b.budgetError} />}
         {b.cards.length > 0 && <ResultCards pid={pid} refs={b.cards} />}
       </div>
     );
+  }
   const it = b.item;
   switch (it.kind) {
     case "user":
       return (
         <div className="enter border-l border-ink pl-4">
-          <div className="kn-label mb-1.5">You</div>
+          <div className="kn-label mb-1.5">Task</div>
           <div className="whitespace-pre-wrap text-[16px] leading-relaxed text-ink">{it.text}</div>
         </div>
       );
