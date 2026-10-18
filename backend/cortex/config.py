@@ -33,6 +33,11 @@ class Settings(BaseSettings):
     selfhosted_model: str = "Qwen/Qwen3-VL-8B-Instruct"
     # Qwen3-VL grounds in relative 0-1000 coordinates (QwenLM/Qwen3-VL cookbooks/2d_grounding.ipynb)
     selfhosted_point_format: str = "norm1000"
+
+    # The studio's agent: the user's own Claude Code, run headless against the Cortex MCP server.
+    # agent_engine: auto (Claude Code if the `claude` CLI and the MCP server are up) | claude_code | model | rules
+    agent_engine: str = "auto"
+    claude_code_model: str | None = None  # e.g. "sonnet" for faster turns; default = the user's Claude Code default
     # Only needed on self-hosted InsForge; InsForge Cloud provisions it via its Model Gateway.
     openrouter_api_key: str | None = None
 

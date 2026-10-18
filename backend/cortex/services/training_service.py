@@ -172,6 +172,15 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     return await poll_slurm(ctx, tj, job)
 
 
+def parse_loss(log: str) -> list[list[float]]:
+    """[[step, loss], ...] from lerobot-train log lines like 'step:2K smpl:16K ... loss:0.231 grdn:...'."""
+    pts = []
+    for m in re.finditer(r"step:(\d+(?:\.\d+)?)([KM]?)\b[^\n]*?\bloss:([0-9.]+(?:e-?\d+)?)", log):
+        step = float(m.group(1)) * {"": 1, "K": 1e3, "M": 1e6}[m.group(2)]
+        pts.append([int(step), float(m.group(3))])
+    return pts
+
+
 async def poll_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     host = ctx.settings.futurama_ssh_host
     remote = f"{ctx.settings.futurama_repo_dir}/jobs/{tj.id}"
@@ -190,6 +199,11 @@ async def poll_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
             step = re.findall(r"step:(\d+[KM]?)", logtxt)
             if step:
                 ctx.jobs.update(job, message=f"training step {step[-1]}")
+            pts = parse_loss(logtxt)
+            if pts:
+                curve = tj.metrics.get("loss_curve", [])
+                tj.metrics["loss_curve"] = (curve + pts)[-500:]
+                await _save(ctx, tj, f"loss {pts[-1][1]:.4f} @ step {pts[-1][0]}")
         if rc == 0 and state in ("PENDING", "CONFIGURING"):
             if tj.status != JobStatus.queued:
                 tj.status = JobStatus.queued

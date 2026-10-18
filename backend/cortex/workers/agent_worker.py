@@ -24,7 +24,8 @@ import numpy as np
 
 from ..sim.manipulation import ManipulationSession
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
-from .sim_worker import PREVIEW_H, PREVIEW_W, emit, write_mp4
+from ..sim.viewer import DemoCamera
+from .sim_worker import emit, write_mp4
 
 
 def live_writer(live_dir: Path):
@@ -60,8 +61,6 @@ def save_attempt(s: ManipulationSession, env: PickPlaceEnv, out: Path, meta: dic
 
 
 def main() -> None:
-    import mujoco
-
     from ..agentic.astra import AstraPlanner, PlannerConfig
 
     configure_gl()
@@ -87,7 +86,7 @@ def main() -> None:
         var = Variation(cube_region=sc["cube_region"], lighting=sc["lighting"],
                         cube_offset=tuple(sc.get("cube_offset", (0, 0))), box_offset=tuple(sc.get("box_offset", (0, 0))))
         env.reset(a["seed"], var)
-        renderer = mujoco.Renderer(env.world.model, PREVIEW_H, PREVIEW_W)
+        renderer = DemoCamera(env.world.model)
         s = ManipulationSession(env, mode=cfg.get("mode", "camera"), on_frame=on_frame, video_renderer=renderer)
         s.reset_environment(a["seed"], var)
         emit(type="attempt_start", index=i, total=len(cfg["attempts"]), seed=a["seed"], scenario=sc)

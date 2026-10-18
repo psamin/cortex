@@ -149,9 +149,8 @@ class ManipulationSession:
         self.rec.action.append(action)
         self.obs, reward, _, _, _ = self.env.step(action)
         self.rec.reward.append(float(reward))
-        if self.video_renderer is not None:
-            self.video_renderer.update_scene(self.env.world.data, camera="front")
-            frame = self.video_renderer.render().copy()
+        if self.video_renderer is not None:  # cortex.sim.viewer.DemoCamera (presentation only)
+            frame = self.video_renderer.render(self.env.world.data)
             self.rec.video.append(frame)
             if self.on_frame:
                 self.on_frame(frame)
