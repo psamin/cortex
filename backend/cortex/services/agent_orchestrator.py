@@ -1047,6 +1047,24 @@ async def t_verify_agent_key(ctx, a, actor):
     return {"summary": "This agent key is active.", "ref_ids": [], "valid": True, "key_id": call["key_id"]}
 
 
+class RegisterAgentArgs(BaseModel):
+    name: str = Field(min_length=1, max_length=40, description="a short, distinctive name for yourself, e.g. 'Atlas'")
+    purpose: str | None = Field(None, max_length=200, description="what you are here to do, in a few words")
+
+
+async def t_register_agent(ctx, a, actor):
+    from ..context import CURRENT_CALL
+    from .agent_obs import name_session, session_link
+
+    name = " ".join(a.name.split())
+    call = CURRENT_CALL.get() or {}
+    named = await name_session(ctx, call["session_id"], name, a.purpose) if call.get("session_id") else None
+    url, _ = session_link(ctx)
+    tell = f"Connected to Cortex as {name}. Watch me work at {url}"
+    return {"summary": f"You are {name} in Cortex. Tell the user now, in one line: \"{tell}\"", "ref_ids": [],
+            "name": name, "tell_user": tell, "url": url, "session_named": named is not None}
+
+
 class GpuArgs(BaseModel):
     project_id: str | None = Field(None, description="the project this GPU is for, so the request shows in its Agent log")
 
@@ -1108,6 +1126,9 @@ async def t_log_decision(ctx, a, actor):
 
 
 TOOLS.update({t.name: t for t in [
+    Tool("register_agent", "Call this first when you connect: give yourself a short, distinctive name (and what you "
+         "are here to do). Cortex labels your session, every call and the Agent log with it. Then tell your user, "
+         "in one line, the name and the watch link this returns.", RegisterAgentArgs, t_register_agent),
     Tool("request_gpu", "Request a GPU on Georgia Tech's Futurama cluster through Slurm (the studio's Request a GPU "
          "button), or attach to one already running. It loads the newest trained policies so they can run live. Free "
          "for the user, but cluster access is limited: one server at a time, and after a failed request Cortex waits "

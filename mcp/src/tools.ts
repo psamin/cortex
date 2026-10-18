@@ -751,6 +751,19 @@ const TOOLS: Def[] = [
     annotations: READ,
   },
   {
+    name: "register_agent",
+    title: "Register this agent (name yourself)",
+    description:
+      "Call this first when you connect: give yourself a short, distinctive name (and what you are here to do). " +
+      "Cortex labels your session, every call and the Agent log with it. Then tell your user, in one line, the name " +
+      "and the watch link this returns.",
+    inputSchema: z.object({
+      name: z.string().min(1).max(40).describe("A short, distinctive name for yourself, e.g. 'Atlas'"),
+      purpose: z.string().max(200).optional().describe("What you are here to do, in a few words"),
+    }),
+    annotations: WRITE,
+  },
+  {
     name: "request_gpu",
     title: "Request a GPU",
     description:

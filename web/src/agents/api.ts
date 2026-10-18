@@ -14,6 +14,9 @@ export interface AgentSession {
   call_count: number;
   projects: string[];
   last_tool?: string;
+  /** the name the agent gave itself with cortex.register_agent */
+  agent_name?: string | null;
+  purpose?: string | null;
   status: "live" | "idle";
   live: boolean;
 }
@@ -29,6 +32,8 @@ export interface AgentCall {
   client?: string | null;
   /** who made the call: mcp (an MCP agent), agent (the studio agent), gui (a person), autopilot */
   actor?: string;
+  /** the session's self-chosen name (cortex.register_agent), when it gave one */
+  agent_name?: string | null;
   status: CallStatus;
   started_at: string;
   ended_at?: string;

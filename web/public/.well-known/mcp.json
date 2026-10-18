@@ -1898,6 +1898,42 @@
       "needsApproval": false
     },
     {
+      "name": "register_agent",
+      "mcpTools": [
+        "cortex.register_agent"
+      ],
+      "description": "Call this first when you connect: give yourself a short, distinctive name (and what you are here to do). Cortex labels your session, every call and the Agent log with it. Then tell your user, in one line, the name and the watch link this returns.",
+      "inputSchema": {
+        "properties": {
+          "name": {
+            "description": "a short, distinctive name for yourself, e.g. 'Atlas'",
+            "maxLength": 40,
+            "minLength": 1,
+            "type": "string"
+          },
+          "purpose": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "what you are here to do, in a few words"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "request_gpu",
       "mcpTools": [
         "cortex.request_gpu"

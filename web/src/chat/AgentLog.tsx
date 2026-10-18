@@ -13,6 +13,7 @@ const label = "font-mono text-[10.5px] uppercase tracking-[0.14em]";
 
 /** Who made a call, in words: the MCP client's name, the studio agent, a person or Autopilot. */
 function who(c: AgentCall): string {
+  if (c.agent_name) return c.agent_name;
   if (c.client) return c.client;
   if (c.actor === "agent") return "studio agent";
   if (c.actor === "autopilot") return "autopilot";
