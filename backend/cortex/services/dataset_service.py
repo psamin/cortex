@@ -69,8 +69,10 @@ async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRe
         eps = [e for e in eps if e.source in req.sources]
     else:  # imported real-world demos never mix into simulation datasets unless asked for explicitly
         eps = [e for e in eps if e.source != EpisodeSource.imported]
+    # cycle protocol: demo + reset segments by default; recover segments only when asked for
+    eps = [e for e in eps if e.segment in req.segments]
     if not eps:
-        raise ValueError("no accepted episodes to snapshot")
+        raise ValueError(f"no accepted episodes to snapshot (segments: {', '.join(req.segments)})")
     versions = await ctx.repo.list("dataset_versions", DatasetVersion, project_id=project.id)
     ds = DatasetVersion(project_id=project.id, name=req.name or f"v{len(versions) + 1}",
                         parent_id=req.parent_id or (versions[-1].id if versions else None),
@@ -104,7 +106,10 @@ async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRe
         lineage = {
             "dataset_version_id": ds.id, "parent_id": ds.parent_id, "env": ENVHUB_URI,
             "source_episodes": [{"episode_id": e.id, "seed": e.seed, "condition": e.condition.model_dump(),
-                                 "split": split[e.id]} for e in eps],
+                                 "split": split[e.id], "segment": e.segment,
+                                 "cycle_id": e.provenance.get("cycle_id")} for e in eps],
+            "segments": {"included": list(req.segments),
+                         "counts": {k: sum(e.segment == k for e in eps) for k in ("demo", "reset", "recover")}},
             "links": [ln.model_dump() for ln in ds.links],
             "augmentations": [a.model_dump() for a in req.augmentations],
             "note": "augmented episodes are image-only transforms of their source episode, train split only",

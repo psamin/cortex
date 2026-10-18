@@ -193,6 +193,9 @@ class QualityReport(BaseModel):
     score: float  # 0..1, 1 = no issues
 
 
+Segment = Literal["demo", "reset", "recover"]
+
+
 class Episode(BaseModel):
     id: str = Field(default_factory=lambda: new_id("ep"))
     project_id: str
@@ -209,6 +212,8 @@ class Episode(BaseModel):
     # who produced the actions: {"planner": "scripted_ik_oracle"} or
     # {"planner": "gpt-6-astra", "provider", "model", "mode", "attempt_id", "collection_id"}
     provenance: dict[str, Any] = {}
+    # cycle protocol (PRODUCT_SPEC 3.2): which segment this is; older data are all demos
+    segment: Segment = "demo"
     created_at: datetime = Field(default_factory=now)
 
 
@@ -319,6 +324,8 @@ class CreateDatasetVersionRequest(BaseModel):
     parent_id: str | None = None
     episode_ids: list[str] | None = None  # default: all accepted episodes
     sources: list[EpisodeSource] | None = None  # e.g. only sim_agent demos (A/B datasets)
+    # cycle-protocol segments to include (recorded in the lineage); recover segments are opt-in
+    segments: list[Segment] = Field(default_factory=lambda: ["demo", "reset"])
     augmentations: list[Augmentation] = []
     eval_fraction: float = 0.2
     split_seed: int = 0
