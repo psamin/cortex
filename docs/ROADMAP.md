@@ -35,3 +35,16 @@ status here.
 | P9a | Real cycle collection (operator-gated) | worker, service, API gates | P6, P7, P8 |
 | P9b | Real evaluation trials with Astra resets | `services/simulation_runner.py` | P9a |
 | P9c | Leader-arm teleop demo source | `backend/cortex/hardware/teleop.py` | P7 |
+
+## Claims (in flight)
+
+Check this table before you edit. Add your row when you start, and remove it when your PR merges.
+
+| Package | Branch | Driver | Files touched |
+|---|---|---|---|
+| P0 | `docs/product-spec` | Claude Code, driven by @AneeshD04 | `docs/PRODUCT_SPEC.md`, `docs/ROADMAP.md`, `CONTRIBUTING.md` |
+| P1 | `fix/windows-sim-workers` | Claude Code, driven by @AneeshD04 | `backend/cortex/sim/so101.py` |
+| P2 | `feat/intake-models` (on P0) | Claude Code, driven by @AneeshD04 | `[new] backend/cortex/intake/*`, `[new] backend/tests/test_intake.py` |
+| P4 | `feat/scene-generator` (on P2 and P1) | Claude Code, driven by @AneeshD04 | `[new] backend/cortex/sim/{scene,scene_env,grasp,feasibility}.py`, `[mod] backend/cortex/sim/expert.py`, `[mod] backend/cortex/sim/so101.py`, `[mod] backend/cortex/intake/service.py`, `[new] backend/tests/test_scene.py` |
+| P3 | `feat/intake-tools` (on P4) | Claude Code, driven by @AneeshD04 | `[new] backend/cortex/services/intake_service.py`, `[mod] backend/cortex/models.py`, `[mod] backend/cortex/services/agent_orchestrator.py`, `[mod] backend/cortex/api/app.py`, `[mod] mcp/src/{tools,backend}.ts`, `[mod] mcp/README.md`, `[new] backend/tests/test_intake_tools.py` |
+| P5 and P6 (next) | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py`, `backend/cortex/workers/agent_worker.py` and `backend/cortex/services/agent_collection_service.py`. **@psamin: these overlap with the planner work. Please comment on the P5/P6 issue before changing these files.** |
