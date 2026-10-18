@@ -89,8 +89,11 @@ class JobManager:
         self.tasks = {i: t for i, t in self.tasks.items() if i in self.jobs}
         if self.persist:
             tmp = self.persist.with_suffix(".tmp")
-            tmp.write_text(json.dumps([j.model_dump() for j in self.jobs.values()]))
-            os.replace(tmp, self.persist)
+            try:  # a snapshot for the next start: failing to write it must never end a job (#125)
+                tmp.write_text(json.dumps([j.model_dump() for j in self.jobs.values()]))
+                os.replace(tmp, self.persist)
+            except OSError as e:  # e.g. Windows refusing the replace while another process has the file open
+                log.warning("could not save job states to %s: %s", self.persist, e)
 
     def stop_requested(self, job_id: str) -> bool:
         """True once ``cancel`` was called: a worker that fails from here on was stopped, not broken."""
@@ -131,8 +134,8 @@ class JobManager:
         self.bus.publish(project_id, "job", job.model_dump())
 
         async def run() -> None:
-            self.update(job, status="running")
-            try:
+            try:  # from the first line: an error here used to end the task unseen, the job "running" forever (#125)
+                self.update(job, status="running")
                 ref = await fn(job)
                 self.update(job, status="succeeded", progress=1.0, result_ref=ref)
             except asyncio.CancelledError:
