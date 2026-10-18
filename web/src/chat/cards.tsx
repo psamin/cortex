@@ -21,6 +21,7 @@ import {
   useEvaluation,
   useJobQuery,
   usePlannerBudget,
+  useProjectState,
   useRecommendations,
   useTraining,
 } from "../api/hooks";
@@ -470,6 +471,8 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
   const qc = useQueryClient();
   const chat = useChat();
   const [skipped, setSkipped] = useState(false);
+  // autonomous mode starts covered training by itself, so a card that still asks is over the standing approval
+  const autonomous = useProjectState(pid).data?.project.autopilot.autonomy !== "manual";
   const m = useMutation({
     mutationFn: async () => {
       await api.approveTraining(tj.id, "you");
@@ -490,7 +493,7 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
       </div>
     );
   return (
-    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta="Needs approval">
+    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta={autonomous ? "Needs you · over your standing approval" : "Needs approval"}>
       <p className="text-sm leading-relaxed text-ink-2">
         <span className="font-medium text-ink">{tj.policy_type.toUpperCase()}</span> on{" "}
         <span className="font-mono text-[13px] text-ink">{tj.dataset_version_id}</span>
@@ -592,7 +595,7 @@ export function BudgetCard({ pid, message }: { pid: string; message: string }) {
     },
   });
   return (
-    <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title={`Raise planner budget to $${target}?`} meta="Model budget used up">
+    <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title={`Raise planner budget to $${target}?`} meta="Needs you · planner budget used up">
       <p className="text-sm text-ink-2">{message}</p>
       {b.data && (
         <p className="mt-1 text-xs text-ink-3">

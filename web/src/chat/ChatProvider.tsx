@@ -3,13 +3,16 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, streamAgent } from "../api/client";
 import { useChatStream } from "../api/events";
 import { splitError } from "../components/ui";
-import { applyEvent, historyToEvents, jobDoneEvent, newItemId, type ChangeItem, type ChatEvent, type ChatItem, type TodoItem } from "./model";
+import { applyEvent, historyToEvents, jobDoneEvent, newItemId, noticeEvent, type ChangeItem, type ChatEvent, type ChatItem, type TodoItem } from "./model";
 
 interface ChatState {
   items: ChatItem[];
   loading: boolean;
   loadError: unknown;
+  /** a turn is running: the user's, or an automatic one (autonomous mode) */
   busy: boolean;
+  /** an automatic turn (autonomous mode) is streaming over the project event stream */
+  auto: boolean;
   /** latest `status` event while a turn runs; `text` is the live line ("Collecting 20 demos in sim…") */
   status: { state: string; tool?: string; text?: string } | null;
   turnStartedAt: number | null;
@@ -71,6 +74,8 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
       return Array.isArray(d.items) ? { type: "todos", items: d.items as TodoItem[] } : null;
     case "changes":
       return Array.isArray(d.items) ? { type: "changes", items: d.items as ChangeItem[] } : null;
+    case "notice":
+      return noticeEvent(d);
     default:
       return null;
   }
@@ -88,6 +93,8 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   const abort = useRef<AbortController | null>(null);
   const queue = useRef<string[]>([]);
   const busyRef = useRef(false);
+  const [auto, setAuto] = useState(false);
+  const autoRef = useRef(false);
 
   // the open thread survives reloads, per project
   const storeKey = `cortex.thread.${pid}`;
@@ -136,8 +143,57 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     return () => abort.current?.abort();
   }, [load]);
 
-  // Cortex-written lines (job finished, …) arrive on the project event stream, outside agent turns
+  const runRef = useRef<(text: string) => Promise<void>>(async () => {});
+
+  /** One event of an automatic turn (autonomous mode), relayed on the project event stream. */
+  const onLive = useCallback(
+    (event: string, data: Record<string, unknown>) => {
+      if (event === "thread") return;
+      if (!autoRef.current && event !== "done") {
+        autoRef.current = true;
+        setAuto(true);
+        setTurnStartedAt((t) => t ?? Date.now());
+        setStatus({ state: "starting", text: "Continuing on my own…" });
+      }
+      const ev = toEvent(event, data);
+      if (event === "done") {
+        if (ev && autoRef.current) setItems((xs) => applyEvent(xs, ev));
+        autoRef.current = false;
+        setAuto(false);
+        if (!busyRef.current) {
+          setStatus(null);
+          setTurnStartedAt(null);
+        }
+        qc.invalidateQueries({ queryKey: ["agent-threads", pid] });
+        const next = queue.current.shift();
+        if (next && !busyRef.current) void runRef.current(next);
+        return;
+      }
+      if (!ev) return;
+      if (ev.type === "status") {
+        setStatus((prev) => ({ state: ev.state, tool: ev.tool, text: ev.text ?? prev?.text }));
+        return;
+      }
+      setItems((xs) => applyEvent(xs, ev));
+      if (ev.type === "tool_result") {
+        qc.invalidateQueries({ predicate: (q) => q.queryKey.includes(pid) });
+        setResultTick((t) => t + 1);
+      }
+    },
+    [pid, qc],
+  );
+
+  // Cortex-written lines (job finished, notices, automatic turns) arrive on the project event stream
   useChatStream((entry) => {
+    const here = typeof entry.thread !== "string" || !threadRef.current || entry.thread === threadRef.current;
+    if (entry.kind === "live") {
+      if (here) onLive(String(entry.event ?? ""), (entry.data as Record<string, unknown>) ?? {});
+      return;
+    }
+    if (entry.kind === "notice") {
+      if (here) setItems((xs) => applyEvent(xs, noticeEvent(entry)));
+      return;
+    }
     if (entry.kind !== "job_done") return;
     setItems((xs) => applyEvent(xs, jobDoneEvent(entry)));
     qc.invalidateQueries({ predicate: (q) => q.queryKey.includes(pid) });
@@ -187,47 +243,55 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         setStatus(null);
         setTurnStartedAt(null);
         qc.invalidateQueries({ queryKey: ["agent-threads", pid] });
-        const next = queue.current.shift();
+        const next = autoRef.current ? undefined : queue.current.shift(); // during an automatic turn it waits
         if (next) void run(next);
       }
     },
     [pid, qc],
   );
+  runRef.current = run;
 
   const send = useCallback(
     (text: string) => {
       const t = text.trim();
       if (!t) return;
-      if (busyRef.current) queue.current.push(t);
+      if (busyRef.current || autoRef.current) queue.current.push(t);
       else void run(t);
     },
     [run],
   );
 
-  const stop = useCallback(() => {
+  /** End this tab's own turn (switching chats). */
+  const abortOwn = useCallback(() => {
     queue.current = [];
     abort.current?.abort();
   }, []);
 
+  /** The stop button: end this turn and the autonomous chain (no more automatic steps). */
+  const stop = useCallback(() => {
+    abortOwn();
+    void api.stopAgent(pid).catch(() => {});
+  }, [abortOwn, pid]);
+
   const newChat = useCallback(async () => {
-    stop();
+    abortOwn();
     const t = await api.newThread(pid);
     threadRef.current = t.id;
     setThreadId(t.id);
     setItems([]);
     qc.invalidateQueries({ queryKey: ["agent-threads", pid] });
-  }, [pid, stop, setThreadId, qc]);
+  }, [pid, abortOwn, setThreadId, qc]);
   const reset = newChat;
 
   const openThread = useCallback(
     (id: string) => {
       if (id === threadRef.current) return;
-      stop();
+      abortOwn();
       threadRef.current = id;
       setThreadId(id);
       load();
     },
-    [stop, setThreadId, load],
+    [abortOwn, setThreadId, load],
   );
 
   const addImport = useCallback((item: Omit<ImportItem, "id" | "kind">) => {
@@ -240,7 +304,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   }, []);
 
   return (
-    <Ctx.Provider value={{ items, loading, loadError, busy, status, turnStartedAt, resultTick, send, stop, reset, reload: load, addImport, patchImport, threadId, newChat, openThread }}>
+    <Ctx.Provider value={{ items, loading, loadError, busy: busy || auto, auto, status, turnStartedAt, resultTick, send, stop, reset, reload: load, addImport, patchImport, threadId, newChat, openThread }}>
       {children}
     </Ctx.Provider>
   );

@@ -24,7 +24,10 @@ export function RobotPage() {
     <div className="space-y-4 px-5 py-5">
       <div>
         <h1 className="kn-display text-[36px] leading-tight">Real SO-101 arm</h1>
-        <p className="mt-0.5 text-sm text-ink-3">Every run needs your approval and a held deadman.</p>
+        <p className="mt-0.5 text-sm text-ink-3">
+          <span className="mr-1.5 font-mono text-[10.5px] uppercase tracking-[0.14em] text-caution">Needs you · real robot motion</span>
+          Every run needs your approval and a held deadman, even in autonomous mode.
+        </p>
       </div>
       {status.isLoading ? (
         <Skeleton className="h-40 w-full" />

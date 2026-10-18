@@ -178,6 +178,8 @@ export const api = {
   autopilot: (pid: string) => get<AutopilotRun | null>(`/projects/${pid}/autopilot`),
   startAutopilot: (pid: string) => post<AutopilotRun>(`/projects/${pid}/autopilot/start`),
   stopAutopilot: (pid: string) => post<AutopilotRun | null>(`/projects/${pid}/autopilot/stop`),
+  /** End the autonomous chain: no more automatic steps, and the running one stops. */
+  stopAgent: (pid: string) => post<{ stopped: boolean }>(`/projects/${pid}/agent/stop`),
   setAutopilotPolicy: (pid: string, policy: Partial<AutopilotPolicy>) =>
     put<AutopilotPolicy>(`/projects/${pid}/autopilot/policy`, policy),
   eventsUrl: (pid: string) => `${API_BASE}/projects/${pid}/events`,
