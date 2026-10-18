@@ -1,6 +1,8 @@
 # Cortex MCP server
 
-An MCP server, built with [mcp-use](https://docs.mcp-use.com) v2 (TypeScript), that lets agents such as Claude Code drive Cortex. It is a thin layer over the backend tool registry. Each `cortex.<name>` tool forwards its arguments to `POST {CORTEX_API_URL}/tools/<name>` and returns:
+The MCP server that lets any agent train its own physical robot. Through these tools an agent like Claude Code describes the arm and its workspace, builds the simulation, collects its own demonstrations, trains, evaluates and improves a policy, with no human doing the training work (people only approve spend and hardware). Agents: start with [AGENTS.md](../AGENTS.md).
+
+Built with [mcp-use](https://docs.mcp-use.com) v2 (TypeScript), it is a thin layer over the backend tool registry. Each `cortex.<name>` tool forwards its arguments to `POST {CORTEX_API_URL}/tools/<name>` and returns:
 
 - `structuredContent`: the backend's JSON (`summary`, `ref_ids`, plus the data).
 - `content`: a short text line, the `summary` and the `ref_ids`.
