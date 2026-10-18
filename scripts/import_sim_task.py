@@ -1,13 +1,14 @@
 """Import a hand-built sim task's Futurama results (infra/futurama/sim_task.sbatch) into its project.
 
     uv run python scripts/import_sim_task.py futurama:~/cortex-sim jenga
-    uv run python scripts/import_sim_task.py futurama:~/cortex-sim unscrew
-    uv run python scripts/import_sim_task.py /path/to/local/job_dir suture --project prj_x
+    uv run python scripts/import_sim_task.py futurama:~/cortex-sim screwdriver
+    uv run python scripts/import_sim_task.py /path/to/local/job_dir palletize --project prj_x
 
-The project is "Jenga (sim)", "Screwdriver (sim)" (unscrew) or "Suture (sim)", reused by name or created;
---name sets another name, --project picks an existing project. Copies only light files: metrics.json, configs, the example and evaluation
-videos, the Slurm logs, the dataset if it is under --dataset-max-gb, and checkpoint weights only when under
---weights-max-mb (otherwise the checkpoint is registered at its Futurama path). Then records the dataset
+The project is named for the task ("Jenga (sim)", "Screwdriver (sim)", "Palletizing (sim)", ...), reused by
+name or created; --name sets another name, --project picks an existing project. Copies only light files:
+metrics.json, configs, the example and evaluation videos, the Slurm logs, the dataset if it is under
+--dataset-max-gb, and checkpoint weights only when under --weights-max-mb (otherwise the checkpoint is
+registered at its Futurama path). Then records the dataset
 version, the oracle's demo run, a training job per variant, a checkpoint per saved step and an evaluation
 per evaluated step (see backend/cortex/services/sim_import_service.py). Safe to re-run while runs land:
 it updates what it recorded before. The project id is added to infra/futurama/projects.json as sim_<task>.

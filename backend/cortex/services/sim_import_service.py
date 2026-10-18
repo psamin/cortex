@@ -30,9 +30,11 @@ from ..models import (
 from . import project_cleanup, project_service, replay_service, training_service
 from .simulation_runner import summarize
 
-NAMES = {"jenga": "Jenga (sim)", "unscrew": "Screwdriver (sim)", "suture": "Suture (sim)",
-         "screwdriver": "Screwdriver tool (sim)"}  # two tasks must never share a project name
+NAMES = {"jenga": "Jenga (sim)", "screwdriver": "Screwdriver (sim)", "palletize": "Palletizing (sim)",
+         "suture": "Suture (sim)", "unscrew": "Unscrew bolt (sim)"}  # two tasks must never share a project name
 PROMPTS = {"jenga": "Push a block out of a Jenga tower without toppling it (MuJoCo sim)",
+           "screwdriver": "Pick up a screwdriver and unscrew a screw with it (MuJoCo sim)",
+           "palletize": "Move boxes off a forklift onto a pallet (MuJoCo sim)",
            "unscrew": "Unscrew a hex bolt from a fixture with the SO-101 (MuJoCo sim)",
            "suture": "Pass a suture needle through a tissue pad (MuJoCo sim, rigid proxy)"}
 EXECUTOR = "futurama_slurm"
