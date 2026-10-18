@@ -223,7 +223,7 @@ async def job_done(ctx: Ctx, job, entry: dict[str, Any]) -> dict[str, Any] | Non
 
 def _schedule_wake(ctx: Ctx, pid: str) -> None:
     t = _TASKS.get(pid)
-    if t and not t.done():
+    if t and not t.done() and t is not asyncio.current_task():  # an automatic turn may chain the next one
         return
     _TASKS[pid] = asyncio.get_running_loop().create_task(_wake(ctx, pid))
 

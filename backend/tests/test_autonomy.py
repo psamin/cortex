@@ -161,6 +161,45 @@ def test_manual_mode_waits_for_the_user(tmp_path, monkeypatch):
     assert rows[-1]["kind"] == "job_done"
 
 
+def test_results_that_land_at_the_end_of_an_automatic_turn_wake_the_agent_again(tmp_path, monkeypatch):
+    """The second (automatic) turn starts a quick job that finishes after the turn's last tool result:
+    the agent hasn't seen it, so it is woken once more; the third turn starts nothing and the chain ends."""
+    async def go():
+        ctx, p = await setup(tmp_path)
+        agent.install_job_listener(ctx)
+        sent: list[str] = []
+
+        async def fake_engine(_ctx):
+            return "claude_code"
+
+        async def fake_claude(ctx_, pid, message, sse, tid=None):
+            sent.append(message)
+            if len(sent) <= 2:
+                async def work(job):
+                    await asyncio.sleep(0.05 if len(sent) == 1 else 0)
+                    return None
+                job = ctx_.jobs.submit("record", pid, work)
+                yield sse("tool_result", {"tool": "record_demonstrations", "summary": "started", "ref_ids": [job.id]})
+                if len(sent) == 2:
+                    await asyncio.sleep(0.1)  # the job finishes before this turn ends
+            yield sse("done", {})
+
+        from cortex.services import claude_code_agent
+        monkeypatch.setattr(agent, "engine", fake_engine)
+        monkeypatch.setattr(claude_code_agent, "chat", fake_claude)
+        async for _ in agent.chat(ctx, p.id, "go"):
+            pass
+        for _ in range(150):
+            await asyncio.sleep(0.02)
+            if len(sent) == 3 and autonomy.armed_thread(ctx, p.id) is None:
+                break
+        await ctx.jobs.shutdown()
+        return sent
+
+    sent = run(go())
+    assert len(sent) == 3 and all(m.startswith("[Cortex, autonomous mode]") for m in sent[1:])
+
+
 def test_stop_ends_the_chain(tmp_path):
     async def go():
         ctx, p = await setup(tmp_path)
