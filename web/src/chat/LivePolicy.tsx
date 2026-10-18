@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, CircleDashed, Cpu, Square } from "lucide-react";
+import { Check, CircleDashed, Cpu, Square, VideoOff } from "lucide-react";
 import { ApiError, api } from "../api/client";
 import { cn } from "../lib/format";
 import { initialPick, SIM_TITLE, type Pick } from "./livePick";
@@ -83,15 +83,15 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
             {SIM_TITLE[task] ?? task} · sim
           </button>
         ))}
-        {policies.map(([task, p]) =>
-          p.held_out.map((ep) => (
-            <button key={`${task}-${ep}`} type="button" onClick={() => setPick({ kind: "replay", task, ep })}
-              title={`${p.checkpoint} on held-out real episode ${ep}`}
-              className={cn("h-6 rounded-full border px-2.5", cur?.kind === "replay" && cur.task === task && cur.ep === ep ? "border-ink bg-ink text-bench" : "border-line-strong text-ink-3 hover:text-ink")}>
-              {task} · real ep {ep}
-            </button>
-          )),
-        )}
+        {policies.map(([task, p]) => (
+          // one chip per trained policy: each click runs it on a random held-out real demo it never trained on
+          <button key={task} type="button"
+            onClick={() => setPick({ kind: "replay", task, ep: p.held_out[Math.floor(Math.random() * p.held_out.length)] })}
+            title={`Trained on real robot demos (${p.checkpoint}); runs on a held-out demo it never saw`}
+            className={cn("h-6 rounded-full border px-2.5", cur?.kind === "replay" && cur.task === task ? "border-ink bg-ink text-bench" : "border-line-strong text-ink-3 hover:text-ink")}>
+            {REAL_TITLE[task] ?? task} · real demo
+          </button>
+        ))}
         <button type="button" onClick={() => stop.mutate()} disabled={stop.isPending}
           className="ml-auto inline-flex h-6 items-center gap-1 rounded-full border border-line-strong px-2.5 text-ink-3 hover:text-ink">
           <Square className="h-3 w-3" /> Stop GPU
@@ -108,12 +108,37 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
         </div>
       )}
       <div className="flex min-h-0 flex-1 items-center justify-center p-4">
-        {cur && (
-          <img key={cur.kind === "sim" ? `${cur.task}-${cur.seed}` : `${cur.task}-${cur.ep}`}
-            src={cur.kind === "sim" ? api.livePolicySimUrl(cur.task, cur.seed) : api.livePolicyStreamUrl(cur.task, cur.ep)}
-            alt={`${cur.task} policy running live on the GPU`} className="block max-h-full w-auto max-w-full border border-line-strong object-contain" />
-        )}
+        {cur && <LiveFrame key={cur.kind === "sim" ? `${cur.task}-${cur.seed}` : `${cur.task}-${cur.ep}`}
+          src={cur.kind === "sim" ? api.livePolicySimUrl(cur.task, cur.seed) : api.livePolicyStreamUrl(cur.task, cur.ep)}
+          label={`${cur.task} policy running live on the GPU`} />}
       </div>
+    </div>
+  );
+}
+
+const REAL_TITLE: Record<string, string> = { jenga: "Jenga", conveyor: "Conveyor sort", suture: "Suture" };
+
+/** The live stream, with a "loading onto the GPU" state until the first frame and a clear failure state. */
+function LiveFrame({ src, label }: { src: string; label: string }) {
+  const [state, setState] = useState<"loading" | "live" | "failed">("loading");
+  return (
+    <div className="relative flex h-full w-full items-center justify-center">
+      <img src={src} alt={label} onLoad={() => setState("live")} onError={() => setState("failed")}
+        className={cn("block max-h-full w-auto max-w-full border border-line-strong object-contain", state !== "live" && "invisible")} />
+      {state === "loading" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-ink-2">
+          <CircleDashed className="h-6 w-6 animate-spin text-ink-3" />
+          <span>Loading the policy onto the GPU and starting the run…</span>
+          <span className="text-ink-3">The first frame takes a few seconds; then it plays in real time.</span>
+        </div>
+      )}
+      {state === "failed" && (
+        <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-ink-2">
+          <VideoOff className="h-6 w-6 text-fault" />
+          <span>Couldn't display this run: the GPU server may have stopped, or another run took over.</span>
+          <span className="text-ink-3">Pick the policy again to retry.</span>
+        </div>
+      )}
     </div>
   );
 }

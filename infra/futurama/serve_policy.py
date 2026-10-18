@@ -38,6 +38,13 @@ CAMS = {"jenga": ["main", "secondary_0", "secondary_1"], "conveyor": ["top", "wr
 STAGE = {"jenga": "jenga", "conveyor": "conveyor", "suture": "needle"}
 JOINTS = ["pan", "lift", "elbow", "wrist flex", "wrist roll", "gripper"]
 LOCK = threading.Lock()  # one GPU, one stream at a time
+# The newest stream wins: a new request bumps the generation, the running stream sees it on its next frame,
+# stops and releases the lock (abandoned streams used to hold it until their episode ended).
+GEN = {"n": 0}
+
+
+def _newer(mine: int) -> bool:
+    return GEN["n"] != mine
 
 job_dir, data_root, port = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
 POLICIES = {}
@@ -145,9 +152,15 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
         ds = LeRobotDataset(f"local/{p['stage']}", root=data_root / p["stage"], episodes=[ep])
+        GEN["n"] += 1
+        mine = GEN["n"]
         with LOCK:
+            if _newer(mine):
+                return
             p["policy"].reset()
             for i in range(len(ds)):
+                if _newer(mine):
+                    return
                 t0 = time.perf_counter()
                 item = ds[i]
                 obs = {k: v for k, v in item.items() if k.startswith("observation.")}
@@ -165,8 +178,14 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
+        GEN["n"] += 1
+        mine = GEN["n"]
         with LOCK:
+            if _newer(mine):
+                return
             for jpg, step, ms, ok in serve_sim.stream(p, seed):
+                if _newer(mine):
+                    return
                 head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
                         f"X-Frame: {step}/{p['env'].max_steps}\r\nX-Inference-Ms: {ms:.2f}\r\n"
                         f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
