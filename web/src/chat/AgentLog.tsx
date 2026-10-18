@@ -8,6 +8,7 @@ import { IsoIcon, type IsoIconName } from "../sketch";
 import { agentsApi, type AgentCall } from "../agents/api";
 import { WorkBoard } from "../agents/Work";
 import { isActive, useSessionWork, type ProjectWork } from "../agents/sessionWork";
+import { DeployCard, deployments, skillEvents, skillStages } from "./deploySkill";
 
 const label = "font-mono text-[10.5px] uppercase tracking-[0.14em]";
 
@@ -102,6 +103,7 @@ function stagesOf(calls: AgentCall[], w: ProjectWork | undefined): Stage[] {
       state: improving ? "running" : sbs.some((s) => s.status === "succeeded") || okCall(calls, "improve_policy") ? "done" : "waiting",
       note: sbs.length ? `${sbs.length} RL sandbox${sbs.length > 1 ? "es" : ""}` : undefined,
     },
+    ...skillStages(calls), // Save skill, Deploy (#310)
   ];
 }
 
@@ -116,7 +118,7 @@ const STAGE_WORD: Record<StageState, string> = { waiting: "not yet", running: "n
 
 function Stages({ stages }: { stages: Stage[] }) {
   return (
-    <ol className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+    <ol className="grid grid-cols-4 gap-2 sm:grid-cols-8">
       {stages.map((s, i) => (
         <li key={s.name} className={cn("relative rounded border bg-plate px-2.5 py-2", STAGE_TONE[s.state])}>
           <div className="flex items-center gap-1.5">
@@ -274,7 +276,8 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
   const stages = useMemo(() => stagesOf(list, w), [list, w]);
   const feed = useMemo<FeedItem[]>(() => {
     const items: FeedItem[] = list.map((c) => (c.tool === "log_decision" ? { kind: "decision", at: c.started_at, call: c } : { kind: "call", at: c.started_at, call: c }));
-    const all = [...items, ...eventsOf(w).filter((e) => e.kind !== "event" || e.tone !== "bad")].filter((x) => !onlyDecisions || x.kind !== "call");
+    const milestones: FeedItem[] = skillEvents(list).map((e) => ({ kind: "event", ...e }));
+    const all = [...items, ...eventsOf(w).filter((e) => e.kind !== "event" || e.tone !== "bad"), ...milestones].filter((x) => !onlyDecisions || x.kind !== "call");
     return all.sort((a, b) => (a.at < b.at ? 1 : -1)); // newest first
   }, [list, w, onlyDecisions]);
 
@@ -282,6 +285,7 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
   const lastDecision = [...list].reverse().find((c) => c.tool === "log_decision");
   const approvals = (w?.training.filter((t) => t.status === "proposed").length ?? 0) + list.filter((c) => c.status === "approval_required").length;
   const narrates = list.some((c) => c.tool === "log_decision");
+  const deployment = useMemo(() => deployments(list).pop(), [list]);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
@@ -326,6 +330,8 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
             </div>
           )}
         </div>
+
+        {deployment && <DeployCard d={deployment} />}
 
         <section>
           <div className="mb-2.5 flex items-center gap-2.5">
