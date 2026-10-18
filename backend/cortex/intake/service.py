@@ -108,7 +108,9 @@ def questions(spec: IntakeSpec) -> list[Question]:
                 prompt=f"Which {family} is it? Options differ in size and weight, which decides if the arm can grasp it.",
                 why="Grasp width, payload and sim fidelity depend on the exact object.",
                 options=catalogue.VARIANTS[family],
-                patch={"objects": [{"name": o.name, **_catalogue_values(catalogue.VARIANTS[family][-1])}]}))
+                patch={"objects": [{"name": o.name, **_catalogue_values(catalogue.VARIANTS[family][-1])}]},
+                option_patches={v: {"objects": [{"name": o.name, **_catalogue_values(v)}]}
+                                for v in catalogue.VARIANTS[family]}))
         elif o.assumed:
             q.append(Question(path=f"objects.{o.name}", type="confirm",
                               prompt=f"Confirm or correct {o.name}: {o.shape}, size {o.size} m, {o.mass_kg} kg.",

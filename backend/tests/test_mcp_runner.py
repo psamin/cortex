@@ -5,7 +5,7 @@ import json
 import httpx
 import pytest
 
-from cortex.mcp_runner import Runner, RunnerError, forward_headers, server_base
+from cortex.mcp_runner import Runner, RunnerError, forward_headers, read_path_ok, server_base
 
 SERVER = "https://cortex.example.run"
 API = "http://127.0.0.1:8000/api"
@@ -122,3 +122,31 @@ async def test_against_the_real_backend(tmp_path, monkeypatch):
         settings.cache_clear()
     assert posted["missing"]["status"] == 404
     assert posted["bad"]["status"] == 422
+
+
+@pytest.mark.parametrize("path, ok", [
+    ("/projects", True), ("/projects/prj_1/state", True), ("/evaluations/ev_1", True), ("/jobs/job_1", True),
+    ("/projects/../tools/launch_training_job", False), ("//evil.example/x", False), ("/agents/keys", False),
+    ("/training/tj_1/approve", False), ("projects", False), ("/projects%2F..", False), (None, False),
+])
+def test_relayed_reads_are_limited_to_read_paths(path, ok):
+    assert read_path_ok(path) is ok
+
+
+async def test_handle_relays_a_read_only_get_and_refuses_other_paths():
+    seen, results = [], []
+
+    def handler(req: httpx.Request):
+        if req.url.host == "127.0.0.1":
+            seen.append((req.method, str(req.url), dict(req.headers)))
+            return httpx.Response(200, json={"id": "prj_1"})
+        results.append(json.loads(req.content))
+        return httpx.Response(200, json={"ok": True})
+
+    r = runner(handler)
+    await r.handle({"id": "g1", "tool": "GET", "args": {}, "path": "/projects/prj_1/state",
+                    "headers": {"X-Cortex-Actor": "mcp", "Authorization": "Bearer leak"}})
+    await r.handle({"id": "g2", "tool": "GET", "args": {}, "path": "/training/tj_1/approve", "headers": {}})
+    assert seen == [("GET", f"{API}/projects/prj_1/state", seen[0][2])] and "authorization" not in seen[0][2]
+    assert results[0]["id"] == "g1" and results[0]["status"] == 200 and json.loads(results[0]["body"]) == {"id": "prj_1"}
+    assert results[1]["id"] == "g2" and results[1]["status"] == 403

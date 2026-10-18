@@ -1,6 +1,9 @@
 import type { MCPServer, ToolAnnotations } from "mcp-use";
 import { z } from "zod";
 import { callTool, identityOf } from "./backend.js";
+import { runIntake, withAskHuman } from "./intake.js";
+import { FOLLOW_NOTE, LONG_JOBS, runLong, withFollow } from "./progress.js";
+import { touchProject } from "./resources.js";
 
 // Input schemas mirror the backend registry (GET /api/tools). Where the
 // registry says plain `string` but the domain model only accepts a fixed set
@@ -13,7 +16,8 @@ const projectId = z.string().describe("Cortex project id (prj_...), from cortex_
 const waitS = (max: number, typical: string) =>
   z.number().int().min(0).max(max).optional().describe(
     `Seconds to block waiting for the background job to finish (0-${max}, default 0 = return immediately with the job id). ` +
-      `${typical} Many MCP clients time out a tool call after about 60 s, so prefer wait_s <= 45 and then poll with cortex_get_job.`,
+      `${typical} Ignored when the call carries a progressToken (the call then follows the job to completion with progress). ` +
+      "Without progress, many MCP clients time out a tool call after about 60 s, so prefer wait_s <= 45 and then poll with cortex_get_job.",
   );
 
 const READ: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -714,20 +718,34 @@ const TOOLS: Def[] = [
   },
 ];
 
+const INTAKE = new Set(["start_intake", "update_intake"]);
+
 /** Registers every backend tool as `cortex.<name>`. */
 export function registerTools(server: MCPServer) {
   for (const t of TOOLS) {
+    // Long jobs stream progress (progress.ts); intake asks the human (intake.ts); the rest is a plain proxy.
+    const long = t.name in LONG_JOBS;
+    const intake = INTAKE.has(t.name);
     server.tool(
       {
         name: `cortex.${t.name}`,
         title: t.title,
-        description: t.description,
-        inputSchema: t.inputSchema,
+        description: long ? t.description + FOLLOW_NOTE : t.description,
+        inputSchema: long ? withFollow(t.inputSchema) : intake ? withAskHuman(t.inputSchema) : t.inputSchema,
         annotations: { title: t.title, ...t.annotations },
       },
       async (input, ctx) => {
         const [name, args] = t.backend ? t.backend(input as Record<string, unknown>) : [t.name, input as Record<string, unknown>];
-        return callTool(name, args, ctx.signal, identityOf(ctx));
+        if (intake) return runIntake(t.name as "start_intake" | "update_intake", args, ctx);
+        const result = long
+          ? await runLong(t.name, name, args, ctx, (p) => touchProject(server, p))
+          : await callTool(name, args, ctx.signal, identityOf(ctx));
+        const data = (result.structuredContent ?? {}) as Record<string, unknown>;
+        const project = (args.project_id ?? data.project_id) as string | undefined;
+        if (!result.isError && !t.annotations.readOnlyHint && typeof project === "string") {
+          touchProject(server, project, t.name === "create_policy_project" || t.name === "create_project");
+        }
+        return result;
       },
     );
   }

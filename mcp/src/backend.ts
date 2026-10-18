@@ -1,5 +1,5 @@
 import type { CallToolResult, MCPServer } from "mcp-use";
-import { relayCall, relayEnabled, runnerConnected } from "./relay.js";
+import { relayCall, relayEnabled, relayGet, runnerConnected } from "./relay.js";
 
 // The Cortex backend's tool registry is the single source of truth:
 //   GET  {CORTEX_API_URL}/tools        -> tool names + JSON Schemas
@@ -126,6 +126,31 @@ function approvalRequired(tool: string, args: Json, detail: string): CallToolRes
       studio_url: where,
     },
   };
+}
+
+export function backendHeaders(accept = "application/json"): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json", Accept: accept, "X-Cortex-Actor": "mcp" };
+  if (MCP_KEY) headers.Authorization = `Bearer ${MCP_KEY}`;
+  return headers;
+}
+
+/**
+ * GET {API_URL}{path} as JSON (resources and stage hints). Read-only. Goes through the runner when one is
+ * connected (a hosted server cannot reach the backend's REST routes otherwise), else directly.
+ * Throws on a non-2xx status.
+ */
+export async function getJson<T = unknown>(path: string, signal?: AbortSignal): Promise<T> {
+  let status: number;
+  let raw: string;
+  if (relayEnabled() && runnerConnected()) {
+    const { Authorization: _auth, ...headers } = backendHeaders();
+    ({ status, raw } = await relayGet(path, headers, signal));
+  } else {
+    const res = await fetch(`${API_URL}${path}`, { headers: backendHeaders(), signal });
+    ({ status, raw } = { status: res.status, raw: await res.text() });
+  }
+  if (status < 200 || status >= 300) throw new Error(`GET ${path} -> ${status}: ${raw.slice(0, 300)}`);
+  return JSON.parse(raw) as T;
 }
 
 const RUNNER_HINT =
