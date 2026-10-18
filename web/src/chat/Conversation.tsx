@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, Paperclip, RotateCcw, Square, X } from "lucide-react";
 import { useTraining } from "../api/hooks";
@@ -157,7 +157,16 @@ export function Conversation({ pid }: { pid: string }) {
               </div>
             )}
             {blocks.map((b, i) => (
-              <BlockView key={b.key} b={b} pid={pid} header={b.type === "item" && b.item.kind === "assistant" && !(i > 0 && isAgentBlock(blocks[i - 1]))} />
+              <Fragment key={b.key}>
+                {isAgentBlock(b) && !(i > 0 && isAgentBlock(blocks[i - 1])) && (
+                  <div className="kn-label kn-label-rule -mb-2">
+                    <span>
+                      <span className="text-ink">Agent</span>&nbsp;&nbsp;Response
+                    </span>
+                  </div>
+                )}
+                <BlockView b={b} pid={pid} />
+              </Fragment>
             ))}
             {chat.busy && !lastRunning && <Thinking startedAt={chat.turnStartedAt} />}
           </div>
@@ -219,7 +228,7 @@ function isAgentBlock(b: Block) {
   return b.type === "tools" || (b.item.kind !== "user" && b.item.kind !== "meta");
 }
 
-function BlockView({ b, pid, header }: { b: Block; pid: string; header?: boolean }) {
+function BlockView({ b, pid }: { b: Block; pid: string }) {
   if (b.type === "tools")
     return (
       <div className="space-y-2.5">
@@ -240,13 +249,6 @@ function BlockView({ b, pid, header }: { b: Block; pid: string; header?: boolean
     case "assistant":
       return (
         <div className="enter">
-          {header && (
-            <div className="kn-label kn-label-rule mb-2.5">
-              <span>
-                <span className="text-ink">Agent</span>&nbsp;&nbsp;Response
-              </span>
-            </div>
-          )}
           <Markdown text={it.text} />
         </div>
       );
