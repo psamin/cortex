@@ -232,3 +232,91 @@ def test_the_api_lists_and_gets_skills(tmp_path, monkeypatch):
             assert c.get("/api/skills/sk_nope").status_code == 404
     finally:
         settings.cache_clear()
+
+
+def _replay(ctx, task, name, mtime):
+    import os
+
+    p = ctx.data_dir / "skill_replays" / task / name
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_bytes(b"mp4")
+    os.utime(p, (mtime, mtime))
+
+
+async def test_sim_skills_stay_listed_with_their_replays_while_the_gpu_server_is_down(world):
+    """#308: a sim policy the live server served stays listed after it goes down; known skills are listed only
+    with a replay; replays are newest first."""
+    ctx, *_ = world
+    _replay(ctx, "unscrew", "old.mp4", 1000)
+    _replay(ctx, "unscrew", "new.mp4", 2000)
+    _replay(ctx, "pick_place", "pp.mp4", 1000)
+    (ctx.data_dir / "skill_replays" / "unscrew" / "notes.txt").write_text("not a video")
+    srv = FakeServe()
+    srv.info["sim"] = {"conveyor": {"variant": "smolvla", "step": 20000, "success_rate": None, "eval_episodes": 0,
+                                    "eval_seeds": "", "instruction": "sort the parts"}}
+    down = ctx.settings.live_policy_url
+    ctx.settings.live_policy_url = f"http://127.0.0.1:{srv.port}"
+    try:
+        live = {s["task"]: s for s in await skills_service.list_skills(ctx)}
+    finally:
+        srv.close()
+    assert live["conveyor"]["live"] is True and live["unscrew"]["live"] is False
+    ctx.settings.live_policy_url = down  # the server is gone
+
+    by_task = {s["task"]: s for s in await skills_service.list_skills(ctx)}
+    assert set(by_task) == {"unscrew", "conveyor", "pick_place"}  # no jenga/unscrew_black: no replay, never seen
+    c = by_task["conveyor"]
+    assert c["id"] == "sk_served_sim_conveyor" and c["live"] is False and c["policy"] == "SmolVLA"
+    assert c["run"] == {"kind": "sim", "task": "conveyor", "episodes": [], "live_now": False,
+                        "note": skills_service.DOWN}
+    assert c["replays"] == []
+    u = by_task["unscrew"]  # the imported skill, not a second seeded one
+    assert u["name"] == "Unscrew a bolt with the gripper" and u["id"].startswith("sk_tj")
+    assert u["replays"] == ["/api/skills/unscrew/replays/new.mp4", "/api/skills/unscrew/replays/old.mp4"]
+    p = by_task["pick_place"]
+    assert p["name"] == "Pick and place" and p["live"] is False and p["run"]["note"] == skills_service.DOWN
+    assert p["thumbnail_url"] == "/api/skills/pick_place/replays/pp.mp4" and p["score"]["kind"] == "none"
+
+
+async def test_a_replay_file_never_leaves_its_folder(world):
+    ctx, *_ = world
+    _replay(ctx, "unscrew", "run 1.mp4", 1000)
+    (ctx.data_dir / "secret.mp4").write_bytes(b"x")
+    assert skills_service.replay_file(ctx, "unscrew", "run 1.mp4").read_bytes() == b"mp4"
+    for task, name in [("unscrew", "../../secret.mp4"), ("..", "secret.mp4"), ("unscrew", "..%2Fsecret.mp4"),
+                       ("unscrew", "/etc/passwd"), ("unscrew", "missing.mp4"), ("unscrew", ".hidden.mp4"),
+                       ("../unscrew", "run 1.mp4"), ("unscrew", "run 1.txt")]:
+        with pytest.raises(NotFound):
+            skills_service.replay_file(ctx, task, name)
+
+
+def test_the_api_serves_replays_and_passes_the_camera_view_on(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    srv = FakeServe()
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("LIVE_POLICY_URL", f"http://127.0.0.1:{srv.port}")
+    monkeypatch.setenv("FUTURAMA_PROJECTS_FILE", str(tmp_path / "projects.json"))
+    (tmp_path / "skill_replays" / "jenga").mkdir(parents=True)
+    (tmp_path / "skill_replays" / "jenga" / "a.mp4").write_bytes(b"mp4data")
+    (tmp_path / "x.mp4").write_bytes(b"secret")
+    from cortex.config import settings
+
+    settings.cache_clear()
+    from cortex.api.app import app
+
+    try:
+        with TestClient(app) as c:
+            [j] = c.get("/api/skills").json()
+            assert j["task"] == "jenga" and j["live"] is True and j["replays"] == ["/api/skills/jenga/replays/a.mp4"]
+            r = c.get(j["replays"][0])
+            assert r.status_code == 200 and r.content == b"mp4data" and r.headers["content-type"] == "video/mp4"
+            assert c.get("/api/skills/jenga/replays/..%2F..%2Fx.mp4").status_code == 404
+            assert c.get("/api/skills/jenga/replays/nope.mp4").status_code == 404
+            assert c.get("/api/live-policy/sim/jenga/7?view=wrist").status_code == 200
+            assert c.get("/api/live-policy/sim/jenga/8").status_code == 200
+            assert c.get("/api/live-policy/sim/jenga/9?view=side").status_code == 422
+            assert srv.started == ["/sim/jenga/7?view=wrist", "/sim/jenga/8"]
+    finally:
+        srv.close()
+        settings.cache_clear()

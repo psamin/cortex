@@ -11,15 +11,22 @@ past live runs.
 The studio's Physical Skills page (GET /api/skills) and the MCP tools read this one list. It holds only policies
 trained in our physics sim (user rule, #298: the GPU server serves real-demo policies only with SERVE_REAL=1);
 list_skills(ctx, real=True) adds the real-demo ones.
+
+Skills stay listed while no GPU server is up (#308): the sim policies a live server served are kept in
+<data dir>/skills_seen.json, and each sim skill carries its recorded replays, the mp4s in
+<data dir>/skill_replays/<task>/ (newest first). Known sim skills (SEEDED) are listed before any server has been
+seen, but only when they have a replay: never a skill with no trained policy behind it.
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from ..context import Ctx
 from ..errors import NotFound
@@ -30,12 +37,15 @@ from . import live_policy_service, project_cleanup, sim_import_service
 from .futurama_files import is_remote
 from .simulation_runner import wilson
 
+log = logging.getLogger(__name__)
+
 # What each known task does, in plain words. Real-data tasks are the Futurama SmolVLA fine-tunes.
 REAL_NAMES = {"jenga": "Pull a Jenga block", "conveyor": "Sort parts on a conveyor",
               "suture": "Pass a needle through eyelets"}
 SIM_NAMES = {"jenga": "Push a block out of a Jenga tower", "unscrew": "Unscrew a bolt with the gripper",
              "screwdriver": "Unscrew a screw with a screwdriver", "palletize": "Move boxes onto a pallet",
-             "suture": "Pass a needle through a tissue pad", "conveyor": "Pick a moving part off a conveyor"}
+             "suture": "Pass a needle through a tissue pad", "conveyor": "Pick a moving part off a conveyor",
+             "unscrew_black": "Unscrewing policy 2", "pick_place": "Pick and place"}
 POLICY = {"act": "ACT", "smolvla": "SmolVLA", "diffusion": "Diffusion"}
 GPUS = ("GH200", "H200", "H100", "A100", "L40S", "L40", "L4", "V100", "P40")
 UNSEEN_FROM = 100_000  # cortex/sim/tasks/run.py EVAL_SEED0: layouts from here up were never used in training
@@ -45,6 +55,50 @@ PRACTICE_DETAIL = ("Closed-loop runs in MuJoCo on the few practice layouts it tr
 PENDING_DETAIL = "Its evaluation is still running, so no score is claimed yet."
 NONE_DETAIL = "No evaluation or held-out replay has been run for this policy yet."
 DOWN = "The GPU server isn't running. Request a GPU to run it live."
+SEEN = "skills_seen.json"  # under the data dir: the sim skills a live GPU server last served (#308)
+REPLAYS = "skill_replays"  # under the data dir: <task>/*.mp4, recorded replays of each sim skill (#308)
+SEEDED = {"unscrew": "act", "unscrew_black": "", "jenga": "", "pick_place": ""}  # known sim skills -> policy type
+TASK = re.compile(r"^[A-Za-z0-9_-]+$")
+
+
+def replay_urls(ctx: Ctx, task: str | None) -> list[str]:
+    """URLs of the task's recorded replays, newest first."""
+    d = ctx.data_dir / REPLAYS / (task or "")
+    if not task or not TASK.match(task) or not d.is_dir():
+        return []
+    files = sorted((f for f in d.glob("*.mp4") if f.is_file() and not f.name.startswith(".")),
+                   key=lambda f: f.stat().st_mtime, reverse=True)
+    return [f"/api/skills/{task}/replays/{quote(f.name)}" for f in files]
+
+
+def replay_file(ctx: Ctx, task: str, name: str) -> Path:
+    """The replay file `name` of `task`, never anything outside <data dir>/skill_replays/<task>/."""
+    root = (ctx.data_dir / REPLAYS).resolve()
+    if TASK.match(task) and name.lower().endswith(".mp4") and not name.startswith(".") \
+            and not any(c in name for c in "/\\\0"):
+        p = (root / task / name).resolve()
+        if p.parent == root / task and p.is_file():
+            return p
+    raise NotFound(f"No replay {name!r} for {task!r}.")
+
+
+def _read_seen(ctx: Ctx) -> dict[str, dict[str, Any]]:
+    try:
+        d = json.loads((ctx.data_dir / SEEN).read_text())
+    except (OSError, ValueError):
+        return {}
+    return {k: v for k, v in d.items() if isinstance(v, dict)} if isinstance(d, dict) else {}
+
+
+def _seeded(task: str) -> dict[str, Any]:
+    v = SEEDED[task]
+    return {"id": f"sk_served_sim_{task}", "name": _name(task, True, None), "task": task, "data": "sim",
+            "instruction": "", "robot": "SO-101", "project_id": None, "project_name": None, "policy_type": v,
+            "policy": _policy(v), "variant": v, "steps": None, "trained_where": None, "trained_at": None,
+            "weights": "on the cluster", "checkpoint_id": None, "checkpoint": v, "training_job_id": None,
+            "dataset_version_id": None, "slurm_job": None, "layouts": None,
+            "score": {"kind": "none", "value": None, "n": None, "label": "Not measured yet", "detail": NONE_DETAIL},
+            "runs": [], "evidence": [], "thumbnail_url": None}
 
 
 def _policy(ptype: str) -> str:
@@ -308,6 +362,23 @@ async def list_skills(ctx: Ctx, real: bool = False) -> list[dict[str, Any]]:
             "layouts": s.get("layouts") or None,
             "run": _run_sim(task, variant, live), "runs": [], "evidence": [], "thumbnail_url": None,
         })
+
+    # sim skills a GPU server served before, and known ones with a recorded replay: listed while it's down (#308)
+    seen = _read_seen(ctx)
+    if fresh := {s["task"]: s for s in out if s["id"].startswith("sk_served_sim_")}:
+        seen = {**seen, **fresh}
+        try:
+            (ctx.data_dir / SEEN).write_text(json.dumps(seen))
+        except OSError:
+            log.exception("could not save the served sim skills")
+    have = {s["task"] for s in out if s["data"] == "sim"}
+    for task, s in {**{t: _seeded(t) for t in SEEDED}, **seen}.items():
+        if task not in have and (task in seen or replay_urls(ctx, task)):
+            out.append({**s, "run": _run_sim(task, str(s.get("variant") or ""), live)})
+    for s in out:
+        s["replays"] = replay_urls(ctx, s["task"]) if s["data"] == "sim" else []
+        s["live"] = bool(s["run"]["live_now"])
+        s["thumbnail_url"] = s["thumbnail_url"] or next(iter(s["replays"]), None)
     out.sort(key=lambda s: s["trained_at"] or "", reverse=True)
     return out if real else [s for s in out if s["data"] == "sim"]
 
