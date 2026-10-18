@@ -1,0 +1,6 @@
+{
+  "_note": "Which Cortex project holds each Futurama task's results (#179). Keys are the task names used by serve_policy.py and replay_policy.py; sim tasks are sim_<task>. Read by the live-policy recorder and scripts/import_*.py.",
+  "jenga": "prj_a8be717dad10",
+  "conveyor": "prj_b39b49bf6c75",
+  "suture": "prj_25dcd4dd3804"
+}

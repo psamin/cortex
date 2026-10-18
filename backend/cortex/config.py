@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     futurama_policy_dir: str = "~/cortex-jenga"  # holds serve_policy.sbatch and output/<task>/ checkpoints
     futurama_node_domain: str = "cc.gatech.edu"  # compute nodes are <node>.<domain>
     live_policy_gres: str = "gpu:l40s:1"  # e.g. gpu:h200:1
+    # task -> project id for results made on Futurama (live GPU sessions, replays, sim-task runs), #179
+    futurama_projects_file: Path = ROOT / "infra" / "futurama" / "projects.json"
 
     # Approval token required for paid jobs / hardware when called via MCP
     cortex_approval_secret: str | None = None
