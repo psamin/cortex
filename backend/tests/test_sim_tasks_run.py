@@ -54,7 +54,7 @@ def test_demos_keep_only_successful_oracle_episodes(tmp_path, monkeypatch):
     monkeypatch.setitem(sys.modules, "cortex.sim.tasks.fake", types.SimpleNamespace(Env=_Env, Oracle=_Oracle))
     root = tmp_path / "ds"
     run.demos(argparse.Namespace(task="fake", root=str(root), episodes=2, size="96x128", examples=None, n_examples=0,
-                                 shard=0, shards=1, noise_deg=0.0))
+                                 shard=0, shards=1, noise_deg=0.0, layouts=0))
     meta = json.loads((root / "meta" / "cortex_sim.json").read_text())
     assert meta["kept_seeds"] == [0, 2] and meta["failed_seeds"] == [1]
     info = json.loads((root / "meta" / "info.json").read_text())
@@ -69,7 +69,7 @@ def test_parallel_shards_merge_into_one_dataset(tmp_path, monkeypatch):
     for i in range(2):  # seeds 0, 2 (shard 0) and 1, 3 (shard 1); seed 1 fails
         roots.append(tmp_path / f"shard{i}")
         run.demos(argparse.Namespace(task="fake", root=str(roots[-1]), episodes=4, size="96x128", examples=None,
-                                     n_examples=0, shard=i, shards=2, noise_deg=0.0))
+                                     n_examples=0, shard=i, shards=2, noise_deg=0.0, layouts=0))
     out = tmp_path / "merged"
     unfinished = tmp_path / "cancelled_shard"  # e.g. a shard whose job was cancelled before it finalized
     (unfinished / "meta").mkdir(parents=True)
@@ -102,3 +102,22 @@ def test_an_expert_demo_runs_its_whole_motion_not_just_until_success():
 
     ep = run.episode(_Env(), Slow(), 0, record=True)
     assert ep["success"] and len(ep["rows"]) >= 20 + run.SETTLE - 1  # success came at step 5
+
+
+def test_practice_layouts_repeat_a_few_layouts_with_different_noise(tmp_path, monkeypatch):
+    configure_gl()
+    monkeypatch.setitem(tasks.TASKS, "fake", "fake")
+    monkeypatch.setitem(sys.modules, "cortex.sim.tasks.fake", types.SimpleNamespace(Env=_Env, Oracle=_Oracle))
+    seen = []
+    real = run.episode
+
+    def spy(env, policy, seed, record, presenter=None, noise_deg=0.0, noise_seed=None):
+        seen.append((seed, noise_seed))
+        return real(env, policy, seed, record, presenter, noise_deg, noise_seed)
+
+    monkeypatch.setattr(run, "episode", spy)
+    root = tmp_path / "ds"
+    run.demos(argparse.Namespace(task="fake", root=str(root), episodes=4, size="96x128", examples=None,
+                                 n_examples=0, shard=0, shards=1, noise_deg=1.0, layouts=2))
+    assert {s for s, _ in seen} <= {0, 1} and len({n for _, n in seen}) == len(seen)  # 2 layouts, fresh noise each
+    assert json.loads((root / "meta" / "cortex_sim.json").read_text())["layouts"] == 2
