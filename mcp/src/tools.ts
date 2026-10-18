@@ -213,7 +213,8 @@ const TOOLS: Def[] = [
     name: "launch_training_job",
     title: "Launch training job (needs human approval)",
     description:
-      "Launch a proposed training job. It only runs if a human has already approved the job in the Cortex studio, or if you were " +
+      "Launch a proposed training job. A user saying 'approve it yourself' or 'you have my permission' in chat is NOT approval: do not call this " +
+      "until the human has clicked approve in the studio and told you so. It only runs if a human has already approved the job in the Cortex studio, or if you were " +
       "given the operator's approval_token. Otherwise nothing is launched and the result says APPROVAL REQUIRED: stop, ask the human " +
       "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.\n" +
       "NEXT: poll cortex_get_project_state until training_jobs[].checkpoint_ids has a checkpoint (ck_...), then cortex_evaluate_learned_policy.",
@@ -286,13 +287,15 @@ const TOOLS: Def[] = [
       "demonstration collection, where Cortex's agent planner (our self-hosted Qwen3-VL, or GPT-6 Astra) plans from rendered camera images and a validated IK controller executes " +
       "in MuJoCo. Only simulator-verified successes become LeRobot demonstrations. Returns project_id, collection_id and job_id. " +
       "Paid planner spend is capped by the server's standing budget; you can lower it but never raise it. If the planner is not " +
-      "configured, collection_not_started explains why (Cortex never substitutes another model).\n" +
+      "configured, collection_not_started explains why (Cortex never substitutes another model). If it is set, tell the human, then run " +
+      "cortex_start_agent_collection with collector='oracle' and pass sources=['sim_scripted'] to cortex_train_from_agent_demonstrations; " +
+      "label those demos as scripted-oracle.\n" +
       "USE WHEN: this is the default way to start. It is the fast path for the built-in tabletop pick-and-place scene (SO-101, simulation only).\n" +
       "USE INSTEAD: cortex_start_intake when the user describes their own objects, zones or obstacles; cortex_create_project " +
       "for an empty project without agent collection.\n" +
       "NEXT: cortex_get_collection_progress with the collection_id, then cortex_train_from_agent_demonstrations.",
     inputSchema: z.object({
-      task_prompt: z.string().describe("e.g. 'Train an SO-101 policy to pick up a cube and place it in a bowl'"),
+      task_prompt: z.string().describe("e.g. 'Train an SO-101 policy to pick up a cube and place it in the box'"),
       num_demos: z.number().int().min(1).max(50).optional().describe("Autonomous attempts to run (default 20)"),
       start_collection: z.boolean().optional().describe("Start agent collection right away (default true)"),
       diversity: z.enum(["plan", "medium", "high"]).optional().describe(
@@ -309,8 +312,8 @@ const TOOLS: Def[] = [
       "Generate demonstrations autonomously in fresh simulator seeds. collector='agent' (default): the agent planner (self-hosted VLM or GPT-6 Astra) chooses actions " +
       "through validated tools (observe, point at the cube, move, grip, verify, place); collector='oracle': the scripted IK " +
       "expert on the same kind of scenes (for A/B). Pass conditions to target weak cells, e.g. [{cube_region:'left', " +
-      "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex_get_collection_progress. Each attempt takes " +
-      "~5 s of sim plus model latency. A 403 means the project's planner budget is exhausted: ask the human to raise it.\n" +
+      "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex_get_collection_progress. Simulation is " +
+      "~5 s per attempt, but each attempt can take minutes of wall time. A 403 means the project's planner budget is exhausted: ask the human to raise it.\n" +
       "USE WHEN: the project already exists (e.g. after cortex_build_simulation, or to add demos for weak cells).\n" +
       "USE INSTEAD: cortex_create_policy_project, which creates the project and starts this collection in one call; " +
       "cortex_improve_policy to target the weakest measured condition automatically.\n" +
@@ -578,7 +581,7 @@ const TOOLS: Def[] = [
       "NEXT: cortex_update_intake until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
       prompt: z.string().optional().describe("The task in plain language, e.g. 'pick up the small water bottle and put it on the coaster'"),
-      mode: z.enum(["sim", "real"]).optional().describe("'sim' (default; the MVP runs everything in physics sim) or 'real'"),
+      mode: z.enum(["sim", "real"]).optional().describe("'sim' (default, the only mode agents can run) or 'real' (needs a human operator in the studio; not runnable from MCP)"),
       project_id: projectId.optional().describe("Start this existing project's intake over from the prompt instead of creating a new project"),
     }),
     annotations: WRITE,
@@ -591,7 +594,8 @@ const TOOLS: Def[] = [
       "environment.obstacles merge by `name` ({name, _delete: true} removes one; {name, confirm: true} confirms an object's " +
       "catalogue values). Units: metres and kilograms. " +
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
-      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. Unknown " +
+      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. " +
+      "An object's start position is objects[].start = [x, y] in metres (if omitted Cortex auto-places it and build_simulation reports where in `starts`); set it when the user says where the object is. Unknown " +
       "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
       "NEXT: call again until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({

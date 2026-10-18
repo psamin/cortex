@@ -10,6 +10,7 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
@@ -566,7 +567,19 @@ async def register_checkpoint(pid: str, req: CheckpointReq, request: Request) ->
 
 @app.get("/api/projects/{pid}/checkpoints")
 async def checkpoints(pid: str) -> list[Checkpoint]:
-    return await ctx().repo.list("checkpoints", Checkpoint, project_id=pid)
+    c = ctx()
+    rows = await c.repo.list("checkpoints", Checkpoint, project_id=pid)
+    # #region agent log
+    from ..context import agent_debug
+    unfiltered = await c.store.list("checkpoints")
+    agent_debug("D", "app.py:checkpoints", "list checkpoints", {
+        "project_id": pid, "store": c.store.name, "matched": len(rows),
+        "unfiltered": len(unfiltered),
+        "matched_paths": [{"id": ck.id, "path": ck.path, "exists": Path(ck.path).joinpath("config.json").exists()} for ck in rows[:8]],
+        "other_projects": sorted({r.get("project_id") for r in unfiltered if r.get("project_id") != pid})[:8],
+    })
+    # #endregion
+    return rows
 
 
 @app.post("/api/projects/{pid}/evaluations")

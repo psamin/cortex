@@ -114,7 +114,7 @@ function approvalRequired(tool: string, args: Json, detail: string): CallToolRes
   const where = typeof args.project_id === "string" ? `${STUDIO_URL}/p/${args.project_id}` : STUDIO_URL;
   const tj = typeof args.training_job_id === "string" ? args.training_job_id : undefined;
   const ask = tj
-    ? `Ask the human to open the Cortex studio at ${where}, go to the project's Improve tab and approve training job ${tj}. After they confirm, call cortex.${tool} again with the same training_job_id.`
+    ? `Ask the human to open the Cortex studio at ${where}, go to the project's Improve tab and approve training job ${tj}. After they confirm, call cortex.${tool} again with the same training_job_id. If you do not have the project link, call cortex.show_training_review for its studio_url.`
     : `Ask the human to do this in the Cortex studio at ${where}.`;
   const headline = `HUMAN APPROVAL REQUIRED - cortex.${tool} was not executed. Do not retry until the human confirms.`;
   // Some clients (Claude Code) show the model structuredContent instead of the
@@ -240,7 +240,9 @@ export async function callTool(tool: string, args: Json, signal?: AbortSignal, w
       // Camera image for the agent to look at. Claude Code shows the model structuredContent
       // instead of content when both exist, so image results carry no structuredContent.
       const { image_b64, ...rest } = data;
-      const result = (rest.result ?? {}) as Json;
+      // build_simulation reports feasibility and start positions at the top level, not under `result`.
+      const scene = (rest.scene ?? {}) as Json;
+      const result = (rest.result ?? (rest.feasibility ? { feasibility: rest.feasibility, starts: scene.starts, zones: scene.zones } : {})) as Json;
       return {
         content: [
           ...text(

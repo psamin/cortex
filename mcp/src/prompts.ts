@@ -11,7 +11,7 @@ ${projectId ? `\n0. A project already exists: ${projectId}. Call cortex.get_proj
    generates demonstrations autonomously (it plans from camera images; a validated IK controller executes in MuJoCo).
    If collection_not_started says the planner is unavailable, tell the human and use cortex.start_agent_collection
    {project_id, collector: "oracle"} instead (the scripted IK oracle), clearly labelled as such.
-2. Poll cortex.get_collection_progress {collection_id} every ~20 s until it finishes. Report successes vs failed attempts,
+2. If the call returned a job_id/collection_id instead of the finished result, poll cortex.get_collection_progress {collection_id} every ~20 s until it finishes. Report successes vs failed attempts,
    model calls and USD spent. Failed attempts are diagnostics, never training data.
 3. cortex.get_demonstration_results {project_id} for provenance and per-collector metrics (only claim what is measured).
 4. cortex.train_from_agent_demonstrations {project_id} -> job_id; poll cortex.get_job; result_ref = training job tj_....

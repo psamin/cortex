@@ -19,6 +19,23 @@ from .store.local import LocalBlobStore, SqliteStore
 
 log = logging.getLogger(__name__)
 
+
+def agent_debug(hypothesis_id: str, location: str, message: str, data: dict[str, Any]) -> None:
+    # #region agent log
+    try:
+        import json
+        import time
+
+        line = json.dumps({
+            "sessionId": "9f1445", "hypothesisId": hypothesis_id, "location": location,
+            "message": message, "data": data, "timestamp": int(time.time() * 1000),
+        }, default=str)
+        with open(r"C:\Users\Suhas\OneDrive\Documents\CodingProjects\Cortex\debug-9f1445.log", "a", encoding="utf-8") as f:
+            f.write(line + "\n")
+    except Exception:
+        pass
+    # #endregion
+
 # The agent tool call in flight on this task (set by agent_obs around call_tool): {id, tool, session_id, open, ...}.
 CURRENT_CALL: ContextVar[dict[str, Any] | None] = ContextVar("cortex_current_call", default=None)
 
@@ -156,6 +173,30 @@ async def build_ctx(s: Settings) -> Ctx:
         notes.append("InsForge not configured: using local SQLite + disk (fallback).")
     await store.init()
     await blobs.init()
+    # #region agent log
+    ck_rows, tj_rows, list_error = None, None, None
+    try:
+        ck_rows = await store.list("checkpoints")
+        tj_rows = await store.list("training_jobs")
+    except Exception as e:
+        list_error = f"{type(e).__name__}: {e}"[:300]
+    agent_debug("A", "context.py:build_ctx", "store ready", {
+        "store": store.name, "blobs": blobs.name, "insforge": s.insforge_enabled,
+        "s3": bool(getattr(blobs, "s3", None)),
+        "s3_problem": None if getattr(blobs, "s3", None) else getattr(blobs, "s3_problem", None),
+        "checkpoint_rows": None if ck_rows is None else len(ck_rows),
+        "training_jobs": None if tj_rows is None else [
+            {"id": r.get("id"), "project_id": r.get("project_id"), "status": r.get("status"),
+             "checkpoint_ids": (r.get("data") or {}).get("checkpoint_ids") if isinstance(r.get("data"), dict) else None}
+            for r in tj_rows[:12]],
+        "checkpoints": None if ck_rows is None else [
+            {"id": r.get("id"), "project_id": r.get("project_id"),
+             "path": (r.get("data") or {}).get("path") if isinstance(r.get("data"), dict) else type(r.get("data")).__name__,
+             "data_is_dict": isinstance(r.get("data"), dict)}
+            for r in ck_rows[:12]],
+        "list_error": list_error,
+    })
+    # #endregion
 
     route, gw_err = await resolve_model_route(s)
     src = route.label if route else "disabled"
