@@ -50,7 +50,7 @@ export function AnalyzePage() {
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="kn-display text-[36px] leading-tight">Analyze</h1>
-          <p className="mt-0.5 text-sm text-ink-3">Measured checks · VLM diagnoses are unverified hypotheses until confirmed.</p>
+          <p className="mt-0.5 text-sm text-ink-3">Measured checks · VLM diagnoses are unverified hypotheses.</p>
         </div>
       </div>
 
@@ -120,7 +120,7 @@ function RunAnalysis({ pid, analysis }: { pid: string; analysis?: Analysis }) {
                 </Badge>
               )}
             </div>
-            {analysis.summary && <p className="mt-1 text-xs text-ink-2">{analysis.summary}</p>}
+            {analysis.summary && <p className="mt-1 line-clamp-1 cursor-help text-xs text-ink-2" title={analysis.summary}>{analysis.summary}</p>}
           </>
         ) : (
           <p className="text-sm text-ink-3">No analysis yet.</p>
@@ -232,7 +232,7 @@ function EpisodeTable({
                         </Badge>
                       ))
                     ) : q ? (
-                      <span className="text-2xs text-ink-4">none</span>
+                      <span className="text-2xs text-ink-4">—</span>
                     ) : null}
                     {q && q.flags.length > 3 && <span className="text-2xs text-ink-3">+{q.flags.length - 3}</span>}
                   </div>

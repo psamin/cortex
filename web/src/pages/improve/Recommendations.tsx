@@ -5,7 +5,7 @@ import { RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { api } from "../../api/client";
 import { useRecommendations } from "../../api/hooks";
 import type { Evidence, Recommendation, RecommendationStatus } from "../../api/types";
-import { Badge, Button, EmptyState, ErrorState, InfoTip, Input, Panel, SkeletonRows, InlineError } from "../../components/ui";
+import { Badge, Button, EmptyState, ErrorState, InfoTip, Input, Panel, Readout, SkeletonRows, InlineError } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
 import { RefChip } from "../../components/refs";
 import { cn, evidenceValue, humanize } from "../../lib/format";
@@ -60,24 +60,19 @@ export function EvidenceList({ evidence, pid, compact }: { evidence: Evidence[];
   );
 }
 
+/** Score components as one compact mono readout: `coverage gap 1.00 · diversity 0.50 …`. */
 function ComponentBars({ components }: { components: Record<string, number> }) {
   const entries = Object.entries(components).sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
-  const max = Math.max(1e-9, ...entries.map(([, v]) => Math.abs(v)));
   if (entries.length === 0) return null;
   return (
-    <div className="space-y-1">
-      {entries.map(([k, v]) => (
-        <div key={k} className="grid grid-cols-[110px_1fr_44px] items-center gap-2 text-2xs">
-          <span className="truncate text-ink-3" title={k}>
-            {humanize(k)}
-          </span>
-          <div className="h-1.5 overflow-hidden rounded-full bg-rail">
-            <div className={cn("h-full rounded-full", v < 0 ? "bg-fault/70" : "bg-servo")} style={{ width: `${(Math.abs(v) / max) * 100}%` }} />
-          </div>
-          <span className={cn("num text-right font-mono", v < 0 ? "text-fault" : "text-ink-2")}>{v.toFixed(2)}</span>
-        </div>
+    <Readout
+      className="justify-end normal-case tracking-normal"
+      items={entries.map(([k, v]) => (
+        <span key={k} title={k} className={v < 0 ? "text-fault" : undefined}>
+          {humanize(k)} <span className="num text-ink-2">{v.toFixed(2)}</span>
+        </span>
       ))}
-    </div>
+    />
   );
 }
 

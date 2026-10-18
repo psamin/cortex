@@ -221,7 +221,7 @@ function StartForm({
   return (
     <Panel
       title={isAgent(collector) ? "Agent demos" : "Oracle demos"}
-      meta={isAgent(collector) ? `${agentLabel(planner?.model)} plans · IK executes` : "oracle · privileged"}
+      meta={isAgent(collector) ? `${agentLabel(planner?.model)} plans · IK executes` : "privileged"}
       actions={
         running && current ? (
           <Button size="sm" variant="danger" loading={stop.isPending} onClick={() => stop.mutate()}>

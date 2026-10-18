@@ -64,9 +64,8 @@ export function ProjectSpecView({ project }: { project: Project }) {
               {spec.success_criteria.map((c, i) => (
                 <li key={c.id} className="grid grid-cols-[20px_1fr] gap-1">
                   <span className="num font-mono text-xs text-ink-4">{i + 1}.</span>
-                  <div>
-                    <div className="text-ink">{c.description}</div>
-                    <div className="mt-0.5 font-mono text-2xs text-ink-3">{c.measurable}</div>
+                  <div className="cursor-help text-ink" title={c.measurable}>
+                    {c.description}
                   </div>
                 </li>
               ))}
@@ -90,7 +89,7 @@ export function ProjectSpecView({ project }: { project: Project }) {
         <WorkcellGrid
           renderCell={(c) => {
             const cell = byKey.get(conditionKey(c));
-            if (!cell) return <div className="px-2.5 py-3 text-2xs text-ink-4">not planned</div>;
+            if (!cell) return <div className="px-2.5 py-3 text-2xs text-ink-4" title="not planned">—</div>;
             const done = cell.collected >= cell.target && cell.target > 0;
             return (
               <div className="px-2.5 py-2" title={cell.reason || undefined}>
@@ -98,14 +97,13 @@ export function ProjectSpecView({ project }: { project: Project }) {
                   <span className={cn("num kn-display text-[26px]", done ? "text-pass" : "text-ink")}>{cell.collected}</span>
                   <span className="num text-xs text-ink-3">/ {cell.target}</span>
                 </div>
-                {cell.reason && <div className="mt-0.5 line-clamp-2 text-2xs leading-snug text-ink-3">{cell.reason}</div>}
               </div>
             );
           }}
         />
         <p className="mt-3 flex items-center gap-1.5 text-2xs text-ink-3">
           Collected / target
-          <InfoTip>Collected / target demos per condition. Columns are where the cube starts, rows are the lighting.</InfoTip>
+          <InfoTip>Collected / target demos per condition. Columns are where the cube starts, rows are the lighting. Hover a cell for why it is planned.</InfoTip>
         </p>
       </Panel>
     </div>
