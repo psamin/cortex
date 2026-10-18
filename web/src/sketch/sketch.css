@@ -134,9 +134,6 @@
   Offsets use top/left (not transform) so fixed-position descendants are unaffected.
 */
 .sk-depth {
-  position: relative;
-  top: 0;
-  left: 0;
   --sk-d: var(--sk-depth);
   transition: top 180ms cubic-bezier(0.23, 1, 0.32, 1), left 180ms cubic-bezier(0.23, 1, 0.32, 1);
 }
@@ -170,6 +167,7 @@
   border-left: 0;
   transform: skewY(45deg);
 }
+.sk-depth.sk-hover { position: relative; top: 0; left: 0; }
 .sk-depth.sk-hover:hover,
 .sk-depth.sk-hover:focus-within {
   top: -2px;

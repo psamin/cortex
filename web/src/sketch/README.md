@@ -31,8 +31,8 @@ Lower-level helpers: `iso(p, scale, origin)`, `poly`, `line`, `boxFaces`, `circl
 
 | Class | Effect |
 |---|---|
-| `.sk-depth` | Gives a card a 4 px isometric extrusion on the bottom-right edge: two skewed hairline side faces in toon greys, not a shadow. Needs a visible overflow on the card. `.sk-depth-lg` makes it 6 px. |
-| `.sk-depth.sk-hover` | The card lifts 2 px up and left on hover or focus-within, and its faces grow, so the base stays put. It uses `top`/`left`, not `transform`, so fixed-position children keep working. |
+| `.sk-depth` | Gives a card a 4 px isometric extrusion on the bottom-right edge: two skewed hairline side faces in toon greys, not a shadow. The card must be positioned (`relative` or `absolute`) and must not be clipped by `overflow: hidden`. `.sk-depth-lg` makes it 6 px. |
+| `.sk-depth.sk-hover` | The card lifts 2 px up and left on hover or focus-within, and its faces grow, so the base stays put. It makes the card `relative` and uses `top`/`left`, not `transform`, so fixed-position children keep working. |
 | `.sk-pill` + `.sk-pill-primary` / `-secondary` / `-danger` | A pill button with an offset base plate under it, which compresses on press. Set the height and padding yourself. |
 | `.sk-svg`, `.sk-f1…f4`, `.sk-construction`, `.sk-leader`, `.sk-node`, `.sk-accent` | Line-art primitives for custom drawings. |
 
