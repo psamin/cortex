@@ -268,7 +268,7 @@ export function SkillViewer() {
                 aria-current={x.id === sid || undefined}
                 className={cn("flex w-full items-center gap-3 rounded px-2 py-2 text-left", x.id === sid ? "bg-rail text-ink" : "text-ink-2 hover:bg-rail/50 hover:text-ink")}
               >
-                <Thumb url={x.replays[0] ?? x.thumbnail_url} className="h-10 w-14 shrink-0 rounded-sm border border-line" />
+                <Thumb url={x.replays?.[0] ?? x.thumbnail_url} className="h-10 w-14 shrink-0 rounded-sm border border-line" />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[13px]">{x.name}</span>
                   <span className="block truncate text-[11px] text-ink-3">{[x.policy, scoreBadge(x.score).text].filter(Boolean).join(" · ")}</span>

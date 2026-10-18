@@ -57,7 +57,7 @@ export type SkillVideo = { url: string; label: string; success?: boolean | null 
 export function skillVideos(s: PhysicalSkill): SkillVideo[] {
   const name = (u: string) => decodeURIComponent(u.split("/").pop() ?? "").replace(/\.mp4$/i, "");
   return [
-    ...s.replays.map((u) => ({ url: u, label: name(u) })),
+    ...(s.replays ?? []).map((u) => ({ url: u, label: name(u) })),
     ...s.runs.flatMap((r) => (r.video_url ? [{ url: r.video_url, label: `${r.label} · ${ago(r.when)}`, success: r.success }] : [])),
     ...s.evidence.flatMap((e) => (e.video_url ? [{ url: e.video_url, label: e.label, success: e.success }] : [])),
   ];

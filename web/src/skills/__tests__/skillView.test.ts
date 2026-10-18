@@ -91,4 +91,10 @@ describe("skillVideos", () => {
     expect(v[2].success).toBe(true);
     expect(v[3]).toMatchObject({ label: "Unseen layout 100000", success: false });
   });
+  it("copes with a backend older than #308, which sends no replays", () => {
+    const old = skill({ evidence: [{ label: "Unseen layout 1", success: true, video_url: "/files/e.mp4" }] });
+    delete old.replays;
+    delete old.live;
+    expect(skillVideos(old).map((x) => x.url)).toEqual(["/files/e.mp4"]);
+  });
 });

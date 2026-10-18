@@ -971,8 +971,9 @@ export interface PhysicalSkill {
   runs: SkillPastRun[];
   evidence: SkillEvidence[];
   thumbnail_url: string | null;
-  /** recorded replay videos of a sim skill, newest first (#308); empty for real-demo policies */
-  replays: string[];
-  /** on the live GPU server now */
-  live: boolean;
+  /** recorded replay videos of a sim skill, newest first (#308); empty for real-demo policies. Missing from a
+   *  backend older than #308. */
+  replays?: string[];
+  /** on the live GPU server now (missing from a backend older than #308) */
+  live?: boolean;
 }

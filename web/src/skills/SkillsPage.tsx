@@ -49,6 +49,7 @@ export function Thumb({ url, className, autoPlay = false }: { url: string | null
 function SkillCard({ s, gpu, onOpen }: { s: PhysicalSkill; gpu?: LivePolicyStatus; onOpen: () => void }) {
   const b = scoreBadge(s.score);
   const live = runAction(s, gpu).kind === "play";
+  const reps = s.replays ?? []; // a backend older than #308 sends none
   return (
     <li>
       <button
@@ -58,7 +59,7 @@ function SkillCard({ s, gpu, onOpen }: { s: PhysicalSkill; gpu?: LivePolicyStatu
       >
         <GlowEdge />
         {/* a recorded replay plays on its own, so skills show what they do even with no GPU server up (#308) */}
-        <Thumb url={s.replays[0] ?? s.thumbnail_url} autoPlay={!!s.replays.length} className="aspect-[16/10] w-full border-b border-line" />
+        <Thumb url={reps[0] ?? s.thumbnail_url} autoPlay={!!reps.length} className="aspect-[16/10] w-full border-b border-line" />
         <div className="flex flex-1 flex-col p-3.5">
           <div className="flex items-start gap-2">
             <h3 className="min-w-0 flex-1 text-[15px] font-medium leading-snug text-ink">{s.name}</h3>
