@@ -1,7 +1,7 @@
 import { BRAND } from "../landing/brand";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Outlet, useMatch } from "react-router-dom";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Sparkles } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { describeProvider } from "../components/HealthPills";
 import { useEngine, useHealth, useProjects } from "../api/hooks";
@@ -111,6 +111,7 @@ export function AppShell() {
   const project = pid ? projects.data?.find((p) => p.id === pid) : undefined;
   const onStudioHome = !!useMatch("/studio");
   const onAgents = !!useMatch("/studio/agents");
+  const onSkills = !!useMatch("/studio/skills/*");
 
   return (
     <div className="flex h-full flex-col">
@@ -138,9 +139,18 @@ export function AppShell() {
           )}
           <Link
             to="/studio"
-            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onAgents ? "text-ink-2" : "text-ink")}
+            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onAgents || onSkills ? "text-ink-2" : "text-ink")}
           >
             Studio
+          </Link>
+          <Link
+            to="/studio/skills"
+            className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] hover:text-ink", onSkills ? "bg-rail text-ink" : "text-ink-2")}
+            title="Every policy you've trained, ready to run live"
+            aria-label="Physical Skills"
+          >
+            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
+            <span className="hidden sm:inline">Physical Skills</span>
           </Link>
           <Link
             to="/studio/agents"

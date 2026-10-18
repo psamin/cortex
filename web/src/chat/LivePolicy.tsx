@@ -115,7 +115,7 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
 
 
 /** The live stream, with a "loading onto the GPU" state until the first frame and a clear failure state. */
-function LiveFrame({ src, label }: { src: string; label: string }) {
+export function LiveFrame({ src, label }: { src: string; label: string }) {
   const [state, setState] = useState<"loading" | "live" | "failed">("loading");
   return (
     <div className="relative flex h-full w-full items-center justify-center">
