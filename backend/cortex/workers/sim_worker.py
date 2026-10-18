@@ -84,6 +84,7 @@ def failure_mode(success: bool, max_z: float, steps: int, max_steps: int, final_
 def run_episode(env: PickPlaceEnv, policy, seed: int, var: Variation, max_steps: int,
                 preview: Preview | None, record: bool) -> dict[str, Any]:
     obs = env.reset(seed, var)
+    render = record or getattr(policy, "needs_pixels", True)  # oracles read sim state, not the cameras
     policy.reset(env, obs, seed)
     buf: dict[str, list] = {"front": [], "wrist": [], "state": [], "action": [], "reward": []}
     video: list[np.ndarray] = []
@@ -95,7 +96,8 @@ def run_episode(env: PickPlaceEnv, policy, seed: int, var: Variation, max_steps:
             buf["wrist"].append(obs["pixels"]["wrist"])
             buf["state"].append(obs["agent_pos"])
             buf["action"].append(action)
-        obs, reward, success, _, _ = env.step(action)
+        nxt, reward, success, _, _ = env.step(action, render=render)
+        obs = nxt if nxt is not None else obs
         if record:
             buf["reward"].append(reward)
         if preview is not None:

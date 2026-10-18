@@ -246,6 +246,7 @@ class PickPlacePolicy:
     """``sim_worker.run_episode``-compatible oracle (reset/act/ex) for intake scenes."""
 
     name = "pick-place skill (oracle, privileged state)"
+    needs_pixels = False
 
     def __init__(self, params: dict[str, float] | None = None, height: float | None = None,
                  grasp_width: float | None = None, on_phase: Callable[[str], None] | None = None):
