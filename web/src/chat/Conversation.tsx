@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, History, Info, Paperclip, Plus, Square, X } from "lucide-react";
 import { api } from "../api/client";
@@ -35,7 +35,10 @@ export function Conversation({ pid }: { pid: string }) {
   const nav = useNavigate();
   // Chat: talk to the agent and step in. Agent log: just watch what every agent on this project is doing.
   const modeKey = `cortex.chatMode.${pid}`;
+  const [params] = useSearchParams();
   const [mode, setModeState] = useState<"chat" | "log">(() => {
+    const asked = params.get("view"); // ?view=log from the Agents page's "Open log"
+    if (asked === "log" || asked === "chat") return asked;
     try {
       return localStorage.getItem(modeKey) === "log" ? "log" : "chat";
     } catch {

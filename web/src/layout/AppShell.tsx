@@ -110,6 +110,7 @@ export function AppShell() {
   const engine = useEngine();
   const project = pid ? projects.data?.find((p) => p.id === pid) : undefined;
   const onStudioHome = !!useMatch("/studio");
+  const onAgents = !!useMatch("/studio/agents");
 
   return (
     <div className="flex h-full flex-col">
@@ -135,7 +136,17 @@ export function AppShell() {
               {engine.data.label}
             </span>
           )}
-          <Link to="/studio/agents" className="inline-flex h-7 items-center rounded-full px-2.5 text-[13px] text-ink-2 hover:text-ink">
+          <Link
+            to="/studio"
+            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onAgents ? "text-ink-2" : "text-ink")}
+          >
+            Studio
+          </Link>
+          <Link
+            to="/studio/agents"
+            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onAgents ? "bg-rail text-ink" : "text-ink-2")}
+            title="Which agents are connected, and their keys"
+          >
             Agents
           </Link>
           <HealthSummary />

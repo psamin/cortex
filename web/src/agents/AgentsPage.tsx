@@ -3,10 +3,10 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button, ErrorState, Field, Input, Panel, Segmented, SkeletonRows } from "../components/ui";
 import { ago, cn } from "../lib/format";
-import { agentsApi, token, useAgentEvents, type AgentCall, type AgentEvent, type AgentSession } from "./api";
+import { agentsApi, token, useAgentEvents, type AgentEvent, type AgentSession } from "./api";
 import { KeysPanel } from "./Keys";
-import { Timeline } from "./Timeline";
-import { NowBar, WorkBoard, useSessionWork } from "./Work";
+import { GlowEdge } from "../components/ui/spotlight-card";
+import { useProjects } from "../api/hooks";
 
 const label = "font-mono text-[10.5px] uppercase tracking-[0.14em]";
 
@@ -44,110 +44,79 @@ function SignIn({ onDone }: { onDone: () => void }) {
   );
 }
 
-function SessionRow({ s, active }: { s: AgentSession; active: boolean }) {
+function SessionCard({ s, names }: { s: AgentSession; names: Record<string, string> }) {
   return (
-    <li>
-      <Link
-        to={`/studio/agents?session=${s.id}`}
-        className={cn("block rounded-sm border px-3 py-2.5 transition-colors", active ? "border-ink bg-plate" : "border-transparent hover:bg-rail")}
-      >
-        <div className="flex items-center gap-2">
-          <span className={cn("h-2 w-2 shrink-0 rounded-full", s.live ? "animate-pulse bg-pass" : "bg-ink-4")} title={s.live ? "live" : "idle"} />
-          <span className="truncate text-[13.5px] text-ink">{s.client ?? "unknown client"}</span>
-          {s.client_version && <span className="font-mono text-[11px] text-ink-3">{s.client_version}</span>}
-          <span className={cn("ml-auto shrink-0 text-ink-3", label)}>{s.live ? "live" : "idle"}</span>
-        </div>
-        <div className="mt-1 flex flex-wrap gap-x-3 text-xs text-ink-3">
-          <span>
-            {s.last_tool ? <span className="font-mono">{s.last_tool}</span> : "no calls"} · {ago(s.last_seen)}
-          </span>
-          <span>{s.call_count} calls</span>
-          {s.projects.length > 0 && <span className="font-mono">{s.projects.slice(-2).join(", ")}{s.projects.length > 2 ? ` +${s.projects.length - 2}` : ""}</span>}
-        </div>
-      </Link>
+    <li className={cn("sk-depth relative rounded border bg-plate p-4", s.live ? "border-servo/60" : "border-line-strong")}>
+      <GlowEdge />
+      <div className="flex items-center gap-2">
+        <span className={cn("h-2 w-2 shrink-0 rounded-full", s.live ? "live-dot bg-pass" : "bg-ink-4")} title={s.live ? "live" : "idle"} />
+        <span className="truncate text-[14px] text-ink">{s.client ?? "unknown client"}</span>
+        {s.client_version && <span className="font-mono text-[11px] text-ink-3">{s.client_version}</span>}
+        <span className={cn("ml-auto shrink-0 text-ink-3", label)}>{s.live ? "live" : "idle"}</span>
+      </div>
+      <p className="mt-1.5 text-xs text-ink-3">
+        {s.last_tool ? <span className="font-mono text-ink-2">{s.last_tool}</span> : "no calls yet"} · {ago(s.last_seen)} · {s.call_count} calls
+      </p>
+      {s.projects.length > 0 ? (
+        <ul className="mt-3 space-y-1.5">
+          {s.projects.map((p) => (
+            <li key={p} className="flex items-center justify-between gap-3 rounded-sm border border-line px-2.5 py-1.5">
+              <span className="min-w-0 truncate text-[13px] text-ink-2">{names[p] ?? <span className="font-mono text-xs">{p}</span>}</span>
+              <Link to={`/p/${p}?view=log`} className="shrink-0 text-xs font-medium text-ink underline underline-offset-2 hover:text-servo">
+                Open log
+              </Link>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="mt-3 text-xs text-ink-3">Not working on a project yet.</p>
+      )}
     </li>
   );
 }
 
+/**
+ * Which agents are connected and what they are working on. The detail (every call, demos, training,
+ * evaluations, RL) lives in each project's Agent log; this page only routes you there.
+ */
 function Sessions() {
   const qc = useQueryClient();
-  const [params] = useSearchParams();
-  const sessions = useQuery({ queryKey: ["agents", "sessions"], queryFn: agentsApi.sessions, refetchInterval: 60_000 });
-  const selected = params.get("session") ?? sessions.data?.[0]?.id;
-  const calls = useQuery({ queryKey: ["agents", "calls", selected], queryFn: () => agentsApi.calls(selected!), enabled: !!selected });
-
+  const sessions = useQuery({ queryKey: ["agents", "sessions"], queryFn: agentsApi.sessions, refetchInterval: 30_000 });
+  const projects = useProjects();
+  const names = Object.fromEntries((projects.data ?? []).map((p) => [p.id, p.name]));
   const live = useAgentEvents((e: AgentEvent) => {
     if (e.event === "session_start" || e.event === "session_idle" || e.event === "tool_end") void qc.invalidateQueries({ queryKey: ["agents", "sessions"] });
-    if ((e.event === "tool_start" || e.event === "tool_end") && e.data.session_id) {
-      // Merge the call into its session's timeline: start rows show live, the end row replaces it.
-      qc.setQueryData<AgentCall[]>(["agents", "calls", e.data.session_id], (old) => {
-        if (!old) return old;
-        const i = old.findIndex((c) => c.id === e.data.id);
-        if (i < 0) return [...old, e.data];
-        const next = old.slice();
-        next[i] = { ...old[i], ...e.data };
-        return next;
-      });
-      if (e.data.session_id !== selected) void qc.invalidateQueries({ queryKey: ["agents", "calls", e.data.session_id] });
-    }
   });
-
-  const current = sessions.data?.find((s) => s.id === selected);
-  const { work, loading } = useSessionWork(current?.projects ?? []);
+  const list = sessions.data ?? [];
+  const liveCount = list.filter((s) => s.live).length;
   return (
-    <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
-      <Panel title="Sessions" meta={<span className="inline-flex items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-pass" : "bg-caution")} />{live ? "live tail on" : "connecting"}</span>} bodyClassName="p-2">
-        {sessions.isLoading ? (
-          <SkeletonRows rows={3} />
-        ) : sessions.error ? (
-          <ErrorState error={sessions.error} onRetry={() => sessions.refetch()} compact />
-        ) : !sessions.data?.length ? (
-          <div className="space-y-2 p-2 text-xs leading-5 text-ink-3">
-            <p>No agent sessions yet.</p>
-            <p>
-              Connect Claude Code (or any MCP client) to the Cortex MCP server; every call shows up here live. Ask it for{" "}
-              <span className="font-mono">cortex.get_session_link</span> to jump straight to its session.
-            </p>
-          </div>
-        ) : (
-          <ul className="space-y-1">
-            {sessions.data.map((s) => (
-              <SessionRow key={s.id} s={s} active={s.id === selected} />
-            ))}
-          </ul>
-        )}
-      </Panel>
-      <section className="min-w-0">
-        {current && (
-          <div className="mb-4 flex flex-wrap items-baseline gap-x-4 gap-y-1">
-            <h2 className="kn-display text-[24px]">{current.client ?? "Agent"} session</h2>
-            <span className={cn("text-ink-3", label)}>
-              started {ago(current.first_seen)} · {current.call_count} calls
-            </span>
-            {current.projects.map((p) => (
-              <Link key={p} to={`/p/${p}`} className="font-mono text-xs text-ink-2 underline-offset-2 hover:text-ink hover:underline">
-                {p}
-              </Link>
-            ))}
-          </div>
-        )}
-        {current && <NowBar session={current} calls={calls.data ?? []} work={work} />}
-        {!selected ? null : (
-          <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_420px]">
-            {current && <WorkBoard from={current.first_seen} work={work} loading={loading} />}
-            <div className="min-w-0">
-              <h2 className={cn("mb-2.5 text-ink", label)}>Tool calls</h2>
-              {calls.isLoading ? (
-                <SkeletonRows rows={4} />
-              ) : calls.error ? (
-                <ErrorState error={calls.error} onRetry={() => calls.refetch()} />
-              ) : (
-                <Timeline calls={calls.data ?? []} />
-              )}
-            </div>
-          </div>
-        )}
-      </section>
+    <div className="space-y-4">
+      <p className="max-w-[46rem] text-sm leading-6 text-ink-2">
+        Every agent connected to Cortex over MCP. To watch one work (its calls, demos, training, evaluations and RL), open the project's{" "}
+        <span className="text-ink">Agent log</span>.
+        <span className={cn("ml-2 inline-flex items-center gap-1.5 align-middle text-ink-3", label)}>
+          <span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-pass" : "bg-caution")} />
+          {live ? `${liveCount} live` : "connecting"}
+        </span>
+      </p>
+      {sessions.isLoading ? (
+        <SkeletonRows rows={3} />
+      ) : sessions.error ? (
+        <ErrorState error={sessions.error} onRetry={() => sessions.refetch()} />
+      ) : !list.length ? (
+        <Panel title="No agents yet">
+          <p className="text-sm leading-6 text-ink-2">
+            Connect Claude Code (or any MCP client): <span className="font-mono text-xs">claude mcp add --transport http cortex http://localhost:3000/mcp</span>. It
+            shows up here the moment it calls a tool.
+          </p>
+        </Panel>
+      ) : (
+        <ul className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+          {list.map((s) => (
+            <SessionCard key={s.id} s={s} names={names} />
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -166,7 +135,7 @@ export function AgentsPage() {
           <span className="text-ink">Agents</span>
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-4">
-          <h1 className="kn-display text-[clamp(1.9rem,3.6vw,2.6rem)]">What your agents are doing</h1>
+          <h1 className="kn-display text-[clamp(1.9rem,3.6vw,2.6rem)]">Connected agents</h1>
           <div className="ml-auto flex items-center gap-3">
             {me.data && (
               <span className={cn("text-ink-3", label)} title={me.data.note}>
@@ -183,7 +152,7 @@ export function AgentsPage() {
               value={tab}
               onChange={(v) => setParams(v === "keys" ? { tab: "keys" } : {})}
               options={[
-                { value: "sessions", label: "Sessions" },
+                { value: "sessions", label: "Agents" },
                 { value: "keys", label: "Settings · Agent keys" },
               ]}
             />
