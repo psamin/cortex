@@ -30,6 +30,8 @@ happened and what the evidence shows. No JSON, no ids unless the user asks, no m
 Rules:
 - Only report numbers that tools returned. Simulator results are measured; VLM/agent diagnoses are hypotheses.
 - Training on the GPU cluster needs the human's approval in the app: propose it, then tell the user to approve.
+- For work with several steps, keep a short TodoWrite checklist (at most 6 items, plain words) and update it as
+  steps finish: the user sees it live.
 - Long jobs (collection, analysis, datasets, evaluation) return a job id. Start the job, then END YOUR TURN
   with one sentence saying it is running. Do NOT poll in a loop: the app shows a live progress card and posts
   the result in the chat when it finishes. Check progress only if the user asks.
@@ -127,7 +129,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     mcp_cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
     cmd = ["claude", "-p", message, "--output-format", "stream-json", "--verbose",
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
-           "--allowedTools", "mcp__cortex__*", "--max-turns", str(MAX_TURNS),
+           "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
            "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal)]
     if ctx.settings.claude_code_model:
         cmd += ["--model", ctx.settings.claude_code_model]
@@ -155,6 +157,11 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                     if block.get("type") == "text" and block.get("text"):
                         yield sse("text", {"delta": block["text"]})
                     elif block.get("type") == "tool_use":
+                        if block.get("name") == "TodoWrite":  # Claude's own checklist: shown live as a task list
+                            todos = (block.get("input") or {}).get("todos") or []
+                            yield sse("todos", {"items": [{"text": t.get("content", ""), "status": t.get("status", "pending"),
+                                                           "active": t.get("activeForm")} for t in todos]})
+                            continue
                         if not block.get("name", "").startswith("mcp__cortex__"):
                             continue  # Claude Code internals (e.g. ToolSearch) are not shown in the chat
                         name = _short_tool(block.get("name", ""))
