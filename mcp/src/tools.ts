@@ -357,6 +357,20 @@ const TOOLS: Def[] = [
     annotations: WRITE,
   },
 
+  {
+    name: "import_demonstrations",
+    title: "Import demonstrations",
+    description:
+      "Import existing demonstrations from a LeRobot dataset on the Hugging Face Hub (e.g. the user's own SO-101 " +
+      "recordings or 'lerobot/svla_so101_pickplace'). Episodes get quality checks and videos and become a dataset " +
+      "version that can be trained on; they are kept separate from simulation demos. Returns job_id.",
+    inputSchema: z.object({
+      project_id: projectId,
+      repo_id: z.string().describe("Hugging Face dataset repo id"),
+      max_episodes: z.number().int().min(1).max(50).optional(),
+    }),
+    annotations: { ...WRITE, openWorldHint: true },
+  },
   // ---- drive the simulated arm yourself (Cortex validates + executes every command; the simulator judges success)
   {
     name: "robot_start_episode",

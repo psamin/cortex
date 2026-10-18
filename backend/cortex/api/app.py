@@ -517,6 +517,39 @@ async def next_actions(pid: str):
     return st.next_actions
 
 
+# ------------------------------------------------------------------ import demonstrations
+class HubImportReq(BaseModel):
+    repo_id: str
+    max_episodes: int = 10
+    revision: str | None = None
+
+
+@app.post("/api/projects/{pid}/imports/hub")
+async def import_hub(pid: str, req: HubImportReq, request: Request):
+    from ..services import import_service
+    src = {"hub": req.repo_id, **({"revision": req.revision} if req.revision else {})}
+    job = await import_service.start_import(ctx(), await orch.get_project(ctx(), pid), src,
+                                            max(1, min(req.max_episodes, 50)), actor(request))
+    return job.model_dump()
+
+
+@app.post("/api/projects/{pid}/imports/upload")
+async def import_upload(pid: str, request: Request, max_episodes: int = 10):
+    """Body: multipart form with `file` = .zip / .tar.gz of a LeRobot dataset folder."""
+    from ..services import import_service
+    form = await request.form()
+    up = form.get("file")
+    if up is None or not hasattr(up, "read"):
+        raise ValueError("send the dataset archive as multipart field 'file'")
+    data = await up.read()  # type: ignore[union-attr]
+    if len(data) > 2 * 1024 ** 3:
+        raise ValueError("archive larger than 2 GB; use a Hugging Face repo id instead")
+    root = import_service.save_upload(ctx(), pid, up.filename or "upload.zip", data)  # type: ignore[union-attr]
+    job = await import_service.start_import(ctx(), await orch.get_project(ctx(), pid), {"path": str(root)},
+                                            max(1, min(max_episodes, 50)), actor(request))
+    return job.model_dump()
+
+
 # ------------------------------------------------------------------ studio read models
 @app.get("/api/projects/{pid}/iterations")
 async def iterations(pid: str):
