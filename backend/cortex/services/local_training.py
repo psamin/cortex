@@ -9,7 +9,9 @@ registered without a training job, so the GPU job is never marked succeeded by i
 from __future__ import annotations
 
 import asyncio
+import shutil
 import sys
+import tempfile
 from pathlib import Path
 
 from ..context import Ctx
@@ -42,15 +44,19 @@ async def start_smoke(ctx: Ctx, p: Project, dataset_version_id: str):
     ds = await ctx.repo.get("dataset_versions", dataset_version_id, DatasetVersion)
     if ds is None or not ds.lerobot_root:
         raise FileNotFoundError(f"dataset {dataset_version_id} has no local LeRobot directory")
-    base = ctx.local(f"projects/{p.id}/training/smoke_{ds.id}")
+    base = ctx.local(f"projects/{p.id}/smoke")  # short: Windows MAX_PATH applies to the files lerobot writes
     base.mkdir(parents=True, exist_ok=True)
-    out_dir = base / f"run{len(list(base.iterdir()))}"  # lerobot-train refuses an existing output_dir
+    dest = base / str(len(list(base.iterdir()))) / "pretrained_model"
+    # lerobot-train writes optimizer state several levels deep; a short scratch dir keeps Windows paths under
+    # MAX_PATH. Only pretrained_model/ is kept, under the project.
+    scratch = Path(tempfile.mkdtemp(prefix="cx_smoke_"))
+    out_dir = scratch / "out"  # lerobot-train refuses an existing output_dir
     cmd = command(ctx, ds, out_dir)
 
     async def run(job) -> str:
         ctx.jobs.log(job, "$ " + " ".join(cmd))
         proc = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE,
-                                                    stderr=asyncio.subprocess.STDOUT, cwd=str(base))
+                                                    stderr=asyncio.subprocess.STDOUT, cwd=str(scratch))
         tail: list[str] = []
         assert proc.stdout is not None
         async for raw in proc.stdout:
@@ -62,14 +68,26 @@ async def start_smoke(ctx: Ctx, p: Project, dataset_version_id: str):
             if "step:" in line:
                 ctx.jobs.update(job, message=line[-120:])
         rc = await proc.wait()
-        if rc != 0:
-            raise RuntimeError(f"lerobot-train exited {rc}: {' | '.join(tail[-4:])[-400:]}")
-        ck_dir = out_dir / "checkpoints" / "last" / "pretrained_model"
-        ck = await training_service.register_checkpoint(ctx, p.id, None, str(ck_dir), SMOKE_STEPS, actor="gui")
+        try:
+            ckpts = sorted((out_dir / "checkpoints").glob("[0-9]*"))
+            done = bool(ckpts) and (ckpts[-1] / "pretrained_model" / "model.safetensors").exists()
+            # On Windows without Developer Mode, lerobot-train saves the checkpoint and then fails to create the
+            # checkpoints/last symlink (WinError 1314). The checkpoint itself is complete, so keep it.
+            symlink_only = done and any("symlink" in ln or "WinError 1314" in ln for ln in tail[-6:])
+            if rc != 0 and not symlink_only:
+                raise RuntimeError(f"lerobot-train exited {rc}: {' | '.join(tail[-4:])[-400:]}")
+            if symlink_only:
+                ctx.jobs.log(job, "note: checkpoint saved; only the 'last' symlink failed (Windows privilege)")
+            if not ckpts:
+                raise RuntimeError("lerobot-train finished without writing a checkpoint")
+            shutil.copytree(ckpts[-1] / "pretrained_model", dest)
+        finally:
+            shutil.rmtree(scratch, ignore_errors=True)
+        ck = await training_service.register_checkpoint(ctx, p.id, None, str(dest), SMOKE_STEPS, actor="gui")
         ck.metrics = {**ck.metrics, "cpu_smoke_run": 1.0}
         await ctx.repo.save("checkpoints", ck, status="ready")
         return ck.id
 
-    return ctx.jobs.submit("train_smoke", p.id, run, idempotency_key=f"smoke:{out_dir}")
+    return ctx.jobs.submit("train_smoke", p.id, run, idempotency_key=f"smoke:{dest}")
 
 

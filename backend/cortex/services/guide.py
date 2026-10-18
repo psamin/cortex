@@ -23,9 +23,9 @@ from ..context import Ctx
 from ..intake import catalogue, status
 from ..models import Checkpoint, EpisodeStatus, JobStatus, Project, TrainingJob
 from . import agent_orchestrator as orch
-from . import local_training, recording_service, simulation_runner, training_service
+from . import dataset_service, local_training, recording_service, simulation_runner, training_service
 from .guide_answers import answer, catalogue_values, is_yes, option_buttons
-from .recommendation_service import MIN_TRAIN_EPISODES
+from .recommendation_service import MIN_TRAIN_EPISODES, region_of
 
 Event = tuple[str, dict[str, Any]]
 STEPS = ["intake", "simulate", "collect", "train", "evaluate"]
@@ -88,28 +88,36 @@ async def plan(ctx: Ctx, p: Project) -> Plan:
     if accepted < MIN_TRAIN_EPISODES:
         return Plan("collect", "collect", f"{accepted} accepted demonstrations; training needs {MIN_TRAIN_EPISODES}",
                     {"accepted": accepted, "attempted": len(eps)})
-    st_ = await orch.project_state(ctx, p)
-    if not st_.dataset_versions:
+    dss = await dataset_service.list_versions(ctx, p.id)
+    if not dss:
         return Plan("train", "dataset", f"{accepted} accepted demonstrations are ready to snapshot")
-    ckpts = await ctx.repo.list("checkpoints", Checkpoint, project_id=p.id)
-    evals = await simulation_runner.list_evaluations(ctx, p.id)
-    tjs = await ctx.repo.list("training_jobs", TrainingJob, project_id=p.id)
+    ds = dss[-1]
+    if accepted > ds.num_source_episodes:  # an improve round added demos: snapshot them before retraining
+        return Plan("train", "dataset", f"{accepted - ds.num_source_episodes} new accepted demonstrations since {ds.id}")
+    # Only work on the latest dataset counts; earlier rounds stay in the lineage graph.
+    ckpts = [c for c in await ctx.repo.list("checkpoints", Checkpoint, project_id=p.id) if c.created_at >= ds.created_at]
+    tjs = [t for t in await ctx.repo.list("training_jobs", TrainingJob, project_id=p.id) if t.dataset_version_id == ds.id]
     tj = tjs[-1] if tjs else None
     if not ckpts:
         if tj is None or tj.status in (JobStatus.failed, JobStatus.cancelled):
             why = "no training job yet" if tj is None else f"{tj.id} {tj.status}: {tj.error or ''}"
-            return Plan("train", "propose", why, {"dataset_version_id": st_.dataset_versions[-1]})
+            return Plan("train", "propose", why, {"dataset_version_id": ds.id})
         if tj.status == JobStatus.proposed:
             return Plan("train", "await_approval", f"{tj.id} is waiting for a human approval", {"tj": tj})
         if tj.status == JobStatus.approved:
             return Plan("train", "launch", f"{tj.id} is approved", {"tj": tj})
         return Plan("train", "manual" if tj.backend == "manual" else "wait_train",
                     f"{tj.id} is {tj.status} on {tj.backend}", {"tj": tj})
-    evaluated = {e["run"].policy.checkpoint_id: e for e in evals if e["run"].policy.kind == "checkpoint"}
     ck = ckpts[-1]
-    if ck.id not in evaluated:
-        return Plan("evaluate", "evaluate", f"checkpoint {ck.id} has not been evaluated", {"ck": ck})
-    return Plan("evaluate", "results", f"checkpoint {ck.id} is evaluated", {"ck": ck, "eval": evaluated[ck.id]})
+    runs = [e for e in await simulation_runner.list_evaluations(ctx, p.id)
+            if e["run"].policy.kind == "checkpoint" and e["run"].policy.checkpoint_id == ck.id]
+    done = [e for e in runs if e["run"].status == JobStatus.succeeded and any(b.result for b in e["branches"])]
+    if done:
+        return Plan("evaluate", "results", f"checkpoint {ck.id} is evaluated", {"ck": ck, "eval": done[-1]})
+    if runs and runs[-1]["run"].status == JobStatus.failed:
+        j = ctx.jobs.get(runs[-1]["run"].job_id or "")
+        return Plan("evaluate", "eval_failed", (j.error if j and j.error else "the evaluation failed"), {"ck": ck})
+    return Plan("evaluate", "evaluate", f"checkpoint {ck.id} has not been evaluated", {"ck": ck})
 
 
 async def guidance(ctx: Ctx, p: Project) -> str:
@@ -303,18 +311,9 @@ async def _pipeline(ctx: Ctx, p: Project, pl: Plan, msg: str) -> AsyncIterator[E
             yield ev
         return
     if "improve" in low and pl.action == "results":
-        yield step_event("collect")
-        out: dict[str, Any] = {}
-        async for ev in _tool(ctx, "improve_policy", {"project_id": pid}, out):
+        async for ev in _improve(ctx, p, pl):
             yield ev
-        if "error" in out:
-            yield text(f"improve_policy failed: {out['error']}")
-            return
-        yield text(out["res"]["summary"] + " The retraining proposal will need your approval again.")
-        if out["res"].get("job_id") and (j := ctx.jobs.get(out["res"]["job_id"])):
-            yield card(job_card(j))
         return
-
     yield step_event(pl.step)
     if pl.action == "wait":
         names = ", ".join(JOB_TITLES.get(j.kind, j.kind).lower() for j in pl.data["jobs"])
@@ -327,7 +326,7 @@ async def _pipeline(ctx: Ctx, p: Project, pl: Plan, msg: str) -> AsyncIterator[E
             yield ev
         return
     if pl.action == "dataset":
-        out = {}
+        out: dict[str, Any] = {}
         async for ev in _tool(ctx, "create_dataset_version", {"project_id": pid}, out):
             yield ev
         if "error" in out:
@@ -373,6 +372,11 @@ async def _pipeline(ctx: Ctx, p: Project, pl: Plan, msg: str) -> AsyncIterator[E
                    f"object, dim lighting); it needs your approval. {STOCK_SCENE_NOTE}")
         yield "approval_required", _eval_approval(ck)
         return
+    if pl.action == "eval_failed":
+        ck = pl.data["ck"]
+        yield text(f"The last evaluation of {ck.id} failed: {pl.reason}. No results were recorded. Approve to run it again.")
+        yield "approval_required", _eval_approval(ck)
+        return
     if pl.action == "results":
         ck = pl.data["ck"]
         rc = results_card(pl.data["eval"], ck)
@@ -411,6 +415,40 @@ async def _collect(ctx: Ctx, p: Project, pl: Plan) -> AsyncIterator[Event]:
                f"{STOCK_SCENE_NOTE}")
     j = ctx.jobs.get(out["res"].get("job_id") or "")
     if j:
+        yield card(job_card(j))
+
+
+async def _improve(ctx: Ctx, p: Project, pl: Plan) -> AsyncIterator[Event]:
+    """improve_policy when Astra is available; otherwise the same targeting with labelled oracle demos."""
+    from . import agent_collection_service as acs
+
+    yield step_event("collect")
+    out: dict[str, Any] = {}
+    if (await acs.planner_status(ctx))["available"]:
+        async for ev in _tool(ctx, "improve_policy", {"project_id": p.id}, out):
+            yield ev
+        if "error" in out:
+            yield text(f"improve_policy failed: {out['error']}")
+            return
+        yield text(out["res"]["summary"] + " The retraining proposal will need your approval again.")
+        if out["res"].get("job_id") and (j := ctx.jobs.get(out["res"]["job_id"])):
+            yield card(job_card(j))
+        return
+    scored = [(b.result.success_rate, b) for b in pl.data["eval"]["branches"] if b.result]
+    rate, b = min(scored, key=lambda t: t[0])
+    cell = {"cube_region": region_of(b.spec.condition.cube_region, b.spec.cube_offset),
+            "lighting": b.spec.condition.lighting}
+    args = {"project_id": p.id, "num_demos": 6, "collector": "oracle", "conditions": [cell]}
+    async for ev in _tool(ctx, "start_agent_collection", args, out):
+        yield ev
+    if "error" in out:
+        yield text(f"Collection did not start: {out['error']}")
+        return
+    yield text(f"The weakest measured branch is {b.spec.name} ({rate:.0%}), so I'm collecting 6 more demonstrations in "
+               f"the {cell['cube_region']} / {cell['lighting']} cell. No Astra planner is configured, so improve_policy "
+               "(which uses Astra) is unavailable; these come from the labelled scripted oracle. When they finish, "
+               "continue: Cortex snapshots a new dataset version and proposes retraining for your approval.")
+    if (j := ctx.jobs.get(out["res"].get("job_id") or "")):
         yield card(job_card(j))
 
 
