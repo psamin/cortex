@@ -675,14 +675,14 @@ async def t_import(ctx, a, actor):
 
 
 TOOLS: dict[str, Tool] = {t.name: t for t in [
-    Tool("create_project", "Create a robot-learning project from a natural-language task; returns task spec, "
-         "success criteria and an initial demonstration plan.", Args.CreateProject, t_create_project),
+    Tool("create_project", "Create a project for the built-in cube task only (for any other object use "
+         "start_intake); returns task spec, success criteria and an initial demonstration plan.", Args.CreateProject, t_create_project),
     Tool("get_project_state", "Counts, datasets, training jobs, evaluations, open recommendations and next actions.",
          Args.ProjectRef, t_state),
     Tool("list_episodes", "List recorded demonstrations with condition, seed, success and quality flags.",
          Args.ListEpisodes, t_list_episodes),
     Tool("record_demonstrations", "Record scripted-expert demonstrations in MuJoCo for the given conditions "
-         "(simulation only).", Args.Record, t_record),
+         "(simulation only; cube_region applies to the built-in cube task only).", Args.Record, t_record),
     Tool("analyze_dataset", "Run quality checks, telemetry failure analysis and VLM hypotheses; builds failure "
          "clusters.", Args.Analyze, t_analyze),
     Tool("get_failure_clusters", "Current failure clusters with source (quality/evaluation/vlm), episodes and "
@@ -723,12 +723,13 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          InfraArgs, t_get_infra),
     Tool("set_infrastructure", "Change this project's infrastructure choices (planner, training backend, GPU, "
          "walltime). Only stores the choice: training still needs the human's approval.", SetInfraArgs, t_set_infra),
-    Tool("robot_start_episode", "Start a simulated SO-101 episode you will control yourself (fresh seed; optional cube "
+    Tool("robot_start_episode", "Simulated arm (MuJoCo, no hardware): start an SO-101 episode you will control yourself (fresh seed; optional cube "
          "region/lighting). Returns session_id.", RobotArgs.Start, t_robot_start, agent_callable=False),
-    Tool("robot_act", "Run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, "
+    Tool("robot_act", "Simulated arm (MuJoCo, no hardware): run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, "
          "move_end_effector, set_gripper, verify_grasp, place_object, check_task_success).", RobotArgs.Act,
          t_robot_act, agent_callable=False),
-    Tool("robot_finish_episode", "End your episode; the simulator judges success and successes become demonstrations.",
+    Tool("robot_finish_episode", "Simulated arm (MuJoCo, no hardware): end your episode; the simulator judges success and successes "
+         "become demonstrations.",
          RobotArgs.Finish, t_robot_finish, agent_callable=False),
     Tool("improve_policy", "Find the weakest measured condition, collect targeted agent demos there in fresh seeds, "
          "build a new dataset version and propose retraining. Returns job_id.", AgentArgs.Improve, t_improve),
@@ -746,7 +747,10 @@ class IntakeArgs:
         project_id: str
         patch: dict[str, Any] = Field(description="Partial intake spec to merge. Each open question carries a "
                                                   "ready-to-send patch; lists of objects/zones/cameras/obstacles merge "
-                                                  "by name.")
+                                                  "by name. Sizes in metres: box = [x, y, z] full extents, "
+                                                  "cylinder = [diameter, height] (not radius), sphere = "
+                                                  "[diameter]. Positions: +x away from the arm base, +y to "
+                                                  "its left, z up from the table.")
 
     class Frame(BaseModel):
         project_id: str
@@ -814,7 +818,7 @@ TOOLS.update({t.name: t for t in [
     Tool("build_simulation", "Build the MuJoCo scene from the completed intake, then check feasibility (jaw opening, "
          "payload torque, reach to every start and zone, with alternatives). Returns a top-camera preview.",
          Args.ProjectRef, t_build_sim),
-    Tool("capture_frame", "Render a scene camera (top, front, wrist_cam) so you can check the sim matches the "
+    Tool("capture_frame", "Render a scene camera (valid: top, front, wrist_cam) so you can check the sim matches the "
          "real setup you described.", IntakeArgs.Frame, t_capture_frame),
 ]})
 
