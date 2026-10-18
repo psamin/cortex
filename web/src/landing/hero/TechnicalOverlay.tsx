@@ -33,9 +33,8 @@ export function TechnicalOverlay() {
         </div>
       ))}
 
-      {/* Footer row: affordance hint + the one optional action. */}
+      {/* Footer row: the one optional action. */}
       <div className="absolute inset-x-6 bottom-[4.5%] flex items-center justify-between gap-6 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3 lg:left-[52%] lg:right-[4.5%]">
-        <span className="hidden xl:inline">Move the cursor here to command the end effector</span>
         <button
           ref={(el) => void (o.graspButton = el)}
           type="button"
