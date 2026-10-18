@@ -526,3 +526,51 @@ export function Kbd({ children }: { children: ReactNode }) {
 export function SectionLabel({ children, className }: { children: ReactNode; className?: string }) {
   return <div className={cn("kn-label", className)}>{children}</div>;
 }
+
+// ------------------------------------------------------------------ minimal copy
+/** A small "i" that carries an explanation as a native tooltip (hover or focus). */
+export function InfoTip({ children, className }: { children: string; className?: string }) {
+  return (
+    <span
+      tabIndex={0}
+      role="note"
+      title={children}
+      aria-label={children}
+      className={cn(
+        "inline-flex h-3.5 w-3.5 shrink-0 cursor-help items-center justify-center rounded-full border border-line-strong align-middle font-mono text-[9px] leading-none text-ink-3 hover:border-ink hover:text-ink focus:outline-none focus-visible:border-servo",
+        className,
+      )}
+    >
+      i
+    </span>
+  );
+}
+
+/** "Details" toggle for secondary explanations (same look as ErrorDetails). */
+export function More({ children, label = "Details", className }: { children: ReactNode; label?: string; className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className={cn("text-xs", className)}>
+      <button type="button" aria-expanded={open} onClick={() => setOpen((o) => !o)} className="border-b border-line-strong text-ink-3 hover:border-ink hover:text-ink">
+        {open ? "Hide" : label}
+      </button>
+      {open && <div className="mt-1.5 space-y-1 leading-5 text-ink-3">{children}</div>}
+    </div>
+  );
+}
+
+/** Compact mono metadata row: `A · B · C`, empty parts dropped. */
+export function Readout({ items, className }: { items: (ReactNode | null | undefined | false)[]; className?: string }) {
+  const parts = items.filter((x) => x !== null && x !== undefined && x !== false && x !== "");
+  if (!parts.length) return null;
+  return (
+    <div className={cn("flex flex-wrap items-center gap-x-1.5 font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-3", className)}>
+      {parts.map((p, i) => (
+        <span key={i} className="contents">
+          {i > 0 && <span aria-hidden className="text-ink-4">·</span>}
+          <span>{p}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
