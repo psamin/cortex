@@ -144,3 +144,17 @@ def test_agent_tools_grasp_the_cube_where_it_is(env, mode, region):
     for _ in range(20):
         s._step(s.cmd)
     assert env.in_box()
+
+
+@pytest.mark.parametrize("seed", range(4))
+def test_camera_estimate_keeps_the_cube_apart_from_the_green_box(env, seed):
+    """A cube beside the box: the box (and the turquoise arm) are saturated too, so a saturation mask merged them
+    into one blob and the estimate landed 19-25 mm toward the box. Only saturated red pixels count now."""
+    s = ManipulationSession(env, mode="camera")
+    s.reset_environment(seed, Variation(cube_region="left", cube_offset=(-0.03, 0.025)))
+    assert s.call("observe_scene", {"camera": "overhead"})[0]["ok"]
+    true = env.cube_pos()
+    u, v = s.table_to_pixel(true)
+    g, _ = s.call("propose_grasp", {"image_point": {"u": u, "v": v}})
+    assert g["ok"] and g["evidence"]["refined"], g
+    assert np.linalg.norm(np.array(g["estimated_xyz"][:2]) - true[:2]) < 0.005, (g["estimated_xyz"], true)

@@ -347,12 +347,12 @@ class ManipulationSession:
         return self._plan_renderer.render().copy()
 
     def refine_blob(self, img: np.ndarray, u: float, v: float, radius: int = 45,
-                    rgba: tuple[float, ...] | None = None) -> dict[str, Any]:
+                    rgba: tuple[float, ...] | None = None, red: bool = False) -> dict[str, Any]:
         """Camera-only refinement: segment the color region under the point and
         return its centroid and in-plane orientation (image evidence only).
 
         With ``rgba`` (the object's colour from the scene) pixels are kept by hue distance to that colour;
-        without it (the upstream red cube) by high saturation."""
+        without it by high saturation, and with ``red`` (the upstream red cube) only saturated red pixels."""
         import cv2
 
         h, w = img.shape[:2]
@@ -362,7 +362,11 @@ class ManipulationSession:
         if rgba is None:
             # Saturated (colored) regions against the low-saturation tabletop; saturation is
             # invariant to the lighting scale, so this works in dim and bright scenes alike.
-            mask = ((hsv[..., 1] > 115) & (hsv[..., 2] > 20)).astype(np.uint8)
+            mask = (hsv[..., 1] > 115) & (hsv[..., 2] > 20)
+            if red:  # the green box and the turquoise arm are saturated too: a cube beside the box merged with it
+                hue = hsv[..., 0].astype(int)  # (#225, 19-25 mm off). OpenCV hue is 0-179, red wraps at 0
+                mask &= np.minimum(hue, 180 - hue) * 2.0 < HUE_TOL_DEG
+            mask = mask.astype(np.uint8)
         else:
             mask = color_mask(hsv, rgba)
         n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
@@ -609,14 +613,15 @@ class ManipulationSession:
                 raise ToolError("image_point_required", "camera mode: point at the object in the overhead image")
             if self.last_overhead is None:
                 raise ToolError("no_observation", "call observe_scene(camera='overhead') first")
-            blob = self.refine_blob(self.last_overhead, a.image_point.u, a.image_point.v, rgba=self.obj.rgba)
+            blob = self.refine_blob(self.last_overhead, a.image_point.u, a.image_point.v, rgba=self.obj.rgba,
+                                    red=self.obj.rgba is None)
             c = self.pixel_to_table(blob["u"], blob["v"], self.obj.grasp_z)
             # minAreaRect angle is in image axes; image right = -y, image up = +x in the robot frame.
             yaw = -float(blob.get("rect_deg", 0.0)) % 90.0
             source = "camera_backprojection"
             evidence = {"model_point": [a.image_point.u, a.image_point.v], "refined_point": [blob["u"], blob["v"]],
                         "refined": blob["refined"], "blob_pixels": blob["pixels"],
-                        "segmentation": "object colour (hue)" if self.obj.rgba is not None else "saturation"}
+                        "segmentation": "object colour (hue)" if self.obj.rgba is not None else "saturated red"}
         head = {"object_id": self.obj.name, "source": source, "estimated_xyz": c.round(4).tolist(),
                 "grasp_mode": self.obj.mode, **note}
         tail = {"evidence": evidence} if evidence else {}
