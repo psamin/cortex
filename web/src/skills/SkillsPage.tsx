@@ -84,19 +84,21 @@ function SkillCard({ s, gpu, onOpen }: { s: PhysicalSkill; gpu?: LivePolicyStatu
   );
 }
 
-export function GpuPill({ st }: { st?: LivePolicyStatus }) {
+/** `compact` (the viewer's one-row header): just the dot below 2xl, the words in its tooltip. */
+export function GpuPill({ st, compact = false }: { st?: LivePolicyStatus; compact?: boolean }) {
   if (!st) return null;
+  const text = st.available ? `GPU server live${st.gpu ? ` · ${st.gpu}` : ""}` : st.phase === "starting" ? "GPU starting" : "GPU server off";
   return (
-    <span className={cn("inline-flex items-center gap-1.5 text-ink-3", label)} title={st.available ? undefined : st.reason}>
+    <span className={cn("inline-flex items-center gap-1.5 text-ink-3", label)} title={st.available ? (compact ? text : undefined) : compact ? `${text}: ${st.reason ?? ""}` : st.reason}>
       <span className={cn("h-1.5 w-1.5 rounded-full", st.available ? "live-dot bg-pass" : st.phase === "starting" ? "bg-caution" : "bg-ink-4")} />
-      {st.available ? `GPU server live${st.gpu ? ` · ${st.gpu}` : ""}` : st.phase === "starting" ? "GPU starting" : "GPU server off"}
+      <span className={compact ? "hidden 2xl:inline" : undefined}>{text}</span>
     </span>
   );
 }
 
 /** The GPU server, from anywhere on Physical Skills (#308): "Request a GPU" (one explicit click; the same request as
  *  the project Inference tab) with its step narration, or "Stop & release GPU" once it's live. */
-export function GpuControl() {
+export function GpuControl({ compact = false }: { compact?: boolean }) {
   const qc = useQueryClient();
   const gpu = useGpu();
   const refresh = () => {
@@ -112,7 +114,7 @@ export function GpuControl() {
   return (
     <div className="flex flex-col items-end gap-1">
       <div className="flex flex-wrap items-center justify-end gap-2">
-        <GpuPill st={st} />
+        <GpuPill st={st} compact={compact} />
         {st?.available ? (
           <Button size="sm" onClick={() => stop.mutate()} loading={stop.isPending} title="Ends the live session and gives the GPU back to the cluster">
             <Square className="h-3 w-3" /> {stop.isPending ? "Releasing the GPU…" : "Stop & release GPU"}
