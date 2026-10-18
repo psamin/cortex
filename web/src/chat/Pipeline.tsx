@@ -1,10 +1,11 @@
 import { useMemo, type ReactNode } from "react";
 import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { AlertTriangle, Check, ChevronDown, CircleDashed, Play, X } from "lucide-react";
+import { ChevronDown, Play } from "lucide-react";
 import { isJobActive, useJobs } from "../api/events";
 import { useAutopilot, useEpisodes, useEvaluations, useHealth, usePlannerBudget, useTraining } from "../api/hooks";
 import { isImported, type AutopilotRun, type EvaluationWithBranches, type Iteration } from "../api/types";
 import { cn, pct } from "../lib/format";
+import { IsoPlate } from "../sketch";
 import { iterationSuccess, useIterations, wilson } from "./rollouts";
 import type { ViewerSelection } from "./Viewer";
 
@@ -108,23 +109,23 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
   }, [jobs, pid, run, episodes.data, evals.data, training.data, iterations]);
 }
 
-function StageIcon({ state }: { state: StageState }) {
-  if (state === "running") return <CircleDashed className="h-4 w-4 animate-spin text-servo" />;
-  if (state === "succeeded")
-    return (
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-pass text-white">
-        <Check className="h-2.5 w-2.5" />
-      </span>
-    );
-  if (state === "failed")
-    return (
-      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-fault text-white">
-        <X className="h-2.5 w-2.5" />
-      </span>
-    );
-  if (state === "attention") return <AlertTriangle className="h-4 w-4 text-caution" />;
-  return <span className="h-4 w-4 rounded-full shadow-[inset_0_0_0_1.5px_rgb(var(--ink-4))]" />;
+/** Each step is a small isometric plate: the live step lifts off its footprint, outlined in the accent. */
+function StagePlate({ state }: { state: StageState }) {
+  const lifted = state === "running" || state === "attention" || state === "failed";
+  return (
+    <span className={cn("flex h-[28px] w-[26px] shrink-0 items-end justify-center", state === "waiting" && "opacity-45")} aria-hidden>
+      <IsoPlate w={1.25} d={1.25} h={state === "succeeded" ? 0.32 : 0.16} scale={9} lift={lifted ? 0.85 : 0} accent={state === "running"} />
+    </span>
+  );
 }
+
+const STATE_TEXT: Record<StageState, string> = {
+  waiting: "text-ink-3",
+  running: "text-servo",
+  succeeded: "text-ink",
+  failed: "text-fault",
+  attention: "text-caution",
+};
 
 export function Pipeline({ pid, open, onToggle, sel }: { pid: string; open: boolean; onToggle: () => void; sel: ViewerSelection }) {
   const ap = useAutopilot(pid);
@@ -134,32 +135,31 @@ export function Pipeline({ pid, open, onToggle, sel }: { pid: string; open: bool
 
   return (
     <section className="border-t border-line bg-bench">
-      <div className="flex items-center gap-3 px-4 py-2">
-        <button type="button" onClick={onToggle} className="flex items-center gap-1.5 text-xs font-semibold text-ink-2 hover:text-ink" aria-expanded={open}>
+      <div className="flex items-center gap-5 px-4 py-2 sm:px-5">
+        <button type="button" onClick={onToggle} className="flex shrink-0 items-center gap-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-ink hover:text-ink-2" aria-expanded={open}>
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
-          Autonomous learning pipeline
+          <span className="hidden sm:inline">Learning pipeline</span>
         </button>
-        <ol className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-thin">
+        <ol className="relative flex min-w-0 flex-1 items-end gap-5 overflow-x-auto pb-1.5 scroll-thin">
+          <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[var(--line)]" />
           {stages.map((s, i) => (
-            <li key={s.name} className="flex shrink-0 items-center">
-              <span
-                className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-xs",
-                  s.state === "running" ? "bg-servo/10 text-ink" : s.state === "attention" ? "bg-caution/10 text-ink" : s.state === "failed" ? "bg-fault/10 text-ink" : "text-ink-2",
-                )}
-              >
-                <StageIcon state={s.state} />
-                <span className="font-medium">{s.name}</span>
-                {s.note && <span className="text-ink-3">· {s.note}</span>}
+            <li key={s.name} className="relative flex shrink-0 items-end gap-2" title={s.note}>
+              <StagePlate state={s.state} />
+              <span className={cn("pb-0.5 font-mono text-[10.5px] uppercase tracking-[0.16em]", STATE_TEXT[s.state])}>
+                <span className={cn("mr-1.5", s.state === "waiting" ? "text-ink-4" : "")}>{String(i + 1).padStart(2, "0")}</span>
+                {s.name}
+                {s.note && <span className="ml-1.5 normal-case tracking-[0.04em] text-ink-3">· {s.note}</span>}
               </span>
-              {i < stages.length - 1 && <span className="mx-1 h-px w-4 bg-[var(--line-strong)]" />}
+              {(s.state === "running" || s.state === "attention") && (
+                <span aria-hidden className={cn("absolute -bottom-1.5 left-0 right-0 h-px", s.state === "running" ? "bg-servo" : "bg-caution")} />
+              )}
             </li>
           ))}
         </ol>
-        {ap.data && <span className="hidden shrink-0 text-2xs text-ink-3 xl:inline">autopilot {ap.data.status.replace(/_/g, " ")}</span>}
+        {ap.data && <span className="hidden shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3 xl:inline">autopilot · {ap.data.status.replace(/_/g, " ")}</span>}
       </div>
       {open && (
-        <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1.1fr)] gap-4 border-t border-line-soft px-4 py-3">
+        <div className="grid grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)_minmax(0,1.1fr)] gap-6 border-t border-line px-5 py-4">
           <Metrics pid={pid} iterations={iterations} run={ap.data ?? null} />
           <Progress iterations={iterations} pid={pid} sel={sel} />
           <FailureAnalysis pid={pid} iterations={iterations} sel={sel} />
@@ -173,9 +173,9 @@ export function Pipeline({ pid, open, onToggle, sel }: { pid: string; open: bool
 function Tile({ label, value, sub, children }: { label: string; value: ReactNode; sub?: ReactNode; children?: ReactNode }) {
   return (
     <div className="min-w-0">
-      <div className="truncate text-[11px] text-ink-3">{label}</div>
-      <div className="num mt-0.5 truncate text-lg font-semibold leading-tight tracking-[-0.01em] text-ink">{value}</div>
-      {sub && <div className="truncate text-[11px] text-ink-3">{sub}</div>}
+      <div className="truncate font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">{label}</div>
+      <div className="num kn-display mt-1 truncate text-[24px] text-ink">{value}</div>
+      {sub && <div className="mt-0.5 truncate text-[11px] text-ink-3">{sub}</div>}
       {children}
     </div>
   );
@@ -204,7 +204,7 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
   const iteration = run?.iteration || iterations.length || null;
 
   return (
-    <div className="grid grid-cols-4 gap-x-4 gap-y-3">
+    <div className="grid grid-cols-4 gap-x-5 gap-y-4">
       <Tile
         label="Policy success"
         value={policy ? pct(policy.rate) : "—"}
@@ -255,8 +255,8 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
     const proposed = (training.data ?? []).filter((t) => t.status === "proposed").length;
     return (
       <div className="min-w-0">
-        <div className="text-xs font-medium text-ink-2">Success across iterations</div>
-        <p className="mt-1.5 text-sm text-ink-2">
+        <div className="kn-label kn-label-rule"><span>Success across iterations</span></div>
+        <p className="mt-2.5 text-sm text-ink-2">
           {iterations.length ? `${iterations.length} iteration${iterations.length === 1 ? "" : "s"} planned, no policy trained yet` : "No policy trained yet"}
           {/futurama/i.test(trainingProvider) ? ". Training needs the Futurama GPU (GT VPN)." : health.data?.training?.fallback ? ". No GPU training backend is connected." : "."}
         </p>
@@ -268,7 +268,7 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
   return (
     <div className="min-w-0">
       <div className="flex items-baseline justify-between">
-        <div className="text-xs font-medium text-ink-2">Success across iterations</div>
+        <div className="kn-label kn-label-rule"><span>Success across iterations</span></div>
         <div className="flex gap-1">
           {iterations.map((it) => (
             <button
@@ -279,7 +279,7 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
                 sel.setEvaluationId(it.evaluation?.id ?? null);
                 sel.setFilter("eval");
               }}
-              className={cn("rounded px-1.5 py-0.5 font-mono text-[10.5px]", sel.evaluationId && sel.evaluationId === it.evaluation?.id ? "bg-servo/15 text-servo" : "text-ink-3 hover:bg-rail hover:text-ink")}
+              className={cn("rounded-full border px-2 py-0.5 font-mono text-[10.5px]", sel.evaluationId && sel.evaluationId === it.evaluation?.id ? "border-servo text-servo" : "border-transparent text-ink-3 hover:border-line-strong hover:text-ink")}
               title="Load this iteration's rollouts into the viewer"
             >
               {it.policy_version || `it${it.iteration}`}
@@ -290,19 +290,19 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
       <div className="mt-1 h-[88px]">
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={points} margin={{ top: 6, right: 6, bottom: 0, left: -28 }}>
-            <XAxis dataKey="it" tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--ink-3))", fontSize: 10 }} />
-            <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--ink-4))", fontSize: 10 }} />
+            <XAxis dataKey="it" tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--ink-3))", fontSize: 10, fontFamily: "IBM Plex Mono" }} />
+            <YAxis domain={[0, 100]} ticks={[0, 50, 100]} tickLine={false} axisLine={false} tick={{ fill: "rgb(var(--ink-3))", fontSize: 10, fontFamily: "IBM Plex Mono" }} />
             <Tooltip
               cursor={{ stroke: "var(--line-strong)" }}
               content={({ active, payload }) =>
                 active && payload?.length ? (
-                  <div className="rounded-md bg-rail px-2 py-1 text-xs text-ink shadow-[0_0_0_1px_var(--line-strong)]">
+                  <div className="rounded-sm border border-line-strong bg-plate px-2 py-1 font-mono text-[11px] text-ink">
                     {String(payload[0].payload.it)}: {Number(payload[0].value).toFixed(0)}%
                   </div>
                 ) : null
               }
             />
-            <Line dataKey="rate" stroke="var(--series-1)" strokeWidth={2} dot={{ r: 3.5, fill: "var(--series-1)", strokeWidth: 0 }} isAnimationActive={false} connectNulls />
+            <Line dataKey="rate" stroke="var(--series-1)" strokeWidth={1.25} dot={{ r: 3, fill: "rgb(var(--plate))", stroke: "var(--series-1)", strokeWidth: 1.25 }} isAnimationActive={false} connectNulls />
           </LineChart>
         </ResponsiveContainer>
       </div>
@@ -314,7 +314,7 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
 function FailureBars({ failures, maxF, empty }: { failures: [string, number][]; maxF: number; empty: string }) {
   return (
     <div className="mt-2">
-      <div className="mb-1 text-[11px] text-ink-3">Failure distribution</div>
+      <div className="mb-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">Failure distribution</div>
       {failures.length === 0 ? (
         <p className="text-xs text-ink-4">{empty}</p>
       ) : (
@@ -322,8 +322,8 @@ function FailureBars({ failures, maxF, empty }: { failures: [string, number][]; 
           {failures.map(([k, v]) => (
             <li key={k} className="grid grid-cols-[110px_1fr_24px] items-center gap-2 text-[11px]">
               <span className="truncate capitalize text-ink-2">{k.replace(/_/g, " ")}</span>
-              <span className="h-1.5 overflow-hidden rounded-full bg-rail">
-                <span className="block h-full rounded-full bg-fault/75" style={{ width: `${(v / maxF) * 100}%` }} />
+              <span className="h-1 overflow-hidden bg-[var(--line)]">
+                <span className="block h-full bg-fault/75" style={{ width: `${(v / maxF) * 100}%` }} />
               </span>
               <span className="num text-right font-mono text-ink-3">{v}</span>
             </li>
@@ -354,8 +354,8 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
     const nextIt = iterations.find((x) => x.iteration === it.iteration + 1);
     return (
       <div className="min-w-0">
-        <div className="text-xs font-medium text-ink-2">Failure analysis</div>
-        <p className="mt-1.5 text-sm leading-relaxed text-ink">
+        <div className="kn-label kn-label-rule"><span>Failure analysis</span></div>
+        <p className="mt-2.5 text-sm leading-relaxed text-ink">
           Policy <span className="font-semibold">{it.policy_version}</span> failed {failed}/{worst.n} trials in{" "}
           <span className="font-medium">{worst.name.replace(/_/g, " ")}</span>
           {topMode ? ` (mostly ${topMode.replace(/_/g, " ")})` : ""}
@@ -369,7 +369,7 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
           )}
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
-          <button type="button" onClick={() => watch(it.evaluation!.id)} className="inline-flex items-center gap-1.5 rounded-md bg-rail px-2.5 py-1 text-xs text-ink hover:bg-rail/70">
+          <button type="button" onClick={() => watch(it.evaluation!.id)} className="sk-pill sk-pill-secondary inline-flex h-7 items-center gap-1.5 px-3 text-xs font-medium">
             <Play className="h-3 w-3" /> Watch the failed rollouts
           </button>
           {nextIt && (
@@ -386,11 +386,11 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
     const worst = [...fallbackEval.branches].filter((b) => b.result).sort((a, b) => a.result!.success_rate - b.result!.success_rate)[0];
     return (
       <div className="min-w-0">
-        <div className="text-xs font-medium text-ink-2">Failure analysis</div>
-        <p className="mt-1.5 text-sm text-ink">
+        <div className="kn-label kn-label-rule"><span>Failure analysis</span></div>
+        <p className="mt-2.5 text-sm text-ink">
           {fallbackEval.run.policy_label || "The learned policy"} failed {worst.result!.n - worst.result!.successes}/{worst.result!.n} trials in {worst.spec.name.replace(/_/g, " ")}.
         </p>
-        <button type="button" onClick={() => watch(fallbackEval.run.id)} className="mt-2 inline-flex items-center gap-1.5 rounded-md bg-rail px-2.5 py-1 text-xs text-ink hover:bg-rail/70">
+        <button type="button" onClick={() => watch(fallbackEval.run.id)} className="sk-pill sk-pill-secondary mt-2 inline-flex h-7 items-center gap-1.5 px-3 text-xs font-medium">
           <Play className="h-3 w-3" /> Watch the failed rollouts
         </button>
       </div>
@@ -398,8 +398,8 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
   }
   return (
     <div className="min-w-0">
-      <div className="text-xs font-medium text-ink-2">Failure analysis</div>
-      <p className="mt-1.5 text-sm text-ink-2">No learned-policy failures to analyze yet.</p>
+      <div className="kn-label kn-label-rule"><span>Failure analysis</span></div>
+      <p className="mt-2.5 text-sm text-ink-2">No learned-policy failures to analyze yet.</p>
       <p className="mt-1 text-xs text-ink-3">
         When a trained policy fails a test condition, Cortex explains it here, generates targeted demonstrations for that condition, and trains the next version.
       </p>
