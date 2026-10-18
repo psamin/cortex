@@ -21,12 +21,15 @@ export function SketchScene({
   const anchor = iso([1.26, 0.02, 0.36], s, o);
   const elbow: Pt = [anchor[0] + 30, anchor[1] + 26];
   const end: Pt = [elbow[0] + 26, elbow[1]];
+  // Keep the callout text at ~10 px on screen whatever the drawing's width.
+  const k = 300 / width;
+  const fs = 10 * k;
   return (
     <svg
       aria-hidden
-      viewBox="-92 -72 300 132"
+      viewBox="-92 -72 300 140"
       width={width}
-      height={(width * 132) / 300}
+      height={(width * 140) / 300}
       className={["sk-svg sk-scene", className].filter(Boolean).join(" ")}
     >
       <Box at={[-1.4, -1.4, 0]} size={[2.8, 2.8, 0.14]} s={s} o={o} />
@@ -44,10 +47,10 @@ export function SketchScene({
       <Box at={[0.86, -0.2, 0.14]} size={[0.4, 0.4, 0.4]} s={s} o={o} />
       <path d={`M${anchor[0]} ${anchor[1]} L${elbow[0]} ${elbow[1]} L${end[0]} ${end[1]}`} fill="none" className="sk-leader" />
       <circle cx={anchor[0]} cy={anchor[1]} r={2.6} className="sk-node" />
-      <text x={end[0] + 5} y={end[1] + 3.5} className="sk-svg-label">
+      <text x={end[0] + 5} y={end[1] + fs * 0.35} className="sk-svg-label" style={{ fontSize: fs }}>
         {label}
       </text>
-      <text x={end[0] + 5} y={end[1] + 17} className="sk-svg-label sk-svg-label-2">
+      <text x={end[0] + 5} y={end[1] + fs * 1.75} className="sk-svg-label sk-svg-label-2" style={{ fontSize: fs }}>
         {value}
       </text>
     </svg>
