@@ -45,7 +45,8 @@ REAL_NAMES = {"jenga": "Pull a Jenga block", "conveyor": "Sort parts on a convey
 SIM_NAMES = {"jenga": "Push a block out of a Jenga tower", "unscrew": "Unscrew a bolt with the gripper",
              "screwdriver": "Unscrew a screw with a screwdriver", "palletize": "Move boxes onto a pallet",
              "suture": "Pass a needle through a tissue pad", "conveyor": "Pick a moving part off a conveyor",
-             "unscrew_black": "Unscrewing policy 2", "pick_place": "Pick and place"}
+             "unscrew_black": "Unscrewing policy 2", "pick_place": "Pick and place",
+             "jenga_big": "Jenga: push, pull out, place on top"}
 POLICY = {"act": "ACT", "smolvla": "SmolVLA", "diffusion": "Diffusion"}
 GPUS = ("GH200", "H200", "H100", "A100", "L40S", "L40", "L4", "V100", "P40")
 UNSEEN_FROM = 100_000  # cortex/sim/tasks/run.py EVAL_SEED0: layouts from here up were never used in training
@@ -57,7 +58,7 @@ NONE_DETAIL = "No evaluation or held-out replay has been run for this policy yet
 DOWN = "The GPU server isn't running. Request a GPU to run it live."
 SEEN = "skills_seen.json"  # under the data dir: the sim skills a live GPU server last served (#308)
 REPLAYS = "skill_replays"  # under the data dir: <task>/*.mp4, recorded replays of each sim skill (#308)
-SEEDED = {"unscrew": "act", "unscrew_black": "", "jenga": "", "pick_place": ""}  # known sim skills -> policy type
+SEEDED = {"unscrew": "act", "unscrew_black": "", "jenga": "", "jenga_big": "", "pick_place": ""}  # sim skill -> policy
 TASK = re.compile(r"^[A-Za-z0-9_-]+$")
 
 

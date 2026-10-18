@@ -7,7 +7,7 @@ import type { PhysicalSkill } from "../api/types";
 import { Badge, Button, EmptyState, ErrorState, Skeleton } from "../components/ui";
 import { cn } from "../lib/format";
 import { LiveFrame } from "../chat/LivePolicy";
-import { GpuPill, Thumb, useGpu } from "./SkillsPage";
+import { GpuControl, Thumb, useGpu } from "./SkillsPage";
 import { newSeed, runAction, scoreBadge, simWhere, skillVideos } from "./skillView";
 
 /** /studio/skills/:sid, full screen (#308): a sidebar of every physical skill, and the selected one's recorded runs.
@@ -171,18 +171,6 @@ function Live({ s }: { s: PhysicalSkill }) {
         <Button variant="primary" size="sm" onClick={() => setSeed(newSeed())}>
           {seed == null ? <Play className="h-3.5 w-3.5" /> : <Shuffle className="h-3.5 w-3.5" />} {seed == null ? "Run live" : "Run on a new layout"}
         </Button>
-        <Button
-          size="sm"
-          onClick={() => {
-            setSeed(null);
-            stop.mutate();
-          }}
-          disabled={stop.isPending}
-          title="Ends the live session and gives the GPU back to the cluster (the next run needs a new GPU)"
-        >
-          {stop.isPending ? <CircleDashed className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
-          {stop.isPending ? "Stopping… releasing the GPU" : "Stop & release GPU"}
-        </Button>
         <span className={cn("ml-auto text-ink-3", label)}>{st?.gpu}</span>
       </div>
       <div className="relative min-h-0 flex-1 bg-rail">
@@ -222,6 +210,8 @@ function Stage({ s }: { s: PhysicalSkill }) {
             )}
           </div>
         </div>
+        {/* Request a GPU (with its steps) when none is live; Stop & release GPU when one is */}
+        <GpuControl />
         <Segmented
           name="Watch"
           value={mode}
@@ -258,9 +248,6 @@ export function SkillViewer() {
           <Link to="/studio/skills" className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[13px] text-ink-2 hover:text-ink">
             <ArrowLeft className="h-3.5 w-3.5" /> Back
           </Link>
-          <span className="ml-auto">
-            <GpuPill st={gpu.data} />
-          </span>
         </div>
         <h2 className={cn("px-4 pb-2 pt-3 text-ink-3", label)}>Physical skills</h2>
         <ul className="scroll-thin min-h-0 flex-1 overflow-y-auto px-2 pb-4">
