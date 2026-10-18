@@ -174,6 +174,8 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
     if project.mode != "sim":
         raise SimulationOnly("Autonomous collection runs in simulation only; physical robots need the local "
                               "hardware adapter with an operator present.")
+    if req.planner == "auto":  # the project's planner choice from the studio's setup
+        req = req.model_copy(update={"planner": project.infra.planner})
     # the scripted oracle always reads simulator object poses, so it is privileged by construction
     mode = "privileged" if req.collector == "oracle" else (req.mode or project.autopilot.planning_mode)
     if req.collector == "agent" and await use_claude_code(ctx, req):

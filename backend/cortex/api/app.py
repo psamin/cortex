@@ -785,6 +785,22 @@ async def ap_get(pid: str):
     return await autopilot.current(ctx(), pid)
 
 
+@app.get("/api/projects/{pid}/infra")
+async def infra_get(pid: str):
+    from ..services import infra_service
+    return await infra_service.options(ctx(), await orch.get_project(ctx(), pid))
+
+
+@app.put("/api/projects/{pid}/infra")
+async def infra_put(pid: str, request: Request):
+    from ..models import InfraChoice
+    from ..services import infra_service
+    p = await orch.get_project(ctx(), pid)
+    choice = InfraChoice.model_validate({**p.infra.model_dump(), **(await request.json())})
+    await infra_service.set_choice(ctx(), p, choice, actor(request))
+    return await infra_service.options(ctx(), p)
+
+
 @app.put("/api/projects/{pid}/autopilot/policy")
 async def ap_policy(pid: str, policy: dict, request: Request):
     p = await orch.get_project(ctx(), pid)
