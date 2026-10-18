@@ -17,7 +17,7 @@ import httpx
 
 from ..context import Ctx
 from . import agent_orchestrator as orch
-from . import autopilot
+from . import autopilot, guide
 
 MAX_TURNS = 8
 HISTORY: dict[str, list[dict[str, Any]]] = {}
@@ -78,12 +78,49 @@ def _sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
-async def chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
+# Events kept in the chat history (so a reload can redraw the cards), minus inline images.
+KEPT_EVENTS = {"card", "approval_required", "step", "tool_result"}
+
+
+def _remember(hist: list[dict[str, Any]], event: str, data: dict[str, Any]) -> None:
+    if event in KEPT_EVENTS:
+        hist.append({"role": "event", "event": event,
+                     "data": {k: v for k, v in data.items() if k != "image_jpeg_base64"}})
+
+
+async def _emit(hist: list[dict[str, Any]], events: AsyncIterator[tuple[str, dict[str, Any]]]) -> AsyncIterator[str]:
+    """Stream guide events as SSE and keep them in the history (text is joined into one assistant turn)."""
+    said: list[str] = []
+    async for event, data in events:
+        if event == "text":
+            said.append(data["delta"])
+        else:
+            _remember(hist, event, data)
+        yield _sse(event, data)
+    if said:
+        hist.append({"role": "assistant", "content": " ".join(said)})
+
+
+async def chat(ctx: Ctx, pid: str, message: str, patch: dict[str, Any] | None = None) -> AsyncIterator[str]:
+    """One chat turn. ``patch``: an intake patch from a one-click card answer, applied before planning."""
     hist = HISTORY.setdefault(pid, [])
+    kickoff = not any(h["role"] == "user" for h in hist)
     hist.append({"role": "user", "content": message})
     await ctx.audit("gui", "agent_message", pid, {"message": message[:500]}, "ok", "user message")
+    project = await orch.get_project(ctx, pid)
+    applied = False
+    if patch is not None:
+        out: dict[str, Any] = {}
+        async for chunk in _emit(hist, guide._tool(ctx, "update_intake", {"project_id": pid, "patch": patch}, out)):
+            yield chunk
+        applied = "res" in out
+        if not applied:
+            yield _sse("text", {"delta": f"Cortex refused that change: {out.get('error')}"})
     if ctx.model:
         async for chunk in _llm(ctx, pid, hist):
+            yield chunk
+    elif project.intake is not None:
+        async for chunk in _emit(hist, guide.respond(ctx, pid, message, applied=applied, kickoff=kickoff)):
             yield chunk
     else:
         async for chunk in _rules(ctx, pid, message, hist):
@@ -97,7 +134,10 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
     sysmsg = SYSTEM.format(project=f"{project.name}: {project.spec.goal} ({project.mode})",
                            state=json.dumps({"episodes": st.episode_counts, "evaluations": st.evaluations,
                                              "next": [n.action for n in st.next_actions]}, default=str))
-    msgs: list[dict[str, Any]] = [{"role": "system", "content": sysmsg}, *hist[-20:]]
+    if project.intake is not None:
+        sysmsg += "\n" + await guide.guidance(ctx, project)
+    turns = [h for h in hist if h["role"] in ("user", "assistant")][-20:]
+    msgs: list[dict[str, Any]] = [{"role": "system", "content": sysmsg}, *turns]
     async with httpx.AsyncClient(timeout=120) as http:
         for _ in range(MAX_TURNS):
             route = ctx.model
@@ -127,12 +167,19 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
                     out = {"summary": res.get("summary"), "ref_ids": res.get("ref_ids", [])}
                     if card:
                         yield _sse("approval_required", card)
+                        _remember(hist, "approval_required", card)
+                    for c in guide.cards_for_tool(name, res):
+                        yield _sse("card", c)
+                        _remember(hist, "card", c)
                 except Exception as e:
                     res = {"error": f"{type(e).__name__}: {e}"}
                     out = {"summary": res["error"], "ref_ids": []}
                 yield _sse("tool_result", {"tool": name, **out})
+                lean = {k: v for k, v in res.items() if k != "image_jpeg_base64"}
+                if isinstance(lean.get("preview"), dict):
+                    lean["preview"] = {k: v for k, v in lean["preview"].items() if k != "image_jpeg_base64"}
                 msgs.append({"role": "tool", "tool_call_id": c["id"],
-                             "content": json.dumps(res, default=str)[:6000]})
+                             "content": json.dumps(lean, default=str)[:6000]})
 
 
 INTENTS: list[tuple[str, str]] = [

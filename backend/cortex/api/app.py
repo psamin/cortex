@@ -664,11 +664,13 @@ async def ap_policy(pid: str, policy: dict, request: Request):
 # ------------------------------------------------------------------ agent
 class ChatReq(BaseModel):
     message: str
+    patch: dict[str, Any] | None = None  # a one-click intake answer (a question's or suggestion's patch)
 
 
 @app.post("/api/projects/{pid}/agent")
 async def chat(pid: str, req: ChatReq):
-    return StreamingResponse(agent.chat(ctx(), pid, req.message), media_type="text/event-stream")
+    await orch.get_project(ctx(), pid)  # 404 before the stream starts
+    return StreamingResponse(agent.chat(ctx(), pid, req.message, req.patch), media_type="text/event-stream")
 
 
 @app.get("/api/projects/{pid}/agent/history")
