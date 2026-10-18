@@ -484,44 +484,29 @@ function Hud({
         </div>
       </div>
       {rollout && (
-        <dl className="flex min-w-0 max-w-[50%] shrink flex-col items-stretch gap-1.5 pt-0.5 font-mono text-[10.5px] uppercase tracking-[0.1em]">
-          <Readout k="By">{rollout.origin === "oracle" ? "Oracle · privileged" : rollout.who}</Readout>
-          {(rollout.imported || rollout.condition) && (
-            <Readout k={rollout.imported ? "Data" : "Cond"} title={[rollout.source, rollout.task].filter(Boolean).join(" · ") || undefined}>
-              {rollout.imported ? `${rollout.source ?? "imported dataset"}${rollout.task ? ` · “${rollout.task}”` : ""}` : rollout.condition ? conditionWords(rollout.condition) : ""}
-            </Readout>
-          )}
-          <Readout k="Result" tone={rollout.success === null ? "text-ink-2" : rollout.success ? "text-pass" : "text-fault"}>
-            {rollout.success === null ? "Not judged" : rollout.success ? "Success · sim-verified" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
-          </Readout>
-          {aug && (
-            <Readout k="Aug" title={aug.tip}>
-              <span className="cursor-help border-b border-dotted border-ink-3">
-                +{aug.n} aug (training only)
-              </span>
-            </Readout>
-          )}
-          <Readout k="Run">
-            {[rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null, rollout.frames ? `${rollout.frames} frames` : null, rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null]
-              .filter(Boolean)
-              .join(" · ") || "—"}
-          </Readout>
-        </dl>
+        <p
+          className="min-w-0 max-w-[50%] shrink truncate pt-0.5 font-mono text-[11px] uppercase tracking-[0.08em] text-ink-2"
+          title={[
+            rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who,
+            rollout.imported ? [rollout.source, rollout.task].filter(Boolean).join(" · ") : null,
+            rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null,
+            rollout.frames ? `${rollout.frames} frames` : null,
+            aug?.tip ?? null,
+          ].filter(Boolean).join("\n")}
+        >
+          {[
+            rollout.origin === "oracle" ? "Oracle" : rollout.who,
+            rollout.imported ? (rollout.source ?? "imported") : rollout.condition ? conditionWords(rollout.condition) : null,
+            rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null,
+            aug ? `+${aug.n} aug` : null,
+          ].filter(Boolean).join(" · ")}
+          {" · "}
+          <span className={rollout.success === null ? "text-ink-3" : rollout.success ? "text-pass" : "text-fault"}>
+            {rollout.success === null ? "not judged" : rollout.success ? "✓ success" : `✗ ${rollout.failureMode ? rollout.failureMode.replace(/_/g, " ") : "failed"}`}
+          </span>
+        </p>
       )}
     </div>
   );
 }
 
-/** One mono readout with a callout leader drawn towards the frame (a node, a diagonal and a run). */
-function Readout({ k, tone, title, children }: { k: string; tone?: string; title?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 items-center justify-end gap-2" title={title}>
-      <svg aria-hidden width="34" height="12" viewBox="0 0 34 12" className="sk-svg hidden shrink-0 md:block">
-        <path d="M3 10 L11 2 L34 2" className="sk-leader" fill="none" />
-        <circle cx="3" cy="10" r="2.2" className="sk-node" />
-      </svg>
-      <dt className="shrink-0 text-ink-3">{k}</dt>
-      <dd className={cn("min-w-0 truncate text-ink", tone)}>{children}</dd>
-    </div>
-  );
-}
