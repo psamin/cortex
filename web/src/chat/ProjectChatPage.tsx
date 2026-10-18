@@ -91,7 +91,7 @@ export function ProjectChatPage() {
   }, [chat.items, chat.loading]);
 
   const activity = chat.busy
-    ? { busy: true, label: chat.status?.state === "running" && chat.status.tool ? toolLabel(chat.status.tool) : "Agent is thinking" }
+    ? { busy: true, label: chat.status?.text ?? (chat.status?.state === "running" && chat.status.tool ? toolLabel(chat.status.tool) : "Agent is thinking") }
     : { busy: false, label: "Idle" };
 
   return (

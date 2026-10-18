@@ -10,8 +10,8 @@ interface ChatState {
   loading: boolean;
   loadError: unknown;
   busy: boolean;
-  /** latest `status` event while a turn runs */
-  status: { state: string; tool?: string } | null;
+  /** latest `status` event while a turn runs; `text` is the live line ("Collecting 20 demos in sim…") */
+  status: { state: string; tool?: string; text?: string } | null;
   turnStartedAt: number | null;
   /** bumps whenever a tool result lands, so the preview can follow the agent */
   resultTick: number;
@@ -64,7 +64,7 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
     case "done":
       return { type: "done", turns: d.turns as number, cost_usd: d.cost_usd as number, duration_ms: d.duration_ms as number, is_error: d.is_error as boolean };
     case "status":
-      return { type: "status", state: String(d.state ?? "thinking"), tool: d.tool as string | undefined };
+      return { type: "status", state: String(d.state ?? "thinking"), tool: d.tool as string | undefined, text: typeof d.text === "string" ? d.text : undefined };
     case "error":
       return { type: "error", message: String(d.message ?? d.detail ?? "Agent error") };
     case "todos":
@@ -147,7 +147,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     async (text: string) => {
       busyRef.current = true;
       setBusy(true);
-      setStatus({ state: "thinking" });
+      setStatus({ state: "starting", text: "Starting…" });
       setTurnStartedAt(Date.now());
       setItems((xs) => applyEvent(xs, { type: "user", text }));
       const ctrl = new AbortController();
@@ -163,7 +163,8 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
           const ev = toEvent(event, data);
           if (!ev) continue;
           if (ev.type === "status") {
-            setStatus({ state: ev.state, tool: ev.tool });
+            // a status without a line keeps the last one, so the live line never goes blank
+            setStatus((prev) => ({ state: ev.state, tool: ev.tool, text: ev.text ?? prev?.text }));
             continue;
           }
           setItems((xs) => applyEvent(xs, ev));

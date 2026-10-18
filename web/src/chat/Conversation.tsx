@@ -72,7 +72,6 @@ export function Conversation({ pid }: { pid: string }) {
   );
   const empty = !chat.loading && chat.items.length === 0;
   const hasNext = (useProjectState(pid).data?.next_actions.length ?? 0) > 0;
-  const lastRunning = [...chat.items].reverse().find((i) => i.kind === "tool" && i.status === "running");
 
   return (
     <div
@@ -164,7 +163,7 @@ export function Conversation({ pid }: { pid: string }) {
                 <BlockView b={b} pid={pid} />
               </Fragment>
             ))}
-            {chat.busy && !lastRunning && <Thinking startedAt={chat.turnStartedAt} />}
+            {chat.busy && <LiveStatus status={chat.status} startedAt={chat.turnStartedAt} />}
             {!chat.busy && !chat.loading && chat.items.length > 0 && <NextSteps pid={pid} onPick={chat.send} />}
           </div>
         </div>
@@ -435,21 +434,26 @@ function friendly(v: unknown): string {
   return evidenceValue(v);
 }
 
-function Thinking({ startedAt }: { startedAt: number | null }) {
+/** One live line while a turn runs: what the agent is doing right now, and for how long, so it never looks frozen. */
+function LiveStatus({ status, startedAt }: { status: { state: string; tool?: string; text?: string } | null; startedAt: number | null }) {
   const [now, setNow] = useState(Date.now());
   useEffect(() => {
     const t = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(t);
   }, []);
   const s = startedAt ? Math.max(0, Math.round((now - startedAt) / 1000)) : 0;
+  const text = status?.text ?? (status?.state === "running" && status.tool ? `${toolLabel(status.tool)}…` : "Thinking…");
   return (
-    <div className="flex items-center gap-3 py-1 font-mono text-[10.5px] uppercase tracking-[0.16em] text-ink-3">
-      <span className="flex gap-1">
+    <div className="flex items-center gap-2.5 py-1 text-xs text-ink-3" role="status" aria-live="polite">
+      <span className="flex shrink-0 gap-1" aria-hidden>
         {[0, 1, 2].map((i) => (
           <span key={i} className="h-1 w-1 bg-servo live-dot" style={{ animationDelay: `${i * 0.18}s` }} />
         ))}
       </span>
-      Thinking{s >= 3 ? ` · ${s}s` : ""}
+      <span key={text} className="enter min-w-0 truncate" title={text}>
+        {text}
+      </span>
+      {s >= 3 && <span className="num shrink-0 font-mono text-[10.5px] text-ink-4">{s}s</span>}
     </div>
   );
 }
