@@ -2,7 +2,6 @@ import { Link } from "react-router-dom";
 import { BRAND, STUDIO_ENTRY } from "../brand";
 import { BrandMark } from "../hero/SiteNav";
 import { scrollToSection } from "../scroll";
-import { LayerStack } from "../layers/LayerStack";
 
 const LINKS = [
   ["How it works", "platform"],
@@ -15,7 +14,7 @@ const LINKS = [
 export function FinalCta() {
   return (
     <>
-      <section className="kn-gutter relative grid items-center gap-10 border-t border-[#E6E6E6] py-28 lg:grid-cols-[minmax(0,1fr)_minmax(0,22rem)] lg:py-36">
+      <section className="kn-gutter border-t border-[#E6E6E6] py-28 lg:py-36">
         <div>
           <div className="kn-label kn-label-rule">
             <span className="text-[#171717]">FIG.06</span>
@@ -48,12 +47,6 @@ export function FinalCta() {
           MVP · the whole loop runs in MuJoCo · the real-arm path is supervised
         </p>
         </div>
-        <figure className="hidden lg:block" aria-hidden>
-          <LayerStack explode={0} active={-1} className="h-auto w-full" />
-          <figcaption className="mt-2 text-center kn-mono text-[10px] uppercase tracking-[0.16em] text-[#858585]">
-            FIG.02 · closed · 7 layers
-          </figcaption>
-        </figure>
       </section>
 
       <footer className="kn-gutter border-t border-[#E6E6E6] py-10">
