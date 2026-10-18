@@ -361,6 +361,41 @@ async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | 
     return ck
 
 
+async def register_remote_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | None, remote: str,
+                                     config: dict, step: int | None = None, actor: str = "gui") -> Checkpoint:
+    """A checkpoint whose weights stay where they were trained, e.g. futurama:~/cortex-jenga/output/jenga/jenga_010000.
+
+    Only its config was read (the caller fetched config.json). Evaluating it here or running it on an arm
+    needs a local copy, registered with register_checkpoint."""
+    from .futurama_files import is_remote
+
+    if not is_remote(remote):
+        raise ValueError(f"{remote} is not a host:path location")
+    ck = Checkpoint(project_id=project_id, training_job_id=training_job_id, policy_type=config.get("type", "unknown"),
+                    step=step or 0, path=remote)
+    await ctx.repo.save("checkpoints", ck, status="ready")
+    if training_job_id:
+        tj = await ctx.repo.get("training_jobs", training_job_id, TrainingJob)
+        if tj:
+            tj.checkpoint_ids.append(ck.id)
+            tj.status = JobStatus.succeeded
+            await _save(ctx, tj, f"checkpoint {ck.id} registered (weights on the cluster)")
+    ctx.changed(project_id, "checkpoints", ck.id)
+    await ctx.audit(actor, "register_checkpoint", project_id, {"path": remote}, "ok",
+                    f"{ck.id} ({ck.policy_type}); weights kept at {remote}, not copied")
+    return ck
+
+
+def checkpoint_dir(ctx: Ctx, ck: Checkpoint) -> Path:
+    """The checkpoint's directory on this machine. Raises when its weights live only on the cluster."""
+    from .futurama_files import is_remote
+
+    if is_remote(ck.path):
+        raise FileNotFoundError(f"{ck.id}'s weights are on the cluster ({ck.path}), not on this machine. Copy the "
+                                f"directory here with rsync and register the copy to use it locally.")
+    return Path(ck.path) if Path(ck.path).is_absolute() else ctx.local(ck.path)
+
+
 async def _publish_checkpoint(ctx: Ctx, p: Path) -> str:
     """Copy a checkpoint inside the data dir to durable storage (the S3 gateway takes the ~200 MB weights).
     The local copy stays registered either way; a failed upload is reported, not fatal."""

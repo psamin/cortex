@@ -16,7 +16,6 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -115,7 +114,9 @@ async def start_policy(ctx: Ctx, project: Project, req: PolicyRunRequest) -> dic
     ck = await ctx.repo.get("checkpoints", req.checkpoint_id, Checkpoint)
     if ck is None or ck.project_id != project.id:
         raise NotFound(f"checkpoint {req.checkpoint_id}")
-    path = Path(ck.path) if Path(ck.path).is_absolute() else ctx.local(ck.path)
+    from .training_service import checkpoint_dir
+
+    path = checkpoint_dir(ctx, ck)
     if not (path / "config.json").exists():
         raise FileNotFoundError(f"checkpoint files for {ck.id} are not on this machine ({path})")
     run = await _launch(ctx, project, "policy", {"mode": "policy", "episodes": req.episodes,
