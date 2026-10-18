@@ -30,7 +30,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
 from ..context import Ctx
-from ..errors import UserError
+from ..errors import NotFound, UserError
 from ..models import Analysis, EpisodeDiagnosis, Hypothesis, Project
 from . import analysis_service
 from . import recording_service as rec
@@ -170,7 +170,7 @@ async def get_inputs(ctx: Ctx, project: Project, max_targets: int, actor: str) -
 async def submit(ctx: Ctx, a: SubmitArgs, actor: str) -> dict[str, Any]:
     an = await ctx.repo.get("analyses", a.analysis_id, Analysis)
     if an is None or an.project_id != a.project_id:
-        raise KeyError(a.analysis_id)
+        raise NotFound(a.analysis_id)
     pending = {d.episode_id for d in an.diagnoses if d.error == PENDING}
     if an.status != "running" or not pending:
         raise UserError(f"analysis {an.id} is not waiting for hypotheses (status {an.status}); "

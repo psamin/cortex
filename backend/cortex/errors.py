@@ -1,6 +1,6 @@
 """Turning failures into messages people can act on.
 
-An error Cortex raises on purpose (`UserError`, or a ValueError / PermissionError / KeyError raised
+An error Cortex raises on purpose (`UserError`, `NotFound`, or a ValueError / PermissionError raised
 from Cortex's own code) is written for people and shown as-is. Known library and system failures
 get a plain sentence. Anything else is an internal error: people see a short notice, and the raw
 text goes in `detail`, never in the headline.
@@ -14,7 +14,7 @@ from pathlib import Path
 
 CORTEX_DIR = str(Path(__file__).resolve().parent)
 INTERNAL = "Cortex hit an internal error. The technical details are attached."
-DELIBERATE = (ValueError, PermissionError, LookupError, FileNotFoundError)
+DELIBERATE = (ValueError, PermissionError, FileNotFoundError)
 WRAPPERS = re.compile(r"^(?:[A-Za-z_][\w.]*(?:Error|Exception|Interrupt|Refused|Exceeded|Unavailable)\s*:\s*)+")
 
 KNOWN: list[tuple[str, str]] = [
@@ -35,6 +35,10 @@ class UserError(ValueError):
     """A problem the user can fix. The message is written for people."""
 
 
+class NotFound(KeyError):
+    """A project, job or other entity that does not exist (HTTP 404). A plain KeyError is a bug, not this."""
+
+
 def _known(raw: str) -> str | None:
     for pat, msg in KNOWN:
         m = re.search(pat, raw)
@@ -45,7 +49,7 @@ def _known(raw: str) -> str | None:
 
 def is_deliberate(exc: BaseException) -> bool:
     """Raised on purpose by Cortex code (not by a library deep inside a call)?"""
-    if isinstance(exc, UserError):
+    if isinstance(exc, (UserError, NotFound)):
         return True
     if not isinstance(exc, DELIBERATE):
         return False

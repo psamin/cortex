@@ -7,7 +7,8 @@ from typing import Any
 import numpy as np
 
 from ..context import Ctx
-from ..models import Condition, Episode, EpisodeSource, EpisodeStatus, Project
+from ..errors import NotFound
+from ..models import Condition, Episode, EpisodeSource, EpisodeStatus, Project, new_id
 from .jobs import Job
 from .quality_analysis import analyze_episode
 
@@ -29,9 +30,14 @@ async def list_episodes(ctx: Ctx, project_id: str) -> list[Episode]:
 
 async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition],
                           seeds: list[int] | None = None, auto_accept: bool = False,
-                          actor: str = "gui") -> Job:
+                          actor: str = "gui", cycles: int = 0, reset_policy: str | None = None) -> Job:
+    """Record oracle demos: one per condition, or with ``cycles`` the cycle protocol on the intake scene
+    (demo, reset and recover segments, each successful segment its own tagged episode)."""
     if project.mode != "sim":
         raise PermissionError("Real-robot recording runs through the local LeRobot bridge and needs operator approval.")
+    if cycles:
+        return await start_cycle_recording(ctx, project, conditions[0] if conditions else Condition(), cycles,
+                                           seeds[0] if seeds else None, auto_accept, actor, reset_policy)
     existing = await list_episodes(ctx, project.id)
     start = len(existing)
     if seeds is None:
@@ -81,13 +87,13 @@ async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition
 
 
 async def finalize_episode(ctx: Ctx, ep: Episode, ev: dict[str, Any], blur_ref: float | None,
-                           auto_accept: bool) -> Episode:
+                           auto_accept: bool, base_key: str | None = None) -> Episode:
     ep.num_frames = int(ev["num_frames"])
     ep.fps = int(ev["fps"])
     ep.success = bool(ev["success"])
-    ep.quality = quality_for(ctx, ep, blur_ref)
-    ep.artifacts = {name.split(".")[0]: episode_key(ep.project_id, ep.id, name)
+    ep.artifacts = {name.split(".")[0]: f"{base_key}/{name}" if base_key else episode_key(ep.project_id, ep.id, name)
                     for name in ("front.mp4", "thumb.jpg", "episode.npz")}
+    ep.quality = quality_for(ctx, ep, blur_ref)
     for k in ep.artifacts.values():
         await ctx.publish_file(k)
     if auto_accept and ep.success and ep.quality.score >= AUTO_ACCEPT_MIN_SCORE:
@@ -101,6 +107,81 @@ async def finalize_episode(ctx: Ctx, ep: Episode, ev: dict[str, Any], blur_ref: 
                      "bytes": p.stat().st_size if p.exists() else None, "storage": ctx.blobs.name}})
     ctx.changed(ep.project_id, "episodes", ep.id)
     return ep
+
+
+# ------------------------------------------------------------------ cycle protocol (PRODUCT_SPEC 3.2)
+
+def cycle_key(project_id: str, run_id: str, index: int | None = None) -> str:
+    base = f"projects/{project_id}/cycles/{run_id}"
+    return base if index is None else f"{base}/seg_{index:03d}"
+
+
+def segment_provenance(run_id: str, ev: dict[str, Any], reset_policy: str) -> dict[str, Any]:
+    """What a cycle segment's episode records about where it came from (cycle_id, index, start and end pose)."""
+    return {"run_id": run_id, "cycle_id": f"{run_id}/{ev['cycle']}", "cycle": ev["cycle"],
+            "segment": ev["segment"], "segment_index": ev["segment_index"], "goal": ev.get("goal"),
+            "target": ev.get("target"), "start_pose": ev.get("start_pose"), "end_pose": ev.get("end_pose"),
+            "reset_policy": reset_policy, "steps": ev.get("steps")}
+
+
+def reset_policy_for(project: Project, override: str | None = None) -> str:
+    return override or (project.intake.task.reset_policy if project.intake else "return_to_origin")
+
+
+async def start_cycle_recording(ctx: Ctx, project: Project, cond: Condition, cycles: int, seed: int | None,
+                                auto_accept: bool, actor: str, reset_policy: str | None = None) -> Job:
+    """The scripted oracle runs ``cycles`` cycles in one sim (no teleport between them)."""
+    from .intake_service import scene_payload
+
+    scene = scene_payload(ctx, project)
+    if scene is None:
+        raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
+    policy = reset_policy_for(project, reset_policy)
+    existing = await list_episodes(ctx, project.id)
+    seed = SEED_BASE + len(existing) if seed is None else seed
+    run_id = new_id("cyc")
+    key = f"{project.id}:cycles:{cond.key}@{seed}x{cycles}:{policy}"
+
+    async def run(job: Job) -> str | None:
+        done: list[str] = []
+        diagnostics: list[dict[str, Any]] = []
+        expected = 2 * cycles
+        blur_ref = await dataset_blur_reference(ctx, project.id)
+
+        async def on_event(ev: dict[str, Any]) -> None:
+            t = ev.get("type")
+            if t == "segment_start":
+                ctx.jobs.update(job, message=f"cycle {ev['cycle'] + 1}/{cycles}: {ev['segment']} segment")
+            elif t == "progress":
+                frac = (len(done) + len(diagnostics) + ev["step"] / ev["max_steps"]) / expected
+                ctx.jobs.update(job, progress=min(0.99, frac))
+            elif t == "segment" and ev["success"]:
+                n = len(await list_episodes(ctx, project.id))
+                ep = Episode(project_id=project.id, index=n, source=EpisodeSource.sim_scripted, condition=cond,
+                             seed=seed, num_frames=0, fps=30, success=None, segment=ev["segment"],
+                             provenance={"planner": "scripted_ik_oracle", "mode": "privileged",
+                                         "note": "scripted IK skill reading simulator object poses",
+                                         **segment_provenance(run_id, ev, policy)})
+                await finalize_episode(ctx, ep, ev, blur_ref, auto_accept,
+                                       base_key=cycle_key(project.id, run_id, ev["segment_index"]))
+                done.append(ep.id)
+            elif t == "segment":  # failed segments are kept as diagnostics (video + result.json), not episodes
+                diagnostics.append({k: ev.get(k) for k in ("cycle", "segment", "segment_index", "failure_reason")})
+            elif t in ("operator_reset_required", "cycles_done") and ev.get("stop_reason", ev.get("reason")):
+                ctx.jobs.update(job, message=ev.get("stop_reason") or ev.get("reason"))
+
+        cfg = {"mode": "record", "cycles": cycles, "reset_policy": policy, "seed": seed,
+               "condition": cond.model_dump(), "max_steps": 240, "scene": scene,
+               "live_dir": str(ctx.local(live_key(project.id))), "out_root": str(ctx.local(cycle_key(project.id, run_id)))}
+        await ctx.jobs.run_worker(job, "cortex.workers.sim_worker", cfg,
+                                  ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
+        await ctx.audit(actor, "record_demonstrations", project.id,
+                        {"cycles": cycles, "reset_policy": policy, "seed": seed, "run_id": run_id,
+                         "condition": cond.key, "failed_segments": diagnostics}, "ok",
+                        f"{cycles} oracle cycles: {len(done)} segments recorded, {len(diagnostics)} failed")
+        return ",".join(done)
+
+    return ctx.jobs.submit("record", project.id, run, idempotency_key=key)
 
 
 def npz_key(ep: Episode) -> str:
@@ -129,7 +210,7 @@ async def dataset_blur_reference(ctx: Ctx, project_id: str) -> float | None:
 async def set_status(ctx: Ctx, episode_id: str, status: EpisodeStatus, actor: str = "gui") -> Episode:
     ep = await ctx.repo.get("episodes", episode_id, Episode)
     if ep is None:
-        raise KeyError(episode_id)
+        raise NotFound(episode_id)
     ep.status = status
     await ctx.repo.save("episodes", ep)
     ctx.changed(ep.project_id, "episodes", ep.id)

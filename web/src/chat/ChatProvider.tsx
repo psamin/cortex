@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, streamAgent } from "../api/client";
 import { useChatStream } from "../api/events";
 import { splitError } from "../components/ui";
-import { applyEvent, historyToEvents, jobDoneEvent, newItemId, type ChatEvent, type ChatItem } from "./model";
+import { applyEvent, historyToEvents, jobDoneEvent, newItemId, type ChangeItem, type ChatEvent, type ChatItem, type TodoItem } from "./model";
 
 interface ChatState {
   items: ChatItem[];
@@ -67,6 +67,10 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
       return { type: "status", state: String(d.state ?? "thinking"), tool: d.tool as string | undefined };
     case "error":
       return { type: "error", message: String(d.message ?? d.detail ?? "Agent error") };
+    case "todos":
+      return Array.isArray(d.items) ? { type: "todos", items: d.items as TodoItem[] } : null;
+    case "changes":
+      return Array.isArray(d.items) ? { type: "changes", items: d.items as ChangeItem[] } : null;
     default:
       return null;
   }

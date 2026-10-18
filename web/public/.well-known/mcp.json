@@ -378,7 +378,7 @@
       "mcpTools": [
         "cortex.propose_training_job"
       ],
-      "description": "Propose an ACT/SmolVLA training job with config and resource estimate (does not start it).",
+      "description": "Propose an ACT/SmolVLA training job with config and resource estimate (does not start it). Pass base_checkpoint_id to continue fine-tuning an existing policy (e.g. for this robot or new data) instead of starting from scratch.",
       "inputSchema": {
         "properties": {
           "project_id": {
@@ -405,6 +405,18 @@
               }
             ],
             "default": null
+          },
+          "base_checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "continue fine-tuning this checkpoint (any project) instead of training from scratch"
           }
         },
         "required": [

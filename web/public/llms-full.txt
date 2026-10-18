@@ -170,7 +170,7 @@ JSON schema:
 
 MCP: `cortex.propose_training_job` · REST: `POST /api/tools/propose_training_job` · needs approval
 
-Propose an ACT/SmolVLA training job with config and resource estimate (does not start it).
+Propose an ACT/SmolVLA training job with config and resource estimate (does not start it). Pass base_checkpoint_id to continue fine-tuning an existing policy (e.g. for this robot or new data) instead of starting from scratch.
 
 Arguments:
 
@@ -178,11 +178,12 @@ Arguments:
 - `dataset_version_id` (string, required)
 - `policy_type` ("act" | "smolvla", default "act")
 - `steps` (integer | null, default null)
+- `base_checkpoint_id` (string | null, default null): continue fine-tuning this checkpoint (any project) instead of training from scratch
 
 JSON schema:
 
 ```json
-{"properties":{"project_id":{"type":"string"},"dataset_version_id":{"type":"string"},"policy_type":{"default":"act","enum":["act","smolvla"],"type":"string"},"steps":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}},"required":["project_id","dataset_version_id"],"type":"object"}
+{"properties":{"project_id":{"type":"string"},"dataset_version_id":{"type":"string"},"policy_type":{"default":"act","enum":["act","smolvla"],"type":"string"},"steps":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null},"base_checkpoint_id":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"continue fine-tuning this checkpoint (any project) instead of training from scratch"}},"required":["project_id","dataset_version_id"],"type":"object"}
 ```
 
 ### launch_training_job

@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     AgentAttempt, AgentCollection, Checkpoint, DatasetVersion, Episode, EvaluationRun, SimulationBranch, TrainingJob,
 )
@@ -111,7 +112,11 @@ async def iterations(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                 nxt = {"reason": c.reason, "collection_id": c.id, "status": c.status,
                        "conditions": [x.key for x in (c.request.conditions or [])],
                        "successes": c.totals.get("successes", 0)}
+        base = (tj.config.get("base_checkpoint_id") if tj else None)
+        versions = {c.id: f"v{j + 1}" for j, c in enumerate(cks)}
         out.append({"iteration": i + 1, "policy_version": f"v{i + 1}", "checkpoint_id": ck.id,
+                    "fine_tuned_from": versions.get(base, base) if base else None,
+                    "robot_type": tj.config.get("robot_type") if tj else None,
                     "demos_accepted": ds.num_source_episodes if ds else None, "dataset_id": ds.id if ds else None,
                     "training": _training(tj), "evaluation": ev, "next": nxt, "created_at": ck.created_at})
     # training in flight that has not produced a checkpoint yet
@@ -160,7 +165,7 @@ async def camera_video(ctx: Ctx, episode_id: str, camera: str) -> Path:
         raise ValueError("camera must be front or wrist")
     ep = await ctx.repo.get("episodes", episode_id, Episode)
     if ep is None:
-        raise KeyError(episode_id)
+        raise NotFound(episode_id)
     src = await ctx.ensure_local(npz_key(ep))
     out = src.parent / f"cam_{camera}.mp4"
     if not out.exists():

@@ -5,6 +5,8 @@
 config: {task, mode, planner{provider, model?, max_calls, max_usd, reasoning_effort},
          max_total_usd, live_dir, attempts: [{seed, scenario{cube_region, lighting, cube_offset, box_offset},
          out_dir}]}
+With ``cycles`` (and an intake scene) it runs the cycle protocol instead of independent attempts
+(``run_cycle_attempts``): demo, reset and recover segments in one sim, each given its own goal text.
 For every attempt it writes episode.npz (same layout as oracle demos: synchronized
 front/wrist frames, joint state, joint-target actions), front.mp4, thumb.jpg and
 trace.json, then emits {"type": "attempt", ...}. Success is the simulator's verdict.
@@ -81,6 +83,8 @@ def main() -> None:
 
     env = env_factory.make_env(cfg.get("scene"), 10_000)
     on_frame = live_writer(Path(cfg["live_dir"]))
+    if cfg.get("cycles"):
+        return run_cycle_attempts(cfg, env, planner, on_frame)
     total_cost, results = 0.0, []
     for i, a in enumerate(cfg["attempts"]):
         if total_cost >= cfg.get("max_total_usd", 1e9):
@@ -120,6 +124,68 @@ def main() -> None:
     env.close()
     Path(cfg["live_dir"], "result.json").write_text(json.dumps({"attempts": results}, default=str))
     emit(type="result", ok=True, spent_usd=round(total_cost, 4))
+
+
+def run_cycle_attempts(cfg: dict[str, Any], env: PickPlaceEnv, planner, on_frame) -> None:
+    """The cycle protocol with the planner driving every segment (scheduling lives in sim_worker.run_cycles).
+
+    Each segment starts from wherever the previous one left the arm and the object; the planner gets the
+    segment's goal text ("reset: put the bottle back at its start"). Zone-aware tools (go_home,
+    place_object(zone)) come from P5c; until then a segment must only end with the object in its target."""
+    from .sim_worker import at_home, object_pose, run_cycles
+
+    pc, a0 = cfg["planner"], cfg.get("attempts", [{}])[0]
+    sc = a0.get("scenario") or {"cube_region": "center", "lighting": "normal"}
+    seed = int(cfg.get("seed", a0.get("seed", 0)))
+    var = Variation(cube_region=sc["cube_region"], lighting=sc["lighting"])
+    renderer: DemoCamera | None = None
+    state: dict[str, Any] = {"cost": 0.0, "s": None}
+
+    def initial_reset() -> None:
+        nonlocal renderer
+        env.reset(seed, var)
+        renderer = renderer or DemoCamera(env.world.model)
+        state["s"] = ManipulationSession(env, mode=cfg.get("mode", "camera"), on_frame=on_frame,
+                                         video_renderer=renderer)
+        state["s"].reset_environment(seed, var)
+
+    def run_segment(kind: str, goal: str, k: int, out: Path) -> dict[str, Any]:
+        from ..sim.manipulation import Recorder
+
+        s = state["s"]
+        s.rec, s.holding, s.last_overhead = Recorder(), False, None  # a new episode, same sim state
+        start_pose = object_pose(env)
+        t0 = time.time()
+
+        def relay(ev: dict[str, Any]) -> None:
+            emit(**ev, index=k, segment=kind)
+        try:
+            run, error = planner.run_episode(s, goal, relay), None
+        except Exception as e:  # provider/network failures end this segment, recorded as such
+            run, error = {"trace": [], "usage": {}, "recoveries": 0, "counters": dict(s.counters)},                 f"{type(e).__name__}: {e}"[:500]
+        home_required = hasattr(s, "go_home")  # P5c's tool; without it a segment cannot be asked to end home
+        home = at_home(env)
+        success = bool(env.in_box()) and (home or not home_required)  # simulator ground truth
+        state["cost"] += float(run.get("usage", {}).get("cost_usd", 0.0))
+        meta = {"seed": seed, "scenario": sc, "mode": cfg.get("mode", "camera"), "provider": pc["provider"],
+                "model_requested": planner.cfg.model, "endpoint": planner.cfg.endpoint, **run, "goal": goal,
+                "success": success, "error": error, "wall_s": round(time.time() - t0, 2),
+                "max_cube_z": env.max_cube_z, "ended_home": home}
+        info = save_attempt(s, env, out, meta)
+        reason = None if success else (error or run.get("stop_reason") or
+                                       ("did not end at home" if env.in_box() else "not in the target"))
+        return {**{k2: v for k2, v in meta.items() if k2 != "trace"}, **info, "failure_reason": reason,
+                "steps": info["num_frames"], "start_pose": start_pose, "trace_len": len(run.get("trace", []))}
+
+    def keep_going() -> bool:
+        return state["cost"] < cfg.get("max_total_usd", 1e9)
+
+    res = run_cycles(env, {**cfg, "seed": seed}, run_segment, initial_reset, keep_going)
+    if renderer is not None:
+        renderer.close()
+    env.close()
+    Path(cfg["live_dir"], "result.json").write_text(json.dumps(res, default=str))
+    emit(type="result", ok=True, spent_usd=round(state["cost"], 4))
 
 
 if __name__ == "__main__":

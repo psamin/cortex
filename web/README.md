@@ -1,6 +1,6 @@
 # Cortex Studio (web)
 
-React studio for Cortex: collect demos in simulation, review quality, diagnose failures, version data, train with approval, and evaluate in parallel sim branches. It talks only to the Cortex REST API ([docs/API.md](../docs/API.md)); types mirror [backend/cortex/models.py](../backend/cortex/models.py).
+React studio for Cortex: where people watch their agents train robots. It shows each agent session's live tool calls (`/studio/agents`), the demos and evaluation videos, and the approval buttons only a human can press. It can also drive the same loop by chat: collect demos in simulation, review quality, diagnose failures, version data, train with approval, and evaluate in parallel sim branches. It talks only to the Cortex REST API ([docs/API.md](../docs/API.md)); types mirror [backend/cortex/models.py](../backend/cortex/models.py).
 
 ## Commands
 

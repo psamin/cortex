@@ -50,6 +50,11 @@ export function ProjectChatPage() {
         setFilter("all");
         setSelectedId(ids[0] ?? null);
       },
+      filter: (f: RolloutFilter) => {
+        setEvaluationId(null);
+        setFilter(f);
+        setSelectedId(null);
+      },
     }),
     [],
   );

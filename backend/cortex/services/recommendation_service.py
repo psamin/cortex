@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     Checkpoint,
     Condition,
@@ -177,7 +178,7 @@ async def open_recommendations(ctx: Ctx, project_id: str) -> list[Recommendation
 async def set_status(ctx: Ctx, rec_id: str, status: str, actor: str = "gui") -> Recommendation:
     r = await ctx.repo.get("recommendations", rec_id, Recommendation)
     if r is None:
-        raise KeyError(rec_id)
+        raise NotFound(rec_id)
     r.status = status  # type: ignore[assignment]
     await ctx.repo.save("recommendations", r)
     ctx.changed(r.project_id, "recommendations", r.id)

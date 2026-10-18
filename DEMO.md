@@ -1,5 +1,7 @@
 # Two-minute judge walkthrough
 
+**The pitch in one line:** an agent connects to one MCP server and trains a physical robot itself. Nobody teleoperates, labels or babysits the runs; a person only approves the spend. Everything below shows the agent doing the work.
+
 ## Before the session (not shown live)
 
 1. Put the InsForge key in `.env`, run `scripts/dev.sh`, and open http://127.0.0.1:5173. The header pills

@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import AgentAttempt, AgentCollection, Condition, Project, Scenario, StartAgentCollectionRequest, new_id
 from . import agent_collection_service as acs
 from .jobs import BACKEND_DIR
@@ -124,7 +125,7 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
 async def act(ctx: Ctx, session_id: str, tool: str, args: dict[str, Any]) -> dict[str, Any]:
     s = SESSIONS.get(session_id)
     if s is None:
-        raise KeyError(f"robot session {session_id} (closed or expired; start a new episode)")
+        raise NotFound(f"robot session {session_id} (closed or expired; start a new episode)")
     if tool in ("finish_episode", "reset_environment"):
         raise ValueError("use robot_finish_episode / robot_start_episode")
     phase = _phase(tool, args, s.holding)
@@ -142,7 +143,7 @@ async def act(ctx: Ctx, session_id: str, tool: str, args: dict[str, Any]) -> dic
 async def finish(ctx: Ctx, session_id: str, believes_success: bool, summary: str, actor: str = "mcp") -> dict[str, Any]:
     s = SESSIONS.get(session_id)
     if s is None:
-        raise KeyError(session_id)
+        raise NotFound(session_id)
     a = s.attempt
     out_dir = ctx.local(acs.attempt_key(a))
     res = await _rpc(s, {"op": "finish", "out_dir": str(out_dir), "meta": {

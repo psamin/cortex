@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     BranchResult,
     BranchSpec,
@@ -64,7 +65,7 @@ async def resolve_policy(ctx: Ctx, req: LaunchEvaluationRequest) -> tuple[dict[s
         return {"kind": "scripted_expert"}, "scripted expert (oracle reference, privileged state)"
     ck = await ctx.repo.get("checkpoints", req.policy.checkpoint_id or "", Checkpoint)
     if ck is None:
-        raise KeyError(f"checkpoint {req.policy.checkpoint_id} not found")
+        raise NotFound(f"checkpoint {req.policy.checkpoint_id} not found")
     path = Path(ck.path)
     if not path.is_absolute():
         path = ctx.local(ck.path)

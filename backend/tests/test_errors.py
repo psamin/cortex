@@ -3,7 +3,7 @@ import json
 
 import pytest
 
-from cortex.errors import INTERNAL, UserError, WorkerFailed, describe, friendly
+from cortex.errors import INTERNAL, NotFound, UserError, WorkerFailed, describe, friendly
 from cortex.services.agent import tidy_job_rows
 from cortex.services.jobs import EventBus, JobManager
 
@@ -80,3 +80,9 @@ def test_failed_jobs_carry_a_readable_error(tmp_path, fn, expected):
     j = asyncio.run(run())
     assert j.status == "failed" and j.error == expected
     assert (j.error_detail is None) == (expected != INTERNAL)
+
+
+def test_not_found_is_for_people_but_a_stray_key_error_is_internal():
+    assert describe(NotFound("project prj_1 not found")) == ("project prj_1 not found", None)
+    msg, detail = describe(raised(lambda: {}["status"]))  # a bug inside Cortex code
+    assert msg == INTERNAL and "KeyError" in detail
