@@ -61,8 +61,6 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
     async def run(job: Job) -> str:
         cfg: dict[str, Any] = {"source": source, "root": str(base / "lerobot"), "max_episodes": max_episodes,
                                "out_dir": str(base / "episodes")}
-        if "hub" in source and ctx.settings.hf_token:
-            cfg["token"] = ctx.settings.hf_token
         meta: dict[str, Any] = {}
 
         def on_event(ev: dict[str, Any]) -> None:
@@ -74,7 +72,8 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
                 ctx.jobs.update(job, progress=(ev["index"] + 1) / max(ev["total"], 1),
                                 message=f"imported episode {ev['index'] + 1}/{ev['total']}")
 
-        env = {"HF_TOKEN": ctx.settings.hf_token} if ctx.settings.hf_token else None
+        token = hf_token(ctx)  # passed in the environment only, never written to the config file
+        env = {"HF_TOKEN": token} if token else None
         await ctx.jobs.run_worker(job, "cortex.workers.import_worker", cfg, base / "config.json", on_event, env=env)
         res = json.loads((base / "episodes" / "result.json").read_text())
         start = len(await list_episodes(ctx, project.id))
@@ -105,6 +104,15 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
         return ds.id
 
     return ctx.jobs.submit("import", project.id, run, idempotency_key=dedup_key(project.id, source, max_episodes))
+
+
+def hf_token(ctx: Ctx) -> str | None:
+    """The user's own Hugging Face login (`hf auth login`, the account LeRobot uses), else HF_TOKEN from .env."""
+    from huggingface_hub import constants
+
+    p = Path(constants.HF_TOKEN_PATH)
+    login = p.read_text().strip() if p.is_file() else ""
+    return login or ctx.settings.hf_token
 
 
 def dedup_key(project_id: str, source: dict[str, Any], max_episodes: int) -> str:
