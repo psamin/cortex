@@ -2,6 +2,7 @@
 view can give (a single-use nonce the model never sees)."""
 
 import asyncio
+import json
 
 import pytest
 
@@ -62,6 +63,29 @@ def test_a_nonce_is_bound_to_its_training_job_and_expires(tmp_path, monkeypatch)
     nonce = mcp_views.issue_nonce("tj_a")
     monkeypatch.setattr(mcp_views.time, "monotonic", lambda: 10**12)
     assert not mcp_views.redeem_nonce(nonce, "tj_a")
+
+
+def test_the_review_nonce_is_not_stored_in_the_audit_log(tmp_path):
+    async def go():
+        ctx, p, tj = await _setup(tmp_path)
+        nonce = (await orch.call_tool(ctx, "review_training_job", {"project_id": p.id}, "mcp"))["view_approval_nonce"]
+        blob = json.dumps(await ctx.store.list("tool_audit_logs"), default=str)
+        assert nonce not in blob and "[redacted]" in blob
+        assert (await training_service._get(ctx, tj.id)).status == JobStatus.proposed
+    run(go())
+
+
+def test_operator_approval_secret_must_match_exactly(tmp_path):
+    async def go():
+        ctx, _, tj = await _setup(tmp_path)
+        ctx.settings.cortex_approval_secret = "op-secret"
+        with pytest.raises(training_service.ApprovalRequired):
+            await training_service.approve(ctx, tj.id, "mcp", "mcp", "nope")
+        with pytest.raises(training_service.ApprovalRequired):
+            await training_service.approve(ctx, tj.id, "mcp", "mcp", None)
+        out = await training_service.approve(ctx, tj.id, "operator", "mcp", "op-secret")
+        assert out.status == JobStatus.approved
+    run(go())
 
 
 def test_mcp_without_a_nonce_still_cannot_approve(tmp_path):

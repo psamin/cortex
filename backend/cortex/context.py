@@ -23,6 +23,25 @@ log = logging.getLogger(__name__)
 CURRENT_CALL: ContextVar[dict[str, Any] | None] = ContextVar("cortex_current_call", default=None)
 
 
+def _secret_field(key: str) -> bool:
+    k = key.lower()
+    return k == "approval_token" or "nonce" in k
+
+
+def redact_secrets(value: Any) -> Any:
+    """Replace operator secrets before a value is written to the audit log or the bus.
+
+    `approval_token` and any field whose name contains "nonce" become "[redacted]".
+    The tool's return value is left as-is, so an MCP view still receives its nonce.
+    """
+    if isinstance(value, dict):
+        return {k: ("[redacted]" if isinstance(k, str) and _secret_field(k) else redact_secrets(v))
+                for k, v in value.items()}
+    if isinstance(value, list):
+        return [redact_secrets(v) for v in value]
+    return value
+
+
 @dataclass
 class ModelRoute:
     """Where every model call goes. One route serves planning, diagnostics and chat."""
@@ -107,7 +126,7 @@ class Ctx:
         session_id = call.get("session_id") if call else None
         await self.store.put("tool_audit_logs", {
             "id": row_id, "project_id": project_id, "status": status, "session_id": session_id,
-            "data": {"id": row_id, "actor": actor, "tool": tool, "args": args, "summary": summary,
+            "data": {"id": row_id, "actor": actor, "tool": tool, "args": redact_secrets(args), "summary": summary,
                      "approved": approved, "session_id": session_id, "created_at": now().isoformat()},
             "created_at": now().isoformat()})
         if project_id:
