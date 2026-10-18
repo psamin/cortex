@@ -8,6 +8,7 @@ import { useAgent } from "../layout/ProjectLayout";
 import { AutopilotHero } from "./Autopilot";
 import { LineagePreview } from "./Lineage";
 import { cn, humanize } from "../lib/format";
+import { ScenePanel } from "../sim3d/ScenePanel";
 
 export function PlanPage() {
   const { pid = "" } = useParams();
@@ -30,6 +31,7 @@ export function PlanPage() {
               <p className="mt-1 text-sm text-ink-3">“{s.project.task_prompt}”</p>
             </div>
             <AutopilotHero project={s.project} />
+            <ScenePanel project={s.project} />
             <LineagePreview pid={pid} />
             <NextActionsPanel pid={pid} />
             <ProjectSpecView project={s.project} />

@@ -26,6 +26,7 @@ import { AgentCollect } from "./AgentCollect";
 import { AttemptDrawer, EpisodeProvenance } from "../components/AgentTrace";
 import { resolveMediaUrl } from "../api/client";
 import { cn, errorMessage, pct } from "../lib/format";
+import { SceneView } from "../sim3d/SceneView";
 
 const randSeed = () => Math.floor(Math.random() * 100_000);
 
@@ -248,7 +249,12 @@ function Viewport({ pid, condition, seed, job }: { pid: string; condition: Condi
 
   return (
     <div className="relative aspect-[4/3] max-h-[440px] w-full overflow-hidden bg-well">
-      {failed === src ? (
+      <SceneView
+        pid={pid}
+        seed={seed}
+        condition={condition}
+        live={live}
+        camera={failed === src ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 text-ink-4">
           <VideoOff className="h-6 w-6" />
           <p className="text-xs">{live ? "Live stream unavailable" : "Sim render unavailable — is the backend running?"}</p>
@@ -262,6 +268,7 @@ function Viewport({ pid, condition, seed, job }: { pid: string; condition: Condi
           className="h-full w-full object-contain"
         />
       )}
+      />
       {live && job && (
         <>
           <div className="absolute left-3 top-3 flex items-center gap-1.5 rounded-sm bg-black/60 px-2 py-1 text-2xs font-semibold text-white">
