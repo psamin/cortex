@@ -108,7 +108,9 @@ async def test_migrations_records_and_agent_artifacts(fake):
             project_id=p.id, collection_id=col.id, index=i, collector="astra", seed=20_000 + i, scenario=Scenario(),
             status=st, provider=col.provider, model=col.model, usage={"calls": 9, "cost_usd": 0.41}))
     got = await repo.list("agent_attempts", AgentAttempt, project_id=p.id)
-    assert [a.status for a in got] == ["success", "failed"] and got[0].model == "openai/gpt-6-astra"
+    # rows saved in the same clock tick tie on created_at and are ordered by id, so compare by index
+    assert {a.index: a.status for a in got} == {0: "success", 1: "failed"}
+    assert {a.model for a in got} == {"openai/gpt-6-astra"}
     assert len(await repo.list("agent_attempts", AgentAttempt, project_id=p.id, status="failed")) == 1
     assert (await repo.get("projects", p.id, type(p))).name == p.name
     assert fake.tables["projects"][p.id]["project_id"] == p.id  # uniform (id, project_id, status, data) rows
