@@ -112,7 +112,11 @@ async def iterations(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                 nxt = {"reason": c.reason, "collection_id": c.id, "status": c.status,
                        "conditions": [x.key for x in (c.request.conditions or [])],
                        "successes": c.totals.get("successes", 0)}
+        base = (tj.config.get("base_checkpoint_id") if tj else None)
+        versions = {c.id: f"v{j + 1}" for j, c in enumerate(cks)}
         out.append({"iteration": i + 1, "policy_version": f"v{i + 1}", "checkpoint_id": ck.id,
+                    "fine_tuned_from": versions.get(base, base) if base else None,
+                    "robot_type": tj.config.get("robot_type") if tj else None,
                     "demos_accepted": ds.num_source_episodes if ds else None, "dataset_id": ds.id if ds else None,
                     "training": _training(tj), "evaluation": ev, "next": nxt, "created_at": ck.created_at})
     # training in flight that has not produced a checkpoint yet

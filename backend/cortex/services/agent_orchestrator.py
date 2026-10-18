@@ -208,6 +208,8 @@ class Args:
         dataset_version_id: str
         policy_type: Literal["act", "smolvla"] = "act"
         steps: int | None = None
+        base_checkpoint_id: str | None = Field(None, description="continue fine-tuning this checkpoint (any project) "
+                                                                 "instead of training from scratch")
 
     class LaunchTraining(BaseModel):
         training_job_id: str
@@ -326,7 +328,7 @@ async def t_dataset(ctx, a, actor):
 
 async def t_propose(ctx, a, actor):
     tj = await training_service.propose(ctx, await get_project(ctx, a.project_id), a.dataset_version_id,
-                                        a.policy_type, a.steps, actor)
+                                        a.policy_type, a.steps, actor, a.base_checkpoint_id)
     return {"summary": f"Proposed {tj.policy_type} training {tj.id} on {tj.backend}: "
                        f"~{tj.estimate.gpu_hours} GPU-h, ${tj.estimate.est_cost_usd}. Needs human approval.",
             "ref_ids": [tj.id], "training_job": tj.model_dump(mode="json"), "requires_approval": True}
@@ -693,7 +695,8 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("create_dataset_version", "Snapshot accepted episodes as a versioned LeRobotDataset v3 with lineage, "
          "train/eval split and optional image-only augmentation.", Args.DatasetVersion, t_dataset),
     Tool("propose_training_job", "Propose an ACT/SmolVLA training job with config and resource estimate "
-         "(does not start it).", Args.ProposeTraining, t_propose),
+         "(does not start it). Pass base_checkpoint_id to continue fine-tuning an existing policy (e.g. for "
+         "this robot or new data) instead of starting from scratch.", Args.ProposeTraining, t_propose),
     Tool("launch_training_job", "Launch an approved training job. Refused unless a human approved it in the "
          "studio or a valid operator approval_token is given.", Args.LaunchTraining, t_launch_training,
          agent_callable=False),

@@ -32,13 +32,21 @@ fi
 cp -r dataset "$SCR/dataset"
 uv venv -q --python 3.12 "$SCR/venv"
 source "$SCR/venv/bin/activate"
-uv pip install -q "lerobot[dataset,training]==0.6.1"
+uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1"
 echo "[cortex] lerobot $(uv pip show lerobot | grep Version)"
 
 rm -rf output
+# Fine-tune from a base when given: a hub id (e.g. lerobot/smolvla_base) or a project checkpoint in base/.
+POLICY_ARGS=(--policy.type=act)
+if [ -n "${POLICY_PATH:-}" ]; then
+  [ "$POLICY_PATH" = "base" ] && POLICY_PATH="$JOB_DIR/base"
+  POLICY_ARGS=(--policy.path="$POLICY_PATH")
+fi
+EXTRA=()
+[ -f rename_map.json ] && EXTRA+=(--rename_map="$(cat rename_map.json)")
 lerobot-train \
   --dataset.repo_id="$REPO_ID" --dataset.root="$SCR/dataset" \
-  --policy.type=act --policy.device=cuda --policy.push_to_hub=false \
+  "${POLICY_ARGS[@]}" --policy.device=cuda --policy.push_to_hub=false "${EXTRA[@]}" \
   --steps="$STEPS" --batch_size="$BATCH" --num_workers=6 \
   --save_freq="$SAVE" --log_freq=100 --seed=1000 \
   --output_dir="$JOB_DIR/output" --job_name=cortex_act --wandb.enable=false
