@@ -116,10 +116,31 @@ def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> 
 VIEWS = ("both", "front", "wrist")
 
 
-def _view(obs: dict[str, Any], view: str) -> np.ndarray:
-    """The live view, from the policy's own cameras (already rendered every step), scaled up. A second MuJoCo
-    renderer in this process drew garbage under headless EGL, so the live view adds no renderer of its own."""
-    cam = obs["pixels"]["wrist" if view == "wrist" else "front"]
+# A 3/4 close-up on the part being worked, for people watching (the policy's front camera sees the arm's back).
+# (azimuth, elevation, distance m); the policy never sees it.
+CLOSEUP = {"unscrew": (150, -32, 0.42), "unscrew_black": (150, -32, 0.42), "pick_place": (150, -38, 0.75)}
+
+
+def _closeup(env, task: str) -> np.ndarray | None:
+    """The close-up, drawn by the env's own renderer (a second MuJoCo renderer drew garbage under headless EGL);
+    the env's next observation re-selects its own camera, so the policy's images are unchanged."""
+    if task not in CLOSEUP:
+        return None
+    import mujoco
+
+    w = env.world
+    cam = mujoco.MjvCamera()
+    cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+    cam.lookat[:] = env.cube_pos()
+    cam.azimuth, cam.elevation, cam.distance = CLOSEUP[task]
+    w.renderer.update_scene(w.data, camera=cam)
+    return w.renderer.render().copy()
+
+
+def _view(obs: dict[str, Any], view: str, close: np.ndarray | None = None) -> np.ndarray:
+    """The live view, scaled up: the close-up (or the policy's front camera) with the wrist camera inset, or
+    just the policy's front or wrist camera."""
+    cam = close if view == "both" and close is not None else obs["pixels"]["wrist" if view == "wrist" else "front"]
     img = np.asarray(Image.fromarray(cam).resize((640, 480), Image.BILINEAR))
     return _inset(img, obs["pixels"]["wrist"]) if view == "both" else img
 
@@ -153,7 +174,13 @@ def _episode(p: dict[str, Any], seed: int, stop, view: str = "both",
         t1 = time.perf_counter()
         ms = (t1 - t0) * 1000
         shown = step % 2 == 0  # 15 fps of video is plenty and halves the bandwidth; the policy still runs every step
-        frame = _view(obs, view) if shown else None
+        frame = None
+        if shown:
+            try:
+                close = _closeup(env, p["task"]) if view == "both" else None
+            except Exception:  # noqa: BLE001 - an env without cube_pos/world: the policy's own camera
+                close = None
+            frame = _view(obs, view, close)
         t2 = time.perf_counter()
         obs, _, success, _, _ = env.step(action)
         t3 = time.perf_counter()
