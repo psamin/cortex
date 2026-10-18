@@ -377,7 +377,7 @@ export function Segmented<T extends string>({
   value: T;
   onChange: (v: T) => void;
   options: { value: T; label: ReactNode }[];
-  size?: "sm" | "md";
+  size?: "xs" | "sm" | "md";
   ariaLabel?: string;
 }) {
   return (
@@ -390,8 +390,8 @@ export function Segmented<T extends string>({
           aria-checked={o.value === value}
           onClick={() => onChange(o.value)}
           className={cn(
-            "rounded-full px-3 font-medium capitalize transition-colors duration-100",
-            size === "sm" ? "h-6 text-2xs" : "h-7 text-xs",
+            "rounded-full font-medium capitalize transition-colors duration-100",
+            size === "xs" ? "h-6 whitespace-nowrap px-2.5 text-2xs" : size === "sm" ? "h-6 px-3 text-2xs" : "h-7 px-3 text-xs",
             o.value === value ? "bg-ink text-bench" : "text-ink-3 hover:text-ink",
           )}
         >
