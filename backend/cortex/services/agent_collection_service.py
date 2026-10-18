@@ -20,12 +20,13 @@ import random
 from typing import Any
 
 from ..context import Ctx
-from ..errors import NotFound
+from ..errors import NotFound, UserError
 from ..models import (
     AgentAttempt, AgentCollection, Condition, Episode, EpisodeSource, EpisodeStatus, Project, Scenario,
     StartAgentCollectionRequest,
 )
 from ..sim.so101 import REGION_XY
+from ..workers.sim_worker import early_stop_reason
 from .jobs import Job
 from .recording_service import (
     AUTO_ACCEPT_MIN_SCORE, HD_FILES, dataset_blur_reference, live_key, list_episodes, quality_for,
@@ -258,6 +259,9 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
             elif t == "budget_exhausted":
                 col.status = "budget_exhausted"
                 col.totals["stopped_reason"] = f"collection budget reached after ${ev['spent_usd']:.2f}"
+            elif t == "stopped_early":  # the first attempts all failed: the worker ran no more
+                col.status, col.error = "failed", ev["reason"]
+                col.totals["stopped_reason"] = ev["reason"]
 
         if req.collector == "agent":
             p = planner or {}
@@ -295,6 +299,8 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
         await _save(ctx, col)
         await ctx.audit(ACTOR_SYSTEM, "agent_collection_finished", project.id, {"collection_id": col.id}, "ok",
                         _summary(col))
+        if col.status == "failed" and col.error:  # stopped early: the job fails with the reason, in words
+            raise UserError(col.error)
         return col.id
 
     job = ctx.jobs.submit("agent_collect", project.id, run, idempotency_key=f"collect:{col.id}")
@@ -339,6 +345,8 @@ async def _start_claude_code_collection(ctx: Ctx, project: Project, req: StartAg
     async def run(job: Job) -> str:
         col.status, col.job_id = "running", job.id
         await _save(ctx, col)
+        outcomes: list[tuple[bool, str | None]] = []
+        stopped = None
         try:
             for i, sc in enumerate(scenarios):
                 ctx.jobs.update(job, message=f"Claude Code attempt {i + 1}/{len(scenarios)}",
@@ -348,11 +356,20 @@ async def _start_claude_code_collection(ctx: Ctx, project: Project, req: StartAg
                 fresh.totals["model_calls"] = fresh.totals.get("model_calls", 0) + int(out.get("turns") or 0)
                 col.totals = fresh.totals
                 await _save(ctx, col)
+                outcomes.append((out.get("status") == "success", None if out.get("finished_by_agent")
+                                 else "agent stopped without finishing"))
+                if stopped := early_stop_reason(outcomes):
+                    break
         except BaseException as e:  # stopped by the user or an attempt crashed: never leave it "running"
             col.status = "cancelled" if isinstance(e, asyncio.CancelledError) else "failed"
             col.error = None if col.status == "cancelled" else f"{type(e).__name__}: {e}"
             await _save(ctx, col)
             raise
+        if stopped:  # the first attempts all failed: running the rest would only repeat it
+            col.status, col.error = "failed", stopped
+            col.totals["stopped_reason"] = stopped
+            await _save(ctx, col)
+            raise UserError(stopped)
         col.status = "succeeded"
         await _save(ctx, col)
         await ctx.audit(ACTOR_SYSTEM, "agent_collection_finished", project.id, {"collection_id": col.id}, "ok",

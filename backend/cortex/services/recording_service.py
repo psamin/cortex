@@ -7,7 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..context import Ctx
-from ..errors import NotFound
+from ..errors import NotFound, UserError
 from ..models import Condition, Episode, EpisodeSource, EpisodeStatus, Project, new_id
 from .jobs import Job
 from .quality_analysis import analyze_episode
@@ -56,6 +56,7 @@ async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition
     async def run(job: Job) -> str | None:
         by_index = {i: ep for i, ep in enumerate(specs)}
         done: list[str] = []
+        stopped: list[str] = []
         blur_ref = await dataset_blur_reference(ctx, project.id)
 
         async def on_event(ev: dict[str, Any]) -> None:
@@ -69,6 +70,8 @@ async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition
                 ep = by_index[ev["index"]]
                 await finalize_episode(ctx, ep, ev, blur_ref, auto_accept)
                 done.append(ep.id)
+            elif ev.get("type") == "stopped_early":  # the first demos all failed: the worker ran no more
+                stopped.append(ev["reason"])
 
         from .intake_service import scene_payload
 
@@ -82,7 +85,9 @@ async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition
                                   ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
         await ctx.audit(actor, "record_demonstrations", project.id,
                         {"conditions": [c.key for c in conditions], "seeds": seeds}, "ok",
-                        f"recorded {len(done)} sim demos")
+                        stopped[0] if stopped else f"recorded {len(done)} sim demos")
+        if stopped:
+            raise UserError(stopped[0])
         return ",".join(done)
 
     return ctx.jobs.submit("record", project.id, run, idempotency_key=key)
