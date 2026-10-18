@@ -79,7 +79,8 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
     jp, jr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
     goal = np.asarray(target, dtype=np.float64)
 
-    def dls(cmd: np.ndarray, n_iters: int) -> float:
+    def dls(cmd: np.ndarray, n_iters: int, n: int = ARM) -> float:
+        """Damped least squares over the first ``n`` arm joints (the rest stay where they are)."""
         err = np.inf
         for _ in range(n_iters):
             mujoco.mj_kinematics(m, d)
@@ -92,10 +93,10 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
             if err < 1e-3 and np.linalg.norm(e_o) < 1e-2:
                 break
             mujoco.mj_jacSite(m, d, jp, jr, env.site)
-            J = np.vstack([jp[:, dofs], jr[:, dofs] * ori_weight])
+            J = np.vstack([jp[:, dofs[:n]], jr[:, dofs[:n]] * ori_weight])
             e = np.concatenate([e_p, e_o])
             dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), e)
-            d.qpos[qadr] = np.clip(d.qpos[qadr] + np.clip(dq, -0.2, 0.2), lo, hi)
+            d.qpos[qadr[:n]] = np.clip(d.qpos[qadr[:n]] + np.clip(dq, -0.2, 0.2), lo[:n], hi[:n])
         return err
 
     err_p = dls(goal, iters)
@@ -127,10 +128,31 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
                 best_q, best_err = q.copy(), err_p
         q, err_p = best_q, best_err
     if yaw is not None and approach is None:
-        # Align the jaws with the cube faces: roll relative to the arm's pan angle.
-        rel = (yaw - d.qpos[qadr[0]] + np.pi / 4) % (np.pi / 2) - np.pi / 4
-        q[4] = np.clip(np.rad2deg(rel), np.rad2deg(lo[4]), np.rad2deg(hi[4]))
+        # Roll the jaws onto the cube's faces, then re-solve the other joints with that roll held: the roll moves
+        # the gripper site (it is off the roll axis), and re-solving changes the pan, which turns the jaws again.
+        # Setting the roll after the solve (and from yaw - pan: the pan's sign is the other way) left the site
+        # up to 15 mm off the target and the jaws up to 36 degrees off the faces, behind a 0.3 mm error (#225).
+        r0 = float(q_init_deg[4])
+        for i in range(3):
+            roll = _roll_onto_faces(m, d, yaw, float(np.rad2deg(d.qpos[qadr[4]])))
+            if i == 0:  # the cube looks the same every 90 degrees: of those rolls, the one nearest the seed's, so
+                roll = r0 + (roll - r0 + 45.0) % 90.0 - 45.0  # consecutive waypoints never flip the wrist
+            d.qpos[qadr[4]] = np.clip(np.deg2rad(roll), lo[4], hi[4])
+            dls(goal, iters, n=ARM - 1)
+        mujoco.mj_kinematics(m, d)
+        q = np.rad2deg(d.qpos[qadr]).copy()
+        err_p = float(np.linalg.norm(goal - d.site_xpos[env.site]))
     return q, err_p
+
+
+def _roll_onto_faces(m: mujoco.MjModel, d: mujoco.MjData, yaw: float, roll_deg: float) -> float:
+    """Wrist roll (degrees) that makes a top-down gripper's jaws close along the cube face normal nearest their
+    current closing direction. Measured on the Menagerie SO-101: the closing direction turns one-for-one with the
+    roll, so the roll changes by that angle (at most 45 degrees either way)."""
+    mujoco.mj_kinematics(m, d)
+    c = closing_direction(m, d)
+    turn = np.rad2deg(yaw - np.arctan2(c[1], c[0]))
+    return float(roll_deg + (turn + 45.0) % 90.0 - 45.0)
 
 
 def _site(m: mujoco.MjModel) -> int:
@@ -167,6 +189,17 @@ def _horizontal_jaw_roll(m: mujoco.MjModel, d: mujoco.MjData, qadr: np.ndarray, 
     return float(best)
 
 
+LINE_STEP_M = 0.005  # waypoint spacing of the straight descent to the grasp and the lift from it
+LINE_HOLD = 2  # steps at each of those waypoints: slow enough that the arm tracks the line
+
+
+def _line(a: np.ndarray, b: np.ndarray, grip: float, phase: str) -> list[tuple[np.ndarray, float, int, bool, str]]:
+    """Legs strictly between a and b on a straight line. A single joint move between them turns each joint at
+    its own rate limit, so the fingertips dip to the table short of the cube and sweep it away (#225)."""
+    n = max(1, int(np.ceil(np.linalg.norm(b - a) / LINE_STEP_M)))
+    return [(a + (b - a) * t, grip, LINE_HOLD, True, phase) for t in np.linspace(0, 1, n + 1)[1:-1]]
+
+
 class ScriptedExpert:
     """Stateful per-episode expert. Call plan() after reset, then act() each step."""
 
@@ -181,25 +214,34 @@ class ScriptedExpert:
         z_grasp = 0.012 + self.rng.uniform(-0.002, 0.002)
         hover = 0.055 + self.rng.uniform(-0.005, 0.005)
         q = state_deg.copy()
-        legs = []  # (target xyz, gripper, hold steps, use_yaw)
-        legs.append((cube + [0, 0, hover], GRIP_OPEN, 8, True))
-        legs.append((np.r_[cube[:2], z_grasp], GRIP_OPEN, 8, True))
-        legs.append((np.r_[cube[:2], z_grasp], GRIP_CLOSED, 12, True))
-        legs.append((np.r_[cube[:2], 0.075], GRIP_CLOSED, 4, True))
-        legs.append((np.r_[box[:2], 0.075], GRIP_CLOSED, 6, False))
-        legs.append((np.r_[box[:2], 0.055], GRIP_CLOSED, 4, False))
-        legs.append((np.r_[box[:2], 0.055], GRIP_OPEN, 10, False))
-        legs.append((np.r_[box[:2], 0.08], GRIP_OPEN, 6, False))
+        top, grasp, lift = cube + [0, 0, hover], np.r_[cube[:2], z_grasp], np.r_[cube[:2], 0.075]
+        legs = []  # (target xyz, gripper, hold steps, use_yaw, phase)
+        legs.append((top, GRIP_OPEN, 8, True, "hover"))
+        legs += _line(top, grasp, GRIP_OPEN, "approach")
+        legs.append((grasp, GRIP_OPEN, 8, True, "grasp"))
+        legs.append((grasp, GRIP_CLOSED, 12, True, "close"))
+        legs += _line(grasp, lift, GRIP_CLOSED, "lift")
+        legs.append((lift, GRIP_CLOSED, 4, True, "lift"))
+        legs.append((np.r_[box[:2], 0.075], GRIP_CLOSED, 6, False, "carry"))
+        legs.append((np.r_[box[:2], 0.055], GRIP_CLOSED, 4, False, "lower"))
+        legs.append((np.r_[box[:2], 0.055], GRIP_OPEN, 10, False, "release"))
+        legs.append((np.r_[box[:2], 0.08], GRIP_OPEN, 6, False, "retreat"))
         self.waypoints: list[tuple[np.ndarray, int]] = []
+        self.phases: list[str] = []
         self.max_ik_err = 0.0
-        for target, grip, hold, use_yaw in legs:
+        for target, grip, hold, use_yaw, phase in legs:
             arm, err = solve_ik(env, target, q, yaw if use_yaw else None)
             self.max_ik_err = max(self.max_ik_err, err)
             q = np.r_[arm, grip]
             self.waypoints.append((q, hold))
+            self.phases.append(phase)
         self.cmd = state_deg.astype(np.float64).copy()
         self.i = 0
         self.hold = 0
+
+    @property
+    def phase(self) -> str:
+        return self.phases[min(self.i, len(self.phases) - 1)]
 
     def act(self) -> np.ndarray:
         if self.i >= len(self.waypoints):
