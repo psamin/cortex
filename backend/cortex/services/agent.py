@@ -90,16 +90,14 @@ async def engine(ctx: Ctx) -> str:
     return "rules"
 
 
-def _log_path(ctx: Ctx, pid: str):
-    return ctx.data_dir / "agent_sessions" / pid / "chat.jsonl"
+async def load_log(ctx: Ctx, pid: str, tid: str | None = None) -> list[dict[str, Any]]:
+    """One chat thread as the UI shows it (the most recent one unless `tid` is given)."""
+    from . import chat_store
 
-
-def load_log(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
-    """The full chat as the UI shows it: user messages, assistant text, tool calls/results, approvals."""
-    p = _log_path(ctx, pid)
-    if not p.exists():
+    items = await chat_store.threads(ctx, pid)
+    if not items:
         return []
-    return tidy_job_rows([json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()])
+    return tidy_job_rows(await chat_store.load(ctx, pid, tid or items[0]["id"]))
 
 
 def tidy_job_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -123,20 +121,22 @@ def tidy_job_rows(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return entries
 
 
-def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any]) -> None:
-    from ..models import now
+async def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any], tid: str | None = None) -> None:
+    from . import chat_store
 
-    p = _log_path(ctx, pid)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with p.open("a") as f:
-        f.write(json.dumps({**entry, "at": now().isoformat()}, default=str) + "\n")
+    t = await chat_store.current(ctx, pid, tid)
+    await chat_store.append(ctx, pid, t["id"], entry)
 
 
-async def chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
-    """Stream one agent turn and record it to the project's chat log."""
-    _append_log(ctx, pid, {"kind": "user", "text": message})
+async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:
+    """Stream one agent turn and record it to the chat thread (the latest unless `tid` is given)."""
+    from . import chat_store
+
+    tid = (await chat_store.current(ctx, pid, tid))["id"]
+    yield _sse("thread", {"id": tid})
+    await _append_log(ctx, pid, {"kind": "user", "text": message}, tid)
     text: list[str] = []
-    async for chunk in _chat(ctx, pid, message):
+    async for chunk in _chat(ctx, pid, message, tid):
         ev, _, data = chunk.partition("\ndata: ")
         ev = ev.removeprefix("event: ")
         try:
@@ -147,20 +147,20 @@ async def chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
             text.append(d.get("delta", ""))
         elif ev in ("tool_call", "tool_result", "approval_required"):
             if text:
-                _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)})
+                await _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)}, tid)
                 text = []
             # keep the card's own kind (e.g. "training") under card_kind; `kind` is the row type
-            _append_log(ctx, pid, {**d, "card_kind": d.get("kind"), "kind": ev})
+            await _append_log(ctx, pid, {**d, "card_kind": d.get("kind"), "kind": ev}, tid)
         elif ev == "done":
             if text:
-                _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)})
+                await _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)}, tid)
                 text = []
-            _append_log(ctx, pid, {"kind": "done", **d})
+            await _append_log(ctx, pid, {"kind": "done", **d}, tid)
         yield chunk
 
 
-async def _chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
-    hist = HISTORY.setdefault(pid, [])
+async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:
+    hist = HISTORY.setdefault(f"{pid}:{tid}", [])
     hist.append({"role": "user", "content": message})
     await ctx.audit("gui", "agent_message", pid, {"message": message[:500]}, "ok", "user message")
     eng = await engine(ctx)
@@ -168,7 +168,7 @@ async def _chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
         from . import claude_code_agent as cc
 
         text = []
-        async for chunk in cc.chat(ctx, pid, message, _sse):
+        async for chunk in cc.chat(ctx, pid, message, _sse, tid):
             if chunk.startswith("event: text"):
                 text.append(json.loads(chunk.split("data: ", 1)[1])["delta"])
             yield chunk
@@ -322,7 +322,7 @@ async def post_job_done(ctx: Ctx, job) -> None:
     entry = {"kind": "job_done", "job_id": job.id, "job_kind": job.kind, "status": job.status,
              "text": text, "detail": getattr(job, "error_detail", None),
              "ref_ids": [r for r in (job.result_ref or "").split(",") if r][:12]}
-    _append_log(ctx, job.project_id, entry)
+    await _append_log(ctx, job.project_id, entry)
     ctx.bus.publish(job.project_id, "chat", entry)
 
 
