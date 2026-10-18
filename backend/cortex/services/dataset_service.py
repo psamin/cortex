@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 import random
 import shutil
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 from ..context import Ctx
 from ..models import (
@@ -60,19 +60,38 @@ def dataset_root(project_id: str, ds_id: str) -> str:
     return f"projects/{project_id}/datasets/{ds_id}/lerobot"
 
 
-async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRequest, actor: str = "gui") -> Job:
-    eps = [e for e in await list_episodes(ctx, project.id) if e.status == EpisodeStatus.accepted]
+def snapshot_episodes(eps: list[Episode], req: CreateDatasetVersionRequest) -> list[Episode]:
+    """The accepted episodes a dataset version takes. Raises ValueError naming the filter that left none."""
+    accepted = [e for e in eps if e.status == EpisodeStatus.accepted]
+    eps = accepted
     if req.episode_ids is not None:
         wanted = set(req.episode_ids)
         eps = [e for e in eps if e.id in wanted]
+    pool = eps
     if req.sources:
         eps = [e for e in eps if e.source in req.sources]
     else:  # imported real-world demos never mix into simulation datasets unless asked for explicitly
         eps = [e for e in eps if e.source != EpisodeSource.imported]
+    by_source = eps
     # cycle protocol: demo + reset segments by default; recover segments only when asked for
     eps = [e for e in eps if e.segment in req.segments]
-    if not eps:
-        raise ValueError(f"no accepted episodes to snapshot (segments: {', '.join(req.segments)})")
+    if eps:
+        return eps
+    if not accepted:
+        raise ValueError("no accepted episodes to snapshot: record demos (or accept recorded ones) first")
+    if not pool:
+        raise ValueError(f"none of the {len(req.episode_ids or [])} requested episodes is accepted")
+    if not by_source:
+        have = ", ".join(f"{n} {s}" for s, n in sorted(Counter(str(e.source) for e in pool).items()))
+        want = ", ".join(str(s) for s in req.sources) if req.sources else "simulation"
+        raise ValueError(f"no accepted {want} episodes to snapshot: the {len(pool)} accepted are {have}. "
+                         "Pass those sources to use them, or collect demos of the source you asked for.")
+    raise ValueError(f"no accepted episodes in the segments {', '.join(req.segments)} "
+                     f"({len(by_source)} accepted are other segments)")
+
+
+async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRequest, actor: str = "gui") -> Job:
+    eps = snapshot_episodes(await list_episodes(ctx, project.id), req)
     versions = await ctx.repo.list("dataset_versions", DatasetVersion, project_id=project.id)
     ds = DatasetVersion(project_id=project.id, name=req.name or f"v{len(versions) + 1}",
                         parent_id=req.parent_id or (versions[-1].id if versions else None),

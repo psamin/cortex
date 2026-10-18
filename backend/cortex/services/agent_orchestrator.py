@@ -508,11 +508,13 @@ async def t_train_from_agent(ctx, a, actor):
 
     p = await get_project(ctx, a.project_id)
     augs = PRESETS.get(a.augmentation_preset, []) if a.augmentation_preset else []
+    req = CreateDatasetVersionRequest(name=f"{'+'.join(a.sources)}-demos", sources=[EpisodeSource(s) for s in a.sources],
+                                      augmentations=augs)
+    # no matching demos: say so in this call, not in a background job that fails after the turn ended
+    dataset_service.snapshot_episodes(await recording_service.list_episodes(ctx, p.id), req)
 
     async def chain(job):
-        ds_job = await dataset_service.create_version(ctx, p, CreateDatasetVersionRequest(
-            name=f"{'+'.join(a.sources)}-demos", sources=[EpisodeSource(s) for s in a.sources], augmentations=augs),
-            actor)
+        ds_job = await dataset_service.create_version(ctx, p, req, actor)
         ctx.jobs.update(job, message=f"building dataset ({ds_job.id})")
         ds = await _await_job(ctx, ds_job.id)
         tj = await training_service.propose(ctx, p, ds.result_ref, a.policy_type, actor=actor)
