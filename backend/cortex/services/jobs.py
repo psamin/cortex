@@ -73,6 +73,7 @@ class JobManager:
         self.persist = persist
         self.on_finished: list[Callable[[Job], None]] = []
         self.closing = False
+        self.stopping: set[str] = set()  # jobs a user asked to stop: their worker may die first and raise
         if persist and persist.exists():
             for row in json.loads(persist.read_text() or "[]"):
                 j = Job.model_validate(row)
@@ -90,6 +91,10 @@ class JobManager:
             tmp = self.persist.with_suffix(".tmp")
             tmp.write_text(json.dumps([j.model_dump() for j in self.jobs.values()]))
             os.replace(tmp, self.persist)
+
+    def stop_requested(self, job_id: str) -> bool:
+        """True once ``cancel`` was called: a worker that fails from here on was stopped, not broken."""
+        return job_id in self.stopping
 
     def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
@@ -135,11 +140,15 @@ class JobManager:
                     raise  # stays "running" on disk; the next start reports it as interrupted by the restart
                 self.update(job, status="cancelled", message="stopped by user")
             except Exception as e:  # surfaced to the UI and the agent, in words people can act on
+                if job.id in self.stopping:  # the stop ended the worker before the task saw the cancel
+                    self.update(job, status="cancelled", message="stopped by user")
+                    return
                 log.exception("job %s failed", job.id)
                 msg, detail = describe(e)
                 self.update(job, status="failed", error=msg, error_detail=detail)
             finally:
                 self.procs.pop(job.id, None)
+                self.stopping.discard(job.id)
 
         self.tasks[job.id] = asyncio.create_task(run())
         return job
@@ -159,6 +168,8 @@ class JobManager:
 
     async def cancel(self, job_id: str) -> Job | None:
         job = self.jobs.get(job_id)
+        if job is not None and job.status not in TERMINAL:
+            self.stopping.add(job_id)  # before the worker dies, so its failure is read as the stop
         await self._terminate(list(self.procs.get(job_id, [])))
         t = self.tasks.get(job_id)
         if t and not t.done():
