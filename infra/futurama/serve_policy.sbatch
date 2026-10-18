@@ -1,11 +1,11 @@
 #!/bin/bash
 # Live GPU inference server for the trained SmolVLA policies (see serve_policy.py).
-#   sbatch -J cortex-serve serve_policy.sbatch <job_dir>
-# Prints "[serve] READY port=<p>" in the log and writes <job_dir>/live/server.json {node, port};
-# connect from a laptop with: ssh -N -L 8765:<node>:<port> futurama, then open http://127.0.0.1:8765/
+#   sbatch -J cortex-serve [--gres=gpu:h200:1] serve_policy.sbatch <job_dir>
+# Prints "[live] <step>" progress lines and "[serve] READY port=<p>" in the log, and writes
+# <job_dir>/live/server.json {node, port}. The studio's GPU tab submits this and tunnels to it
+# (backend/cortex/services/live_policy_service.py).
 #SBATCH -p general
-#SBATCH --gres=gpu:h200:1
-#SBATCH -w nvidia-h200
+#SBATCH --gres=gpu:l40s:1
 #SBATCH -c 8
 #SBATCH --mem=64G
 #SBATCH -t 02:00:00
@@ -24,13 +24,16 @@ PORT=$((20000 + SLURM_JOB_ID % 20000))  # unique per job: several jobs can share
 if ! command -v uv >/dev/null; then
   curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$SCR/bin" UV_NO_MODIFY_PATH=1 sh
 fi
+echo "[live] Installing LeRobot on $(hostname -s) ($(nvidia-smi --query-gpu=name --format=csv,noheader | head -1))"
 cp prepare_dataset.py serve_policy.py "$SCR/"
 uv venv -q --python 3.12 "$SCR/venv"
 source "$SCR/venv/bin/activate"
 uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1"
 
 for t in conveyor suture jenga; do  # held-out episodes for every task that has a checkpoint
-  ls -d "$JOB_DIR/output/$t"/*_[0-9]* >/dev/null 2>&1 && python "$SCR/prepare_dataset.py" "$t" "$SCR/data-$t"
+  ls -d "$JOB_DIR/output/$t"/*_[0-9]* >/dev/null 2>&1 || continue
+  echo "[live] Preparing held-out episodes: $t"
+  python "$SCR/prepare_dataset.py" "$t" "$SCR/data-$t"
 done
 mkdir -p "$SCR/data"
 for d in "$SCR"/data-*; do cp -r "$d"/* "$SCR/data/" 2>/dev/null || true; done
@@ -42,5 +45,6 @@ for f in sorted(scr.glob("data-*/split.json")):
     merged.update(json.loads(f.read_text()))
 (scr / "data" / "split.json").write_text(json.dumps(merged))
 EOF
+echo "[live] Loading the policies onto the GPU"
 echo "{\"node\": \"$(hostname -s)\", \"port\": $PORT, \"job\": $SLURM_JOB_ID}" > "$JOB_DIR/live/server.json"
 python "$SCR/serve_policy.py" "$JOB_DIR" "$SCR/data" "$PORT"

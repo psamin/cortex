@@ -16,15 +16,15 @@ POLICIES = {"gpu": "NVIDIA H200", "policies": {"jenga": {"checkpoint": "jenga_01
 
 @pytest.fixture(autouse=True)
 def _reset_state():
-    lp.STATE.update(job=None, tunnel=None, phase="stopped", error=None)
+    lp.STATE.update(job=None, tunnel=None, phase="stopped", step=None, detail=None, error=None)
     yield
-    lp.STATE.update(job=None, tunnel=None, phase="stopped", error=None)
+    lp.STATE.update(job=None, tunnel=None, phase="stopped", step=None, detail=None, error=None)
 
 
 def _ctx(url: str, host: str | None = None):
     return SimpleNamespace(settings=SimpleNamespace(
         live_policy_url=url, futurama_ssh_host=host, futurama_policy_dir="~/cortex-jenga",
-        futurama_node_domain="cc.gatech.edu"))
+        futurama_node_domain="cc.gatech.edu", live_policy_gres="gpu:l40s:1"))
 
 
 @pytest.fixture
@@ -52,7 +52,7 @@ async def test_status_reports_the_served_policies(server):
 
 async def test_status_explains_when_nothing_is_running():
     st = await lp.status(_ctx("http://127.0.0.1:9"))
-    assert not st["available"] and "Start one" in st["reason"]
+    assert not st["available"] and "requests one on Futurama" in st["reason"]
 
 
 async def test_start_needs_the_cluster_configured():
@@ -104,3 +104,65 @@ async def test_tunnel_user_comes_from_the_ssh_config_for_an_alias(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     await lp.open_tunnel(_ctx("http://127.0.0.1:8765", "futurama"), "angleyne", 30579)
     assert calls[0][-1] == "pi34@angleyne.cc.gatech.edu" and calls[0][calls[0].index("-J") + 1] == "futurama"
+
+
+def test_narration_follows_the_job():
+    assert lp.narrate("1", "PENDING (Resources)", "")[1] == "Waiting for a free GPU (Slurm job 1 queued: Resources)"
+    assert lp.narrate("1", "RUNNING angleyne", "[live] Installing LeRobot on zapp (NVIDIA L40S)") == (
+        "install", "Installing LeRobot on zapp (NVIDIA L40S)")
+    assert lp.narrate("1", "RUNNING angleyne", "[live] Preparing held-out episodes: jenga")[0] == "prepare"
+    assert lp.narrate("1", "RUNNING angleyne", "[serve] READY port=30579 policies=['jenga']")[0] == "connect"
+
+
+async def _no_connect(ctx, job):  # the background connect is tested on its own below
+    return None
+
+
+async def test_start_attaches_to_an_allocated_gpu(monkeypatch):
+    sent = []
+
+    async def fake_sh(*args, timeout=60):
+        sent.append(args[-1])
+        return 0, "ATTACH 10579\n"
+
+    monkeypatch.setattr(lp, "_sh", fake_sh)
+    monkeypatch.setattr(lp, "_connect_when_ready", _no_connect)
+    st = await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
+    assert lp.STATE["job"] == "10579" and "already allocated" in st["reason"]
+    assert "squeue -u $USER -n cortex-serve" in sent[0]
+
+
+async def test_start_requests_the_configured_gpu(monkeypatch):
+    sent = []
+
+    async def fake_sh(*args, timeout=60):
+        sent.append(args[-1])
+        return 0, "10580\n"
+
+    monkeypatch.setattr(lp, "_sh", fake_sh)
+    monkeypatch.setattr(lp, "_connect_when_ready", _no_connect)
+    await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
+    assert lp.STATE["job"] == "10580" and "--gres=gpu:l40s:1" in sent[0]
+
+
+async def test_connects_once_the_server_is_ready(monkeypatch):
+    polls = iter([("PENDING (Resources)", "", None),
+                  ("RUNNING zapp", "[live] Preparing held-out episodes: jenga", None),
+                  ("RUNNING zapp", "[serve] READY port=30580", {"node": "zapp", "port": 30580, "job": 10580})])
+    seen, opened = [], []
+
+    async def fake_poll(ctx, job):
+        r = next(polls)
+        return r
+
+    async def fake_open(ctx, node, port):
+        opened.append((node, port))
+
+    async def no_sleep(_):
+        seen.append(lp.STATE["step"])
+
+    monkeypatch.setattr(lp, "_poll", fake_poll)
+    monkeypatch.setattr(lp, "open_tunnel", fake_open)
+    monkeypatch.setattr(lp.asyncio, "sleep", no_sleep)
+    await lp._connect_when_ready(_ctx("http://127.0.0.1:9", "futurama"), "10580")
+    assert seen == ["queued", "prepare"] and opened == [("zapp", 30580)]

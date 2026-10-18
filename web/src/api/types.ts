@@ -828,7 +828,11 @@ export interface AgentThread {
 export interface LivePolicyStatus {
   available: boolean;
   phase: "stopped" | "starting" | "ready";
+  /** the current step while a GPU comes up, and every step's label in order */
+  step?: string | null;
+  steps?: Record<string, string>;
   reason?: string;
+  error?: string | null;
   job?: string | null;
   gpu?: string;
   policies?: Record<string, { checkpoint: string; stage: string; held_out: number[] }>;

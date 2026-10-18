@@ -22,7 +22,16 @@ import httpx
 from ..context import Ctx
 
 log = logging.getLogger(__name__)
-STATE: dict[str, Any] = {"job": None, "tunnel": None, "phase": "stopped", "error": None}
+STATE: dict[str, Any] = {"job": None, "tunnel": None, "phase": "stopped", "step": None, "detail": None,
+                         "error": None}
+# What the studio shows while a GPU comes up, in order.
+STEPS = {"request": "Requesting a GPU on Georgia Tech's Futurama cluster",
+         "queued": "Waiting for a free GPU",
+         "install": "Installing LeRobot on the GPU node",
+         "prepare": "Preparing held-out episodes",
+         "load": "Loading the policies onto the GPU",
+         "connect": "Connecting to the GPU server",
+         "ready": "Live"}
 
 
 def url(ctx: Ctx) -> str:
@@ -35,53 +44,98 @@ async def _sh(*args: str, timeout: float = 60) -> tuple[int, str]:
     return p.returncode or 0, out.decode(errors="replace")
 
 
+def _step(step: str, detail: str | None = None) -> None:
+    STATE.update(step=step, detail=detail or STEPS[step])
+
+
 async def status(ctx: Ctx) -> dict[str, Any]:
     try:
         async with httpx.AsyncClient(timeout=3) as c:
             info = (await c.get(f"{url(ctx)}/policies.json")).json()
         STATE["phase"] = "ready"
-        return {"available": True, "phase": "ready", **info}
+        _step("ready")
+        return {"available": True, "phase": "ready", "step": "ready", "steps": STEPS, **info}
     except (httpx.HTTPError, ValueError):
-        reason = STATE["error"] or {
-            "starting": "The GPU job is starting (installing and preparing held-out episodes, ~5–10 min).",
-            "stopped": "No live GPU server is running. Start one to run the trained policies on a GPU.",
-        }.get(STATE["phase"], "The live GPU server isn't reachable.")
-        return {"available": False, "phase": STATE["phase"], "reason": reason, "job": STATE["job"]}
+        reason = STATE["error"] or (STATE["detail"] if STATE["phase"] == "starting" else None) or (
+            "No GPU is allocated. Opening this tab requests one on Futurama." if STATE["phase"] == "stopped"
+            else "The live GPU server isn't reachable.")
+        return {"available": False, "phase": STATE["phase"], "step": STATE["step"], "steps": STEPS,
+                "reason": reason, "error": STATE["error"], "job": STATE["job"]}
 
 
 async def start(ctx: Ctx) -> dict[str, Any]:
+    """Attach to a GPU server that is already allocated, or request one through Slurm."""
     s = ctx.settings
     if not s.futurama_ssh_host:
         raise ValueError("FUTURAMA_SSH_HOST is not set in .env, so Cortex can't start a GPU job.")
     if (await status(ctx))["available"] or STATE["phase"] == "starting":
         return await status(ctx)
+    STATE.update(phase="starting", error=None)
+    _step("request")
     d = s.futurama_policy_dir
     rc, out = await _sh("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", s.futurama_ssh_host,
-                        f"cd {d} && rm -f live/server.json && sbatch --parsable -J cortex-serve "
-                        f"serve_policy.sbatch $HOME/{d.removeprefix('~/')}")
-    job = next((ln.strip() for ln in out.splitlines() if ln.strip().isdigit()), None)
+                        f"cd {d} && j=$(squeue -u $USER -n cortex-serve -h -o %i | head -1); "
+                        f"if [ -n \"$j\" ]; then echo ATTACH $j; else rm -f live/server.json && "
+                        f"sbatch --parsable -J cortex-serve --gres={s.live_policy_gres} "
+                        f"serve_policy.sbatch $HOME/{d.removeprefix('~/')}; fi")
+    attach = next((ln.split()[1] for ln in out.splitlines() if ln.startswith("ATTACH ")), None)
+    job = attach or next((ln.strip() for ln in out.splitlines() if ln.strip().isdigit()), None)
     if rc != 0 or not job:
-        raise RuntimeError(f"sbatch failed: {out[-300:]}. Is the GT VPN on?")
-    STATE.update(job=job, phase="starting", error=None)
+        STATE.update(phase="stopped", error=f"Couldn't submit the GPU job: {out.strip()[-200:]}. Is the GT VPN on?")
+        raise RuntimeError(STATE["error"])
+    STATE["job"] = job
+    _step("queued", f"Found GPU job {job} already allocated; connecting" if attach
+          else f"Submitted Slurm job {job}; waiting for a free GPU")
     asyncio.get_running_loop().create_task(_connect_when_ready(ctx, job))
     return await status(ctx)
 
 
-async def _connect_when_ready(ctx: Ctx, job: str) -> None:
+async def _poll(ctx: Ctx, job: str) -> tuple[str, str, dict[str, Any] | None]:
+    """(Slurm state and reason, latest progress line, server.json) for the serve job."""
     s, d = ctx.settings, ctx.settings.futurama_policy_dir
-    for _ in range(80):  # up to ~20 min: queue + install + dataset prep
-        await asyncio.sleep(15)
-        rc, out = await _sh("ssh", "-o", "BatchMode=yes", s.futurama_ssh_host,
-                            f"grep -c 'READY port' {d}/slurm-cortex-serve-{job}.out 2>/dev/null; "
-                            f"cat {d}/live/server.json 2>/dev/null; squeue -j {job} -h -o %T")
-        lines = [ln for ln in out.splitlines() if ln.strip() and not ln.lstrip().startswith("*")]
-        if not any(ln.strip() in ("RUNNING", "PENDING", "CONFIGURING") for ln in lines):
-            STATE.update(phase="stopped", error="The GPU job ended before the server was ready.")
+    _, out = await _sh("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", s.futurama_ssh_host,
+                       f"squeue -j {job} -h -o '%T %R'; echo @@; "
+                       f"grep -E '^\\[live\\]|READY port' {d}/slurm-cortex-serve-{job}.out 2>/dev/null | tail -1; "
+                       f"echo @@; cat {d}/live/server.json 2>/dev/null")
+    text = "\n".join(ln for ln in out.splitlines() if not ln.lstrip().startswith("*"))
+    state, progress, info = ([p.strip() for p in text.split("@@")] + ["", "", ""])[:3]
+    try:
+        server = json.loads(info) if info else None
+    except ValueError:
+        server = None
+    return state, progress, server
+
+
+def narrate(job: str, state: str, progress: str) -> tuple[str, str]:
+    """The step and the line the studio shows for this poll."""
+    if state.startswith(("PENDING", "CONFIGURING")):
+        why = state.split(" ", 1)[1].strip("()") if " " in state else ""
+        return "queued", f"Waiting for a free GPU (Slurm job {job} queued{': ' + why if why else ''})"
+    if "READY port" in progress:
+        return "connect", STEPS["connect"]
+    if progress.startswith("[live] "):
+        line = progress.removeprefix("[live] ")
+        step = "install" if line.startswith("Installing") else "prepare" if line.startswith("Preparing") else "load"
+        return step, line
+    return "install", f"GPU allocated (job {job}); starting up"
+
+
+async def _connect_when_ready(ctx: Ctx, job: str) -> None:
+    for _ in range(120):  # up to ~20 min: queue + install + dataset prep
+        try:
+            state, progress, server = await _poll(ctx, job)
+        except (TimeoutError, OSError) as e:
+            log.warning("live policy poll failed: %s", e)
+            await asyncio.sleep(10)
+            continue
+        if not state:
+            STATE.update(phase="stopped", error=f"GPU job {job} ended before the server was ready.")
             return
-        info = next((json.loads(ln) for ln in lines if ln.startswith("{")), None)
-        if info and any(ln.strip() == "1" for ln in lines):
-            await open_tunnel(ctx, info["node"], int(info["port"]))
+        _step(*narrate(job, state, progress))
+        if STATE["step"] == "connect" and server and str(server.get("job")) == str(job):
+            await open_tunnel(ctx, server["node"], int(server["port"]))
             return
+        await asyncio.sleep(10)
     STATE.update(phase="stopped", error="The GPU server didn't become ready within 20 minutes.")
 
 
@@ -118,5 +172,5 @@ async def stop(ctx: Ctx) -> dict[str, Any]:
     close_tunnel()
     if STATE["job"] and ctx.settings.futurama_ssh_host:
         await _sh("ssh", "-o", "BatchMode=yes", ctx.settings.futurama_ssh_host, f"scancel {STATE['job']}")
-    STATE.update(job=None, phase="stopped", error=None)
+    STATE.update(job=None, phase="stopped", step=None, detail=None, error=None)
     return await status(ctx)
