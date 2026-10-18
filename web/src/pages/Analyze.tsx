@@ -50,20 +50,18 @@ export function AnalyzePage() {
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="kn-display text-[36px] leading-tight">Analyze</h1>
-          <p className="mt-0.5 text-sm text-ink-3">
-            Measured quality checks plus VLM diagnoses. Diagnoses are hypotheses until you confirm them.
-          </p>
+          <p className="mt-0.5 text-sm text-ink-3">Measured checks · VLM diagnoses are unverified hypotheses until confirmed.</p>
         </div>
       </div>
 
       <RunAnalysis pid={pid} analysis={analysis.data ?? undefined} />
 
       <div className="grid grid-cols-1 gap-4 min-[1400px]:grid-cols-[minmax(0,1fr)_360px]">
-        <Panel title="Episodes" meta={episodes.data ? `${episodes.data.length} total` : undefined} bodyClassName="p-0">
+        <Panel title="Episodes" meta={episodes.data ? `${episodes.data.length}` : undefined} bodyClassName="p-0">
           <QueryState q={episodes} skeleton={<div className="p-3.5"><SkeletonRows rows={6} /></div>}>
             {(eps) =>
               eps.length === 0 ? (
-                <EmptyState title="No episodes to analyze">Record demos in Collect first.</EmptyState>
+                <EmptyState title="No episodes">Record demos in Collect first.</EmptyState>
               ) : (
                 <EpisodeTable episodes={eps} analysis={analysis.data ?? undefined} selected={selected} onSelect={select} />
               )
@@ -110,7 +108,7 @@ function RunAnalysis({ pid, analysis }: { pid: string; analysis?: Analysis }) {
         {analysis ? (
           <>
             <div className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="font-medium">Latest analysis</span>
+              <span className="font-medium">Latest</span>
               <StatusBadge status={analysis.status} />
               <span className="text-xs text-ink-3">
                 {analysis.episode_count} episodes · {ago(analysis.created_at)}
@@ -125,7 +123,7 @@ function RunAnalysis({ pid, analysis }: { pid: string; analysis?: Analysis }) {
             {analysis.summary && <p className="mt-1 text-xs text-ink-2">{analysis.summary}</p>}
           </>
         ) : (
-          <p className="text-sm text-ink-3">No analysis yet. Run one to score episode quality and diagnose failures.</p>
+          <p className="text-sm text-ink-3">No analysis yet.</p>
         )}
         {job && isJobActive(job) && (
           <div className="mt-2 flex items-center gap-2">
@@ -136,7 +134,7 @@ function RunAnalysis({ pid, analysis }: { pid: string; analysis?: Analysis }) {
         {job?.status === "failed" && <InlineError prefix="Analysis failed: " error={job.error ?? job.message} detail={job.error_detail} className="mt-1" />}
       </div>
       <div className="flex items-center gap-4">
-        <Toggle checked={useVlm} onChange={setUseVlm} label="VLM diagnosis" hint="Sends frames to the vision model" />
+        <Toggle checked={useVlm} onChange={setUseVlm} label="VLM diagnosis" hint="sends frames to the VLM" />
         {useVlm && (
           <label className="flex items-center gap-1.5 text-xs text-ink-3">
             max
@@ -294,12 +292,12 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
           ) : thumb ? (
             <div className="relative h-full">
               <img src={thumb} alt={`Episode ${e.index} thumbnail`} className="h-full w-full object-contain" />
-              <span className="absolute bottom-2 left-2 rounded-sm bg-black/60 px-1.5 py-0.5 text-2xs text-white/80">thumbnail · no video</span>
+              <span className="absolute bottom-2 left-2 rounded-sm bg-black/60 px-1.5 py-0.5 text-2xs text-white/80">no video</span>
             </div>
           ) : (
             <div className="flex h-full flex-col items-center justify-center gap-1.5 text-ink-4">
               <VideoOff className="h-5 w-5" />
-              <span className="text-xs">{media.error ? "Media unavailable" : "No media for this episode"}</span>
+              <span className="text-xs">{media.error ? "Media unavailable" : "No media"}</span>
             </div>
           )}
         </div>
@@ -312,7 +310,7 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
             <ImportedSource e={e} className="w-full" />
             {e.provenance?.attempt_id && (
               <Button size="sm" variant="ghost" className="h-5 px-1.5 text-2xs" onClick={() => setTrace(String(e.provenance.attempt_id))}>
-                Action trace
+                Trace
               </Button>
             )}
           </div>
@@ -320,7 +318,7 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
             <div>
               <SectionLabel className="mb-1.5">Quality checks · score {q.score.toFixed(2)}</SectionLabel>
               {q.flags.length === 0 ? (
-                <p className="text-xs text-ink-3">No flags raised.</p>
+                <p className="text-xs text-ink-3">No flags.</p>
               ) : (
                 <ul className="space-y-1.5">
                   {q.flags.map((f) => (
@@ -346,7 +344,7 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
               )}
               {Object.keys(q.metrics).length > 0 && (
                 <details className="mt-2">
-                  <summary className="cursor-pointer text-2xs text-ink-3 hover:text-ink-2">All metrics</summary>
+                  <summary className="cursor-pointer text-2xs text-ink-3 hover:text-ink-2">Metrics</summary>
                   <dl className="mt-1.5 grid grid-cols-[auto_1fr] gap-x-3 gap-y-0.5 font-mono text-2xs">
                     {Object.entries(q.metrics).map(([k, v]) => (
                       <div key={k} className="contents">
@@ -359,7 +357,7 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
               )}
             </div>
           ) : (
-            <p className="text-xs text-ink-3">Not scored yet — run analysis.</p>
+            <p className="text-xs text-ink-3">Not scored. Run analysis.</p>
           )}
         </div>
       </Panel>
@@ -386,7 +384,7 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
   if (!diag)
     return (
       <Panel title="VLM diagnosis">
-        <p className="text-xs text-ink-3">No diagnosis for this episode. Run analysis with VLM enabled.</p>
+        <p className="text-xs text-ink-3">No diagnosis. Run analysis with VLM on.</p>
       </Panel>
     );
 
@@ -397,7 +395,7 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
       actions={diag.status === "hypothesis" ? <HypothesisBadge /> : <StatusBadge status={diag.status} />}
     >
       {diag.error && <InlineError prefix="Diagnosis failed: " error={diag.error} fallback="the vision model returned an error." className="mb-2" />}
-      {diag.hypotheses.length === 0 && !diag.error && <p className="text-xs text-ink-3">The model raised no hypotheses.</p>}
+      {diag.hypotheses.length === 0 && !diag.error && <p className="text-xs text-ink-3">No hypotheses.</p>}
       <ul className="space-y-2">
         {diag.hypotheses.map((h, i) => (
           <li key={i} className={cn("rounded p-2.5", diag.status === "human_confirmed" && i === 0 ? "prov-measured" : "prov-hypothesis")}>
@@ -414,7 +412,7 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
           </li>
         ))}
       </ul>
-      <p className="mt-2 text-2xs text-ink-4">* self-reported by the model, not a verified probability.</p>
+      <p className="mt-2 text-2xs text-ink-4">* self-reported, not calibrated</p>
 
       <div className="mt-3 space-y-2 border-t border-line-soft pt-3">
         <SectionLabel className="flex items-center gap-1.5">
@@ -431,7 +429,7 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
         </div>
         {diag.human_label && diag.status !== "hypothesis" && (
           <p className="text-2xs text-ink-3">
-            Labelled <span className="font-mono text-ink-2">{diag.human_label}</span> by a human.
+            Human label: <span className="font-mono text-ink-2">{diag.human_label}</span>
           </p>
         )}
         {m.error && <InlineError error={m.error} />}
@@ -444,11 +442,11 @@ function DiagnosisPanel({ pid, analysisId, diag }: { pid: string; analysisId?: s
 function FailureClusters({ pid, onSelectEpisode }: { pid: string; onSelectEpisode: (id: string) => void }) {
   const q = useFailureClusters(pid);
   return (
-    <Panel title="Failure clusters" meta="grouped by category across episodes">
+    <Panel title="Failure clusters" meta="by category">
       <QueryState q={q} skeleton={<SkeletonRows rows={3} />}>
         {(clusters) =>
           clusters.length === 0 ? (
-            <EmptyState title="No failure clusters">Clusters appear after an analysis finds repeated failure patterns.</EmptyState>
+            <EmptyState title="No failure clusters">Appear when analysis finds repeated failures.</EmptyState>
           ) : (
             <div className="grid grid-cols-1 gap-2.5 lg:grid-cols-2 2xl:grid-cols-3">
               {[...clusters]
