@@ -159,8 +159,8 @@ function Pinned() {
               </div>
             ) : (
               <p className="kn-sans text-[15px] leading-[1.6] text-ink-3">
-                Each layer is one step an agent runs through Cortex, from describing the arm to handing over a policy. Keep
-                scrolling to take the loop apart.
+                Each layer is one step your agent runs through Cortex, from describing any environment to deploying the
+                policy on the arm. Keep scrolling to take the loop apart.
               </p>
             )}
           </div>
@@ -230,7 +230,7 @@ function MobileStack() {
     <div className="px-6 py-20 sm:px-10">
       <Heading />
       <p className="mt-5 max-w-[30rem] kn-sans text-[15px] leading-[1.6] text-ink-2">
-        Each layer is one step an agent runs through Cortex, from describing the arm to handing over a policy.
+        Each layer is one step your agent runs through Cortex, from describing any environment to deploying the policy on the arm.
       </p>
       <ol className="mt-10">
         {STEPS.map((s, i) => (

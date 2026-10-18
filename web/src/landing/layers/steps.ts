@@ -19,7 +19,7 @@ export const STEPS: LayerStep[] = [
     glyph: "card",
     readout: "MCP · UPDATE_INTAKE",
     tag: "Agent · MCP",
-    body: "The agent tells Cortex its arm, cameras, objects, zones and task over MCP. Typed questions come back for whatever is still open.",
+    body: "Any agent connects over MCP and describes the arm, cameras, objects, zones and layout: your environment, not a fixed demo scene. Typed questions come back for whatever is still open.",
   },
   {
     n: "02",
@@ -27,7 +27,7 @@ export const STEPS: LayerStep[] = [
     glyph: "grid",
     readout: "JAW · TORQUE · REACH MEASURED",
     tag: "Sim",
-    body: "A MuJoCo scene is built from that description. Feasibility is measured from the model: jaw opening, holding torque, reach.",
+    body: "Cortex builds that exact layout as a MuJoCo scene and measures feasibility from the model: jaw opening, holding torque, reach.",
   },
   {
     n: "03",
@@ -59,14 +59,14 @@ export const STEPS: LayerStep[] = [
     glyph: "branch",
     readout: "WEAKEST CONDITION → MORE DEMOS",
     tag: "Sim",
-    body: "Cortex finds the weakest condition, then collects targeted demos or RL-distilled demos for it. The loop repeats.",
+    body: "Cortex finds the weakest measured condition and collects targeted demos for it; RL sandboxes are next. The loop repeats.",
   },
   {
     n: "07",
     label: "Deploy",
     glyph: "chip",
-    readout: "OPERATOR + E-STOP ON REAL ARM",
+    readout: "PHYSICAL ARM · OPERATOR + E-STOP",
     tag: "Real · supervised",
-    body: "You get the policy, a model card and the run command. A real arm runs it only with an operator present and an e‑stop in reach.",
+    body: "The policy moves to the physical arm, where it can keep training on real demonstrations and then run the task itself. Always with an operator present and an e‑stop in reach.",
   },
 ];

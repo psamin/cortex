@@ -22,7 +22,7 @@ export function FinalCta() {
           <span>Start</span>
         </div>
         <h2 id="start-title" className="kn-display mt-6 max-w-[48rem] text-[clamp(2.4rem,4.6vw,4.6rem)] text-ink">
-          Teach your arm a task.
+          Let your agent train your robot.
           <br />
           <span className="kn-second">Start in simulation.</span>
         </h2>
@@ -45,7 +45,7 @@ export function FinalCta() {
           </a>
         </div>
         <p className="mt-10 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-          MVP · the whole loop runs in MuJoCo · the real-arm path is supervised
+          MVP · the loop runs in MuJoCo today · training and deploying on the physical arm is supervised
         </p>
       </div>
     </section>
@@ -61,7 +61,7 @@ export function SiteFooter() {
           <BrandMark size={18} />
           <span className="kn-sans text-[14px] font-medium">{BRAND.name}</span>
           <span className="ml-3 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
-            MCP server for robot learning
+            MCP server for agent-trained robots
           </span>
         </div>
         <nav aria-label="Footer" className="flex flex-wrap gap-x-7 gap-y-3 kn-sans text-[13px] text-ink-2">
