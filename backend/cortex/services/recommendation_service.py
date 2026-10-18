@@ -34,8 +34,8 @@ async def recommend(ctx: Ctx, project: Project, budget: int | None = None, actor
     cells = cells_from_plan(project.plan.cells)
     for ep in eps:
         c = cells.get(ep.condition.key)
-        if c is None or ep.status != EpisodeStatus.accepted:
-            continue
+        if c is None or ep.status != EpisodeStatus.accepted or ep.source == "imported":
+            continue  # imported real-world demos do not cover simulation conditions
         w = ep.quality.score if ep.quality else 1.0
         c.accepted += 1
         c.effective += 1.0 if w >= AUTO_ACCEPT_MIN_SCORE else w

@@ -284,6 +284,7 @@ class DatasetVersion(BaseModel):
     split_seed: int = 0
     lerobot_root: str | None = None  # local LeRobotDataset v3 directory
     storage_prefix: str | None = None
+    imported_from: str | None = None  # e.g. "hf:lerobot/svla_so101_pickplace" (dataset used as-is for training)
     num_frames: int = 0
     created_at: datetime = Field(default_factory=now)
 

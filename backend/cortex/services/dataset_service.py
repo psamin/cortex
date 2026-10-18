@@ -16,6 +16,7 @@ from collections import defaultdict
 
 from ..context import Ctx
 from ..models import (
+    EpisodeSource,
     CreateDatasetVersionRequest,
     DatasetEpisodeLink,
     DatasetVersion,
@@ -53,6 +54,8 @@ async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRe
         eps = [e for e in eps if e.id in wanted]
     if req.sources:
         eps = [e for e in eps if e.source in req.sources]
+    else:  # imported real-world demos never mix into simulation datasets unless asked for explicitly
+        eps = [e for e in eps if e.source != EpisodeSource.imported]
     if not eps:
         raise ValueError("no accepted episodes to snapshot")
     versions = await ctx.repo.list("dataset_versions", DatasetVersion, project_id=project.id)

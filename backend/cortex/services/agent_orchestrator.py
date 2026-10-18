@@ -614,6 +614,23 @@ async def t_robot_finish(ctx, a, actor):
             "ref_ids": [x for x in (out["attempt_id"], out["episode_id"]) if x], **out}
 
 
+class ImportArgs(BaseModel):
+    project_id: str
+    repo_id: str = Field(description="Hugging Face dataset repo id, e.g. 'lerobot/svla_so101_pickplace' or the "
+                                     "user's own 'user/my_so101_demos'")
+    max_episodes: int = Field(10, ge=1, le=50)
+
+
+async def t_import(ctx, a, actor):
+    from . import import_service
+
+    job = await import_service.start_import(ctx, await get_project(ctx, a.project_id), {"hub": a.repo_id},
+                                            a.max_episodes, actor)
+    return {"summary": f"Importing up to {a.max_episodes} episodes from {a.repo_id} (job {job.id}). They are kept "
+                       "separate from simulation demos and can be trained on directly.",
+            "ref_ids": [job.id], "job_id": job.id}
+
+
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("create_project", "Create a robot-learning project from a natural-language task; returns task spec, "
          "success criteria and an initial demonstration plan.", Args.CreateProject, t_create_project),
@@ -656,6 +673,8 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "training (training itself needs approval). Returns job_id.", AgentArgs.TrainFromAgent, t_train_from_agent),
     Tool("evaluate_learned_policy", "Evaluate a trained checkpoint (never the oracle) in the three parallel MuJoCo "
          "conditions.", AgentArgs.EvalLearned, t_eval_learned),
+    Tool("import_demonstrations", "Import existing human/robot demonstrations from a LeRobot dataset on the Hugging "
+         "Face Hub (the user's own SO-101 recordings or public ones). Returns job_id.", ImportArgs, t_import),
     Tool("robot_start_episode", "Start a simulated SO-101 episode you will control yourself (fresh seed; optional cube "
          "region/lighting). Returns session_id.", RobotArgs.Start, t_robot_start, agent_callable=False),
     Tool("robot_act", "Run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, "
