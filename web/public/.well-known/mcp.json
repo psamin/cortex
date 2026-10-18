@@ -1191,7 +1191,7 @@
       "mcpTools": [
         "cortex.start_intake"
       ],
-      "description": "Start describing a robot-learning task: creates a draft project and returns typed questions (each with a ready-to-send patch) about the arm, cameras, objects, place zones, environment and task.",
+      "description": "Start describing a robot-learning task: creates a draft project (with project_id: starts that project's intake over) and returns typed questions (each with a ready-to-send patch) about the arm, cameras, objects, place zones, environment and task.",
       "inputSchema": {
         "$defs": {
           "Mode": {
@@ -1212,6 +1212,18 @@
             "$ref": "#/$defs/Mode",
             "default": "sim",
             "description": "'sim' (the MVP runs everything in physics sim) or 'real'"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "Start this existing project's intake over from the prompt instead of creating a new project"
           }
         },
         "type": "object"

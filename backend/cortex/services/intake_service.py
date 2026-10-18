@@ -88,6 +88,19 @@ async def start_intake(ctx: Ctx, prompt: str, mode: str, actor: str) -> tuple[Pr
     return p, status(spec).model_dump(mode="json")
 
 
+async def seed_intake(ctx: Ctx, p: Project, prompt: str, mode: str, actor: str) -> dict[str, Any]:
+    """Start the intake over from a prompt on an existing project (the studio's), instead of creating one."""
+    async with project_lock(p.id):
+        p = await _reload(ctx, p)
+        p.intake = start(prompt, mode)
+        await ctx.repo.save("projects", p, status="active")
+    await ctx.audit(actor, "start_intake", p.id, {"prompt": prompt, "mode": mode}, "ok",
+                    f"{len(p.intake.objects)} objects seeded from the prompt on this project")
+    out = status(p.intake).model_dump(mode="json")
+    out["scene_built"], out["scene_stale"] = p.scene is not None, scene_stale(p)
+    return out
+
+
 async def update_intake(ctx: Ctx, p: Project, patch: dict[str, Any], actor: str) -> dict[str, Any]:
     async with project_lock(p.id):
         p = await _reload(ctx, p)
@@ -123,6 +136,7 @@ async def build_simulation(ctx: Ctx, p: Project, actor: str) -> dict[str, Any]:
         report = await _on_gl(_feasibility, spec, info)
         # Patches wait on the lock, so the intake saved here is the one the scene was built from.
         p.scene = {**info.to_dict(ctx.data_dir), "feasibility": report, "intake_digest": intake_digest(spec)}
+        p.spec.goal = instruction_for(p)  # the studio, the agents and datasets name the scene's task, not the cube's
         await ctx.repo.save("projects", p, status="active")
     preview = await capture_frame(ctx, p, "top")
     await ctx.audit(actor, "build_simulation", p.id, {}, "ok", f"scene {info.digest}: {report['summary']}")
