@@ -9,6 +9,10 @@ export const useHealth = () =>
 
 export const useProjects = () => useQuery({ queryKey: ["projects"], queryFn: api.listProjects });
 
+/** Home: projects with history only (["projects", …] so project events refresh it too). */
+export const useProjectsWithHistory = () =>
+  useQuery({ queryKey: ["projects", "history"], queryFn: api.listProjectsWithHistory });
+
 export const useProjectState = (pid: string) =>
   useQuery({ queryKey: ["state", pid], queryFn: () => api.projectState(pid) });
 
