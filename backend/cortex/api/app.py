@@ -4,6 +4,7 @@ POST /api/tools/{name} for the MCP server (same domain services)."""
 from __future__ import annotations
 
 import asyncio
+import hmac
 import io
 import json
 import logging
@@ -100,7 +101,8 @@ async def guard(request: Request, call_next):
     is_local = request.client is not None and request.client.host in LOCAL and not remote
     if not is_local and path not in ("/api/health",):
         key = settings().cortex_mcp_key
-        ok = path.startswith("/api/tools") and key and request.headers.get("authorization") == f"Bearer {key}"
+        presented = request.headers.get("authorization") or ""
+        ok = path.startswith("/api/tools") and bool(key) and hmac.compare_digest(presented, f"Bearer {key}")
         if not ok:
             return JSONResponse({"detail": "Remote access is limited to /api/tools with the MCP key"}, 403)
     return await call_next(request)

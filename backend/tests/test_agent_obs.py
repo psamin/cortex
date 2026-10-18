@@ -2,6 +2,7 @@
 
 import asyncio
 import base64
+import json
 
 import httpx
 import pytest
@@ -147,6 +148,51 @@ def test_idle_sessions_emit_session_idle(client):
     assert [e for e, _ in drain(q)] == ["session_idle"]
     (s,) = client.get("/api/agents/sessions").json()
     assert s["status"] == "idle" and not s["live"]
+
+
+def test_secrets_are_redacted_in_the_audit_and_on_the_bus(client, monkeypatch):
+    from cortex.services import agent_orchestrator as orch
+
+    async def leak(ctx, a, actor):
+        return {"summary": "ok", "view_approval_nonce": "nonce-secret",
+                "nested": {"approval_token": "nested-secret"}}
+
+    monkeypatch.setitem(orch.TOOLS, "t_leak", orch.Tool("t_leak", "", orch.NoArgs, leak))
+    q = _ctx().bus.subscribe(agent_obs.channel("local"))
+    r = client.post("/api/tools/t_leak", json={"approval_token": "op-secret", "note": "keep"}, headers=agent())
+    assert r.status_code == 200, r.text
+    assert r.json()["view_approval_nonce"] == "nonce-secret"  # the caller still receives it
+    (s,) = client.get("/api/agents/sessions").json()
+    (call,) = client.get(f"/api/agents/sessions/{s['id']}/calls").json()
+    assert call["args"] == {"approval_token": "[redacted]", "note": "keep"}
+    assert "nonce-secret" not in call["result_preview"] and "nested-secret" not in call["result_preview"]
+    assert "[redacted]" in call["result_preview"]
+    for _, payload in drain(q):
+        blob = json.dumps(payload, default=str)
+        assert "op-secret" not in blob and "nonce-secret" not in blob and "nested-secret" not in blob
+
+    ctx = _ctx()
+    asyncio.run(ctx.audit("mcp", "launch_training_job", None, {"approval_token": "sek", "id": "tj"}, "ok", "x"))
+    rows = asyncio.run(ctx.store.list("tool_audit_logs"))
+    assert rows[-1]["data"]["args"] == {"approval_token": "[redacted]", "id": "tj"}
+
+
+def test_remote_mcp_key_comparison_rejects_a_mismatch(client, monkeypatch):
+    from cortex.config import settings
+
+    monkeypatch.setenv("CORTEX_MCP_KEY", "tunnel-secret")
+    settings.cache_clear()
+    try:
+        remote = {"X-Forwarded-For": "8.8.8.8"}
+        assert client.get("/api/health", headers=remote).status_code == 200
+        wrong = client.post("/api/tools/get_session_link", json={},
+                            headers={**remote, "Authorization": "Bearer wrong"})
+        assert wrong.status_code == 403
+        ok = client.post("/api/tools/get_session_link", json={},
+                         headers={**remote, "Authorization": "Bearer tunnel-secret"})
+        assert ok.status_code == 200, ok.text
+    finally:
+        settings.cache_clear()
 
 
 def test_me_reports_local_mode(client):

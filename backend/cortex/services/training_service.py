@@ -12,6 +12,7 @@ Nothing is ever marked succeeded without a checkpoint on disk.
 from __future__ import annotations
 
 import asyncio
+import hmac
 import logging
 import re
 from collections.abc import Awaitable
@@ -127,7 +128,7 @@ async def approve(ctx: Ctx, tj_id: str, approver: str, actor: str, token: str | 
     # human_verified = a human click in an MCP App view, proven by a single-use nonce (mcp_views).
     if actor not in ("gui", "autopilot") and not human_verified:
         secret = ctx.settings.cortex_approval_secret
-        if not secret or token != secret:
+        if not secret or not token or not hmac.compare_digest(token, secret):
             await ctx.audit(actor, "approve_training_job", tj.project_id, {"id": tj_id}, "denied",
                             "agent approval refused: approve in the Cortex studio")
             raise ApprovalRequired("Training must be approved by a human in the Cortex studio "

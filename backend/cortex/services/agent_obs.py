@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from ..context import CURRENT_CALL, Ctx
+from ..context import CURRENT_CALL, Ctx, redact_secrets
 from ..errors import NotFound
 from ..models import new_id, now
 
@@ -217,7 +217,7 @@ async def observe(ctx: Ctx, caller: Caller | None, tool: str, raw_args: dict[str
     pid = raw_args.get("project_id") if isinstance(raw_args.get("project_id"), str) else None
     call: dict[str, Any] = {"id": new_id("aud"), "tool": tool, "open": True,
                             "session_id": caller.session_id if caller else None}
-    base = {"id": call["id"], "actor": actor, "tool": tool, "args": raw_args, "project_id": pid,
+    base = {"id": call["id"], "actor": actor, "tool": tool, "args": redact_secrets(raw_args), "project_id": pid,
             "session_id": call["session_id"], "client": caller.client if caller else None,
             "owner": caller.owner if caller else None, "started_at": now().isoformat(),
             "created_at": now().isoformat()}
@@ -260,8 +260,8 @@ async def _finish(ctx: Ctx, caller: Caller | None, base: dict[str, Any], call: d
                 d["images"] = [key]
             except (ValueError, OSError) as e:  # a bad image must not fail the call it rode on
                 log.warning("could not store image from %s: %s", base["tool"], e)
-        d["result_preview"] = json.dumps({k: v for k, v in result.items() if k != "image_b64"},
-                                         default=str)[:PREVIEW_MAX]
+        preview = redact_secrets({k: v for k, v in result.items() if k != "image_b64"})
+        d["result_preview"] = json.dumps(preview, default=str)[:PREVIEW_MAX]
         d["needs_approval"] = bool(result.get("requires_approval") or result.get("requires_approval_for_training"))
     await _write(ctx, caller, d, status, "tool_end")
     if status == "approval_required" or d.get("needs_approval"):
