@@ -24,7 +24,17 @@ function fromHistory(rows: AgentHistoryItem[]): ChatItem[] {
   const out: ChatItem[] = [];
   let open = false;
   const turn = (step?: StepInfo) => {
-    if (!open || step) out.push({ id: id(), kind: "turn", step });
+    if (!open) out.push({ id: id(), kind: "turn", step });
+    else if (step) {
+      // the turn opened with a tool line before its step arrived: label that turn instead of starting another
+      for (let i = out.length - 1; i >= 0; i--) {
+        const x = out[i];
+        if (x.kind === "turn") {
+          out[i] = { ...x, step };
+          break;
+        }
+      }
+    }
     open = true;
   };
   for (const h of rows) {

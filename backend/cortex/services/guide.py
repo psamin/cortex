@@ -243,7 +243,7 @@ async def respond(ctx: Ctx, pid: str, message: str, *, applied: bool = False,
         yield step_event("intake")
         n = sum(1 for x in status(p.intake).questions if x.required)  # type: ignore[arg-type]
         lead = "Let's describe the task so Cortex can build it in simulation. " if kickoff else ""
-        yield text(f"{lead}{n} question{'s' if n != 1 else ''} left. {q.prompt}")
+        yield text(f"{lead}{n} question{'s' if n != 1 else ''} left.")
         yield card(question_card(p, q))
         return
 

@@ -127,8 +127,8 @@ function ReachDrawing() {
     ["J05 / Wrist roll", "0.0°"],
     ["J06 / Gripper", "30 / 100"],
   ];
-  // table frame: x away from the base (up on the drawing), y to the arm's left; 1 m = 600 px
-  const s = 600;
+  // table frame: x away from the base (up on the drawing), y to the arm's left; 1 m = 640 px
+  const s = 640;
   const cx = 190;
   const cy = 300;
   const rect = { x0: 0.08, x1: 0.36, y0: -0.22, y1: 0.24 };
@@ -136,7 +136,7 @@ function ReachDrawing() {
     <aside className="hidden lg:block" aria-label="SO-101 reach, top view">
       <Label rule>Fig.01 Reach · top view</Label>
       <div className="drafting mt-7 rounded-md border border-line">
-        <svg viewBox="0 0 380 330" className="h-auto w-full text-ink-3" fill="none" stroke="currentColor">
+        <svg viewBox="-92 14 564 306" className="h-auto w-full text-ink-3" fill="none" stroke="currentColor">
           {[0.42, 0.3, 0.18].map((r) => (
             <path key={r} d={`M ${cx - r * s} ${cy} A ${r * s} ${r * s} 0 0 1 ${cx + r * s} ${cy}`} strokeDasharray="2 5" opacity={r === 0.42 ? 0.9 : 0.5} />
           ))}
@@ -151,8 +151,8 @@ function ReachDrawing() {
           <line x1={cx} y1={cy} x2={cx} y2={cy - 0.42 * s} strokeDasharray="1 4" />
           <circle cx={cx} cy={cy} r="7" fill="rgb(var(--bench))" />
           <circle cx={cx} cy={cy} r="2" fill="currentColor" stroke="none" />
-          <line x1={cx + 0.24 * s} y1={cy - 0.36 * s} x2={330} y2={34} opacity=".7" />
-          <text x="236" y="28" className="fill-current font-mono" fontSize="9" letterSpacing="1.4" stroke="none">
+          <line x1={cx + 0.24 * s} y1={cy - 0.36 * s} x2={cx + 0.24 * s + 18} y2={cy - 0.36 * s - 26} opacity=".7" />
+          <text x={cx + 0.24 * s - 40} y={cy - 0.36 * s - 32} className="fill-current font-mono" fontSize="9" letterSpacing="1.4" stroke="none">
             WORKSPACE
           </text>
           <text x={cx + 6} y={cy - 0.42 * s + 12} className="fill-current font-mono" fontSize="9" letterSpacing="1.4" stroke="none">
