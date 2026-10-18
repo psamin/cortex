@@ -50,8 +50,5 @@ comments (the `Claim:` convention on #20 and the owning issue) remain the source
 | Package | Branch | Driver | Files touched |
 |---|---|---|---|
 | #52 redesign (Kinetic) | `52-landing`, then `52-*` | Claude Code, driven by @AneeshD04 | `web/src/landing/**`, `web/src/robotics/**`, small route edits in `web/src/App.tsx` and `layout/AppShell.tsx`, visual-only edits in `web/src/**` |
-| #15 studio pass (S5 part 2) and Robot page (S6) | `15-*`, `25-robot-panel` | Claude Code, driven by @psamin | `web/src/pages/**`, `web/src/chat/**`, `web/src/layout/ProjectLayout.tsx`, `[new] web/src/pages/Robot.tsx`, one route in `web/src/App.tsx`; not `AppShell.tsx`, `index.css`, Tailwind, `main.tsx`, `index.html` or package files |
-| #25 policy runs on the real arm | `25-policy-runs` | Claude Code, driven by @psamin | `backend/cortex/hardware/arm_worker.py`, `backend/cortex/services/hardware_service.py`, `backend/cortex/api/app.py`, tests |
-| #26 Setup panel (infra choices UI) | `26-setup-panel` | Claude Code, driven by @psamin | `[new] web/src/pages/Setup.tsx` (or a chat-header sheet), `web/src/api/*` |
 | P5/P6: sessions and collection on intake scenes | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py` and `backend/cortex/services/robot_session_service.py`, coordinated on #16 |
 | #81 large checkpoint uploads via the InsForge S3 gateway | `81-insforge-s3-uploads` | Claude Code, driven by @Suhas0723 | `[new] backend/cortex/store/s3.py`, `backend/cortex/store/insforge.py`, `backend/cortex/context.py`, `backend/cortex/config.py`, `register_checkpoint` in `backend/cortex/services/training_service.py`, `.env.example`, `docs/INTEGRATIONS.md`, `[new] backend/tests/test_insforge_s3.py` |
