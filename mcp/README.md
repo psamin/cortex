@@ -73,7 +73,7 @@ That limits what each feature below can do.
 
 The long tools are `record_demonstrations`, `analyze_dataset`, `create_dataset_version`, `launch_simulation_evaluation`, `evaluate_learned_policy`, `create_policy_project`, `start_agent_collection`, `improve_policy`, `train_from_agent_demonstrations` and `import_demonstrations`. `build_simulation` gets heartbeat progress only.
 
-- **The client sent a `progressToken`.** The call starts the job with `wait_s: 0`, then follows it. It listens for `job` events on the backend's per-project SSE stream (`GET /api/projects/{id}/events`) and also polls `GET /api/jobs/{id}`, every 5 s, or every 2 s if the stream is down.
+- **The client sent a `progressToken`.** The call starts the job with `wait_s: 0`, then follows it. It polls the backend's `get_job` tool every 5 s, or every 2 s if the stream below is down. It also listens for `job` events on the per-project SSE stream (`GET /api/projects/{id}/events`), which wake it as soon as the job changes. Polling goes through `callTool`, so it also works through the runner relay; the SSE stream is optional.
   - Each update is sent as `notifications/progress`: a monotonic `progress` from 0 to 100 and a `message` such as `record job_x running 40%: recording demo 2/3`.
   - When the job ends, the result holds the start summary, a `Job ... succeeded after N s` line and the `result_ref`. Some tools also add a follow-up read: `get_collection_progress`, `get_failure_clusters` or `compare_experiments`. `structuredContent.followed` is `{job_id, finished, waited_s, final?}`.
   - Following stops after `CORTEX_MCP_FOLLOW_MAX_S` seconds (default 1800) or on cancel. The result then says to poll `cortex_get_job`.
@@ -141,7 +141,7 @@ Because the server is stateless, there is no per-session stage, and a plain `/mc
 
 | Feature | Verified here | Notes |
 |---|---|---|
-| Progress notifications | TS SDK client (`@modelcontextprotocol/client` 2.3.1): a 271 s recording (2026-07-28) and a 149 s evaluation (2025 era), each with a 60 s timeout reset on progress | The client must send `progressToken` **and** reset its timeout on progress. Not checked for Claude Code, Claude Desktop, Cursor or VS Code. Collection, analysis, dataset and import following share the same code path but were not run here. |
+| Progress notifications | TS SDK client (`@modelcontextprotocol/client` 2.3.1): a 271 s recording and a 66 s dataset build (2026-07-28), and a 149 s evaluation (2025 era), each with a 60 s timeout reset on progress | The client must send `progressToken` **and** reset its timeout on progress. Not checked for Claude Code, Claude Desktop, Cursor or VS Code. Collection, analysis and import following share the same code path but were not run here. |
 | Resources, templates, completions | TS SDK client, both eras; Inspector CLI (`resources/templates/list`, `resources/read`) | Claude Code (`@` mentions), Claude Desktop and VS Code read resources. Support for template completion varies and was not checked. The model card's checkpoint section was not exercised, because no checkpoint could be trained here. |
 | Resource update notifications | TS SDK client, 2026-07-28 `subscriptions/listen` | Not delivered to 2025-era clients, because serving is stateless. |
 | Intake forms (`input_required` + elicitation) | TS SDK client, 2026-07-28 with the `elicitation` capability: default answers, non-default variant, and decline | 2025-era clients get the text fallback (checked with the SDK client and the Inspector CLI). |

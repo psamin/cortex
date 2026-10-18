@@ -1,10 +1,10 @@
 import type { CallToolResult, RequestContext } from "mcp-use";
 import { z } from "zod";
-import { API_URL, backendHeaders, callTool, getJson, identityOf } from "./backend.js";
+import { API_URL, backendHeaders, callTool, identityOf } from "./backend.js";
 
 // Long-running Cortex tools (recording, analysis, dataset builds, evaluations, agent collections) start a
 // background job. When the MCP request carries a progressToken, the tool call stays open, follows the job
-// (the backend's per-project SSE stream, with get_job polling as a fallback) and sends
+// (get_job polling, woken early by the backend's per-project SSE stream when it is reachable) and sends
 // notifications/progress until it finishes, then returns the final result. Without a progressToken
 // (or with follow: false) the tool behaves exactly as before: it returns the job id after wait_s.
 
@@ -127,12 +127,11 @@ function watchProject(projectId: string, signal: AbortSignal, onJob: (j: Job) =>
   return { healthy: () => Date.now() - lastEvent < 20_000 };
 }
 
+/** Poll through the get_job tool (not GET /jobs/{id}) so it also works when callTool goes through a relay. */
 async function getJob(id: string, signal: AbortSignal): Promise<Job | undefined> {
-  try {
-    return await getJson<Job>(`/jobs/${encodeURIComponent(id)}`, signal);
-  } catch {
-    return undefined;
-  }
+  const r = await callTool("get_job", { job_id: id }, signal).catch(() => undefined);
+  const job = r && !r.isError ? ((r.structuredContent as Record<string, unknown> | undefined)?.job as Job | undefined) : undefined;
+  return job && typeof job.status === "string" ? job : undefined;
 }
 
 function describe(job: Job): string {
