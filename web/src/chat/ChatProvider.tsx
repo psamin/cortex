@@ -3,7 +3,20 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, streamAgent } from "../api/client";
 import { useChatStream } from "../api/events";
 import { splitError } from "../components/ui";
-import { applyEvent, historyToEvents, jobDoneEvent, newItemId, noticeEvent, type ChangeItem, type ChatEvent, type ChatItem, type TodoItem } from "./model";
+import {
+  applyEvent,
+  historyToEvents,
+  jobDoneEvent,
+  newItemId,
+  noticeEvent,
+  settle,
+  toolCallEvent,
+  toolResultEvent,
+  type ChangeItem,
+  type ChatEvent,
+  type ChatItem,
+  type TodoItem,
+} from "./model";
 
 interface ChatState {
   items: ChatItem[];
@@ -47,15 +60,9 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
     case "text":
       return { type: "text", delta: String(d.delta ?? "") };
     case "tool_call":
-      return { type: "tool_call", tool: String(d.tool ?? ""), args: (d.args as Record<string, unknown>) ?? {} };
+      return toolCallEvent(d);
     case "tool_result":
-      return {
-        type: "tool_result",
-        tool: String(d.tool ?? ""),
-        summary: typeof d.summary === "string" ? d.summary : "",
-        ref_ids: Array.isArray(d.ref_ids) ? (d.ref_ids as string[]) : [],
-        ok: d.ok as boolean | undefined,
-      };
+      return toolResultEvent(d);
     case "approval_required":
       return {
         type: "approval_required",
@@ -63,6 +70,7 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
         ref_id: String(d.training_job_id ?? d.ref_id ?? ""),
         summary: String(d.summary ?? ""),
         args: (d.args as Record<string, unknown>) ?? {},
+        headline: typeof d.headline === "string" ? d.headline : null,
       };
     case "done":
       return { type: "done", turns: d.turns as number, cost_usd: d.cost_usd as number, duration_ms: d.duration_ms as number, is_error: d.is_error as boolean };
@@ -244,7 +252,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
           setItems((xs) => applyEvent(xs, { type: "error", message: msg }));
         }
       } finally {
-        setItems((xs) => xs.map((it) => (it.kind === "tool" && it.status === "running" ? { ...it, status: "ok" } : it)));
+        setItems(settle); // same as the `done` event: a tool that never reported back stopped
         abort.current = null;
         busyRef.current = false;
         setBusy(false);

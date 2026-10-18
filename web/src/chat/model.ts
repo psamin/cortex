@@ -1,6 +1,12 @@
 // Pure chat model: SSE events and stored history both fold into the same item list.
 
-export type ToolStatus = "running" | "ok" | "error";
+/** "stopped": still running when its turn ended (the turn was stopped or crashed), so it never reported back. */
+export type ToolStatus = "running" | "ok" | "error" | "stopped";
+
+/** How Cortex knows a sentence it wrote: simulator telemetry, a reach check, a value it filled in, or a VLM guess. */
+export type Evidence = "measured" | "checked" | "assumed" | "hypothesis" | null;
+/** What Cortex suggests after a failure; `message` is plain user text sent as a chat message. */
+export type NextStep = { text: string; actions: { label: string; message: string }[] } | null;
 
 export type ChatItem =
   | { kind: "user"; id: number; text: string }
@@ -15,6 +21,13 @@ export type ChatItem =
       summary: string;
       refIds: string[];
       args: Record<string, unknown>;
+      /** "cortex": Cortex ran it itself (the scene from the first prompt); absent: the agent did */
+      by?: "cortex" | null;
+      /** one plain sentence written by Cortex; null for reads and older rows */
+      headline?: string | null;
+      evidence?: Evidence;
+      /** the values Cortex filled in for the user (scene from the first prompt) */
+      assumed?: string | null;
     }
   | {
       kind: "approval";
@@ -23,6 +36,7 @@ export type ChatItem =
       refId: string;
       summary: string;
       args: Record<string, unknown>;
+      headline?: string | null;
     }
   | { kind: "meta"; id: number; turns?: number | null; durationMs?: number | null; costUsd?: number | null; isError?: boolean | null }
   | { kind: "error"; id: number; text: string }
@@ -34,9 +48,22 @@ export type ChatItem =
   | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; errorDetail?: string; jobId?: string }
   /** Written by Cortex: in autonomous mode it acted under your standing approval ("auto") or a gate needs you;
    *  "engine": which agent answers and what is missing ("Claude Code not found: using the built-in planner"). */
-  | { kind: "notice"; id: number; tone: "auto" | "needs_you" | "engine"; text: string; refIds: string[] }
+  | { kind: "notice"; id: number; tone: "auto" | "needs_you" | "engine"; text: string; refIds: string[]; wake?: boolean }
   /** Written by Cortex (not the LLM) when a background job finishes. */
-  | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[]; detail?: string | null; superseded?: boolean };
+  | {
+      kind: "job_done";
+      id: number;
+      jobId: string;
+      jobKind: string;
+      status: string;
+      text: string;
+      refIds: string[];
+      detail?: string | null;
+      superseded?: boolean;
+      headline?: string | null;
+      next?: NextStep;
+      evidence?: Evidence;
+    };
 
 export interface TodoItem {
   text: string;
@@ -52,17 +79,39 @@ export interface ChangeItem {
 export type ChatEvent =
   | { type: "user"; text: string }
   | { type: "text"; delta: string }
-  | { type: "tool_call"; tool: string; args: Record<string, unknown> }
-  | { type: "tool_result"; tool: string; summary: string; ref_ids: string[]; ok?: boolean }
-  | { type: "approval_required"; kind: string; ref_id: string; summary: string; args: Record<string, unknown> }
+  | { type: "tool_call"; tool: string; args: Record<string, unknown>; by?: "cortex" | null }
+  | {
+      type: "tool_result";
+      tool: string;
+      summary: string;
+      ref_ids: string[];
+      ok?: boolean;
+      by?: "cortex" | null;
+      headline?: string | null;
+      evidence?: Evidence;
+      assumed?: string | null;
+    }
+  | { type: "approval_required"; kind: string; ref_id: string; summary: string; args: Record<string, unknown>; headline?: string | null }
   | { type: "done"; turns?: number | null; cost_usd?: number | null; duration_ms?: number | null; is_error?: boolean | null }
   /** live only: `text` is one short line on what the agent is doing ("Collecting 20 demos in sim…") */
   | { type: "status"; state: string; tool?: string; text?: string }
   | { type: "error"; message: string }
   | { type: "todos"; items: TodoItem[] }
   | { type: "changes"; items: ChangeItem[] }
-  | { type: "notice"; tone: string; text: string; ref_ids: string[] }
-  | { type: "job_done"; job_id: string; job_kind: string; status: string; text: string; ref_ids: string[]; detail?: string | null; superseded?: boolean };
+  | { type: "notice"; tone: string; text: string; ref_ids: string[]; wake?: boolean }
+  | {
+      type: "job_done";
+      job_id: string;
+      job_kind: string;
+      status: string;
+      text: string;
+      ref_ids: string[];
+      detail?: string | null;
+      superseded?: boolean;
+      headline?: string | null;
+      next?: NextStep;
+      evidence?: Evidence;
+    };
 
 // ------------------------------------------------------------------ friendly labels
 const LABELS: Record<string, string> = {
@@ -182,7 +231,7 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
       if (COLLAPSE_TOOLS.has(tool) && last?.kind === "tool" && (last.tool === tool || (POLL_TOOLS.has(tool) && POLL_TOOLS.has(last.tool)))) {
         return [...items.slice(0, -1), { ...last, tool, status: "running", count: last.count + 1, args: ev.args ?? {} }];
       }
-      return [...items, { kind: "tool", id: id(), tool, status: "running", count: 1, summary: "", refIds: [], args: ev.args ?? {} }];
+      return [...items, { kind: "tool", id: id(), tool, status: "running", count: 1, summary: "", refIds: [], args: ev.args ?? {}, by: ev.by ?? null }];
     }
     case "tool_result": {
       const tool = normalizeTool(ev.tool);
@@ -193,30 +242,25 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
         const it = items[i];
         if (it.kind === "tool" && (it.status === "running" || (COLLAPSE_TOOLS.has(tool) && i === items.length - 1)) && (it.tool === tool || (POLL_TOOLS.has(it.tool) && POLL_TOOLS.has(tool)))) {
           const next = [...items];
-          next[i] = { ...it, status, summary: clean.summary || it.summary, refIds: clean.refIds.length ? clean.refIds : it.refIds };
+          next[i] = { ...it, status, summary: clean.summary || it.summary, refIds: clean.refIds.length ? clean.refIds : it.refIds, ...resultFields(ev, it) };
           return next;
         }
       }
-      return [...items, { kind: "tool", id: id(), tool, status, count: 1, summary: clean.summary, refIds: clean.refIds, args: {} }];
+      return [...items, { kind: "tool", id: id(), tool, status, count: 1, summary: clean.summary, refIds: clean.refIds, args: {}, ...resultFields(ev) }];
     }
     case "approval_required": {
       const dup = items.some((it) => it.kind === "approval" && it.refId === ev.ref_id && it.approvalKind === ev.kind);
       if (dup) return items;
-      return [...items, { kind: "approval", id: id(), approvalKind: ev.kind, refId: ev.ref_id, summary: cleanSummary(ev.summary).summary, args: ev.args ?? {} }];
+      return [...items, { kind: "approval", id: id(), approvalKind: ev.kind, refId: ev.ref_id, summary: cleanSummary(ev.summary).summary, args: ev.args ?? {}, headline: ev.headline ?? null }];
     }
-    case "done": {
-      // a finished turn has no running tools left
-      const settled = items.map((it) =>
-        it.kind === "tool" && it.status === "running" ? { ...it, status: "ok" as const } : it.kind === "todos" && !it.done ? { ...it, done: true } : it,
-      );
-      return [...settled, { kind: "meta", id: id(), turns: ev.turns, durationMs: ev.duration_ms, costUsd: ev.cost_usd, isError: ev.is_error }];
-    }
+    case "done":
+      return [...settle(items), { kind: "meta", id: id(), turns: ev.turns, durationMs: ev.duration_ms, costUsd: ev.cost_usd, isError: ev.is_error }];
     case "error":
       return [...items, { kind: "error", id: id(), text: ev.message }];
     case "todos": {
-      // one checklist per turn, kept right after the turn's user message so it sits above the tool rows
+      // one checklist per turn (its latest items), kept right after the turn's start: your message or a wake line
       let u = items.length - 1;
-      while (u >= 0 && items[u].kind !== "user") u--;
+      while (u >= 0 && !isTurnStart(items[u])) u--;
       const at = items.findIndex((it, i) => i > u && it.kind === "todos");
       if (at >= 0) return items.map((it, i) => (i === at && it.kind === "todos" ? { ...it, items: ev.items } : it));
       const card: ChatItem = { kind: "todos", id: id(), items: ev.items, done: false, firstCount: ev.items.length };
@@ -225,7 +269,10 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
     case "changes":
       return ev.items.length ? [...items, { kind: "changes", id: id(), items: ev.items }] : items;
     case "notice":
-      return [...items, { kind: "notice", id: id(), tone: ev.tone === "needs_you" || ev.tone === "engine" ? ev.tone : "auto", text: ev.text, refIds: ev.ref_ids }];
+      return [
+        ...items,
+        { kind: "notice", id: id(), tone: ev.tone === "needs_you" || ev.tone === "engine" ? ev.tone : "auto", text: ev.text, refIds: ev.ref_ids, ...(ev.wake ? { wake: true } : {}) },
+      ];
     case "job_done":
       // the same line can arrive live (SSE) and again from history: one row per job
       if (items.some((it) => it.kind === "job_done" && it.jobId === ev.job_id)) return items;
@@ -234,11 +281,77 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
         const prior = ev.status === "succeeded"
           ? items.map((it) => (it.kind === "job_done" && it.status === "failed" && it.jobKind === ev.job_kind ? { ...it, superseded: true } : it))
           : items;
-        return [...prior, { kind: "job_done", id: id(), jobId: ev.job_id, jobKind: ev.job_kind, status: ev.status, text: ev.text, refIds: ev.ref_ids ?? [], detail: ev.detail ?? null, superseded: !!ev.superseded }];
+        return [
+          ...prior,
+          {
+            kind: "job_done",
+            id: id(),
+            jobId: ev.job_id,
+            jobKind: ev.job_kind,
+            status: ev.status,
+            text: ev.text,
+            refIds: ev.ref_ids ?? [],
+            detail: ev.detail ?? null,
+            superseded: !!ev.superseded,
+            headline: ev.headline ?? null,
+            next: ev.next ?? null,
+            evidence: ev.evidence ?? null,
+          },
+        ];
       }
     case "status":
       return items;
   }
+}
+
+/** The end of a turn (its `done`, or the stream closing): a tool still running never reported back, so it stopped. */
+export function settle(items: ChatItem[]): ChatItem[] {
+  return items.map((it) =>
+    it.kind === "tool" && it.status === "running" ? { ...it, status: "stopped" as const } : it.kind === "todos" && !it.done ? { ...it, done: true } : it,
+  );
+}
+
+/** Cortex woke the agent on its own (autonomous mode): this notice starts a turn, as your message does. */
+export const isWakeNotice = (it: ChatItem) => it.kind === "notice" && it.tone === "auto" && (it.wake === true || it.text.startsWith("Continuing on my own"));
+const isTurnStart = (it: ChatItem) => it.kind === "user" || isWakeNotice(it);
+
+/** The Cortex-written fields of a tool result; `by` falls back to the call's. */
+function resultFields(ev: Extract<ChatEvent, { type: "tool_result" }>, prev?: ToolItem) {
+  return { by: ev.by ?? prev?.by ?? null, headline: ev.headline ?? null, evidence: ev.evidence ?? null, assumed: ev.assumed ?? null };
+}
+
+const EVIDENCE = new Set(["measured", "checked", "assumed", "hypothesis"]);
+const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
+const evidenceOf = (v: unknown): Evidence => (typeof v === "string" && EVIDENCE.has(v) ? (v as Evidence) : null);
+const byOf = (v: unknown) => (v === "cortex" ? ("cortex" as const) : null);
+function nextOf(v: unknown): NextStep {
+  if (!v || typeof v !== "object") return null;
+  const n = v as { text?: unknown; actions?: unknown };
+  if (typeof n.text !== "string") return null;
+  const actions = (Array.isArray(n.actions) ? n.actions : [])
+    .filter((a): a is { label: string; message: string } => !!a && typeof a.label === "string" && typeof a.message === "string")
+    .map((a) => ({ label: a.label, message: a.message }));
+  return { text: n.text, actions };
+}
+
+/** A tool_call row or SSE payload as a chat event. */
+export function toolCallEvent(r: Record<string, unknown>): ChatEvent {
+  return { type: "tool_call", tool: String(r.tool ?? ""), args: (r.args as Record<string, unknown>) ?? {}, by: byOf(r.by) };
+}
+
+/** A tool_result row or SSE payload as a chat event. */
+export function toolResultEvent(r: Record<string, unknown>): ChatEvent {
+  return {
+    type: "tool_result",
+    tool: String(r.tool ?? ""),
+    summary: typeof r.summary === "string" ? r.summary : "",
+    ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [],
+    ok: r.ok as boolean | undefined,
+    by: byOf(r.by),
+    headline: str(r.headline),
+    evidence: evidenceOf(r.evidence),
+    assumed: str(r.assumed),
+  };
 }
 
 /** GET /agent/history rows → events (same reducer as the live stream). */
@@ -248,9 +361,8 @@ export function historyToEvents(rows: Record<string, unknown>[]): ChatEvent[] {
     const k = r.kind;
     if (k === "user") out.push({ type: "user", text: String(r.text ?? "") });
     else if (k === "assistant") out.push({ type: "text", delta: String(r.text ?? "") });
-    else if (k === "tool_call") out.push({ type: "tool_call", tool: String(r.tool ?? ""), args: (r.args as Record<string, unknown>) ?? {} });
-    else if (k === "tool_result")
-      out.push({ type: "tool_result", tool: String(r.tool ?? ""), summary: String(r.summary ?? ""), ref_ids: (r.ref_ids as string[]) ?? [], ok: r.ok as boolean | undefined });
+    else if (k === "tool_call") out.push(toolCallEvent(r));
+    else if (k === "tool_result") out.push(toolResultEvent(r));
     else if (k === "approval_required" || ((k === "training" || k === "evaluation") && "ref_id" in r))
       // card type is `card_kind`; older logs stored it in `kind` itself
       out.push({
@@ -259,6 +371,7 @@ export function historyToEvents(rows: Record<string, unknown>[]): ChatEvent[] {
         ref_id: String(r.training_job_id ?? r.ref_id ?? ""),
         summary: String(r.summary ?? ""),
         args: (r.args as Record<string, unknown>) ?? {},
+        headline: str(r.headline),
       });
     else if (k === "job_done") out.push(jobDoneEvent(r));
     else if (k === "notice") out.push(noticeEvent(r));
@@ -280,7 +393,13 @@ export const PREVIEW_PREFIXES = ["ev", "ac", "ds", "tj", "an", "rec"];
 
 /** A notice row (history, the turn's SSE, or the project stream) as a chat event. */
 export function noticeEvent(r: Record<string, unknown>): ChatEvent {
-  return { type: "notice", tone: String(r.tone ?? "auto"), text: String(r.text ?? ""), ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [] };
+  return {
+    type: "notice",
+    tone: String(r.tone ?? "auto"),
+    text: String(r.text ?? ""),
+    ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [],
+    ...(r.wake === true ? { wake: true } : {}),
+  };
 }
 
 /** A job_done payload (history row or live SSE `chat` event) as a chat event. */
@@ -294,6 +413,9 @@ export function jobDoneEvent(r: Record<string, unknown>): ChatEvent {
     ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [],
     detail: typeof r.detail === "string" ? r.detail : null,
     superseded: r.superseded === true,
+    headline: str(r.headline),
+    next: nextOf(r.next),
+    evidence: evidenceOf(r.evidence),
   };
 }
 

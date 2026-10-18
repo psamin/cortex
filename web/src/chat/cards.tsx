@@ -34,6 +34,7 @@ import { useChat } from "./ChatProvider";
 import { useViewerFocus } from "./focus";
 import { AUG_NOTE, datasetBreakdown } from "../lib/augment";
 import { prefixOf } from "./model";
+import { jobLabel } from "./timeline";
 import { GlowEdge } from "../components/ui/spotlight-card";
 
 // ------------------------------------------------------------------ shell
@@ -324,6 +325,9 @@ const trainingWhat = (t: TrainingJob) => {
   const steps = typeof t.config.steps === "number" ? `${(t.config.steps as number).toLocaleString()} steps` : null;
   return [`dataset ${t.dataset_version_id}`, steps].filter(Boolean).join(" · ");
 };
+/** "about 35 min of GPU time" under 2 h, else "about 2.5 hours of GPU time". */
+const gpuTime = (h: number) => (h < 2 ? `about ${Math.max(5, Math.round((h * 60) / 5) * 5)} min of GPU time` : `about ${h.toFixed(1)} hours of GPU time`);
+const whereTraining = (t: TrainingJob) => (t.backend === "futurama_slurm" ? "the shared GPU cluster" : t.backend === "manual" ? "this computer" : "a cloud GPU");
 const estimateLine = (t: TrainingJob) =>
   `${t.estimate.gpu} · ~${num(t.estimate.gpu_hours, 1)} GPU-h · ${t.estimate.paid ? `${usd(t.estimate.est_cost_usd)} estimate` : "no charge"}`;
 
@@ -415,8 +419,7 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
       pid={pid}
       large={large}
       icon={active ? <CircleDashed className="h-4 w-4 animate-spin" /> : <IsoIcon name="gpu" size={22} />}
-      title={j.message || j.kind.replace(/_/g, " ")}
-      meta={j.kind.replace(/_/g, " ")}
+      title={jobLabel(j.kind)}
       status={active ? <Pill tone="live">{pct(j.progress)}</Pill> : j.status === "succeeded" ? <Pill tone="ok">done</Pill> : <Pill tone="bad">{j.status}</Pill>}
     >
       <div className="h-1 overflow-hidden bg-[var(--line)]">
@@ -480,9 +483,15 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["training", pid] });
-      chat.send(`Approved training ${tj.id}`);
+      chat.send("Approved and started the training."); // approved and launched above, so the agent needs no id
     },
   });
+  const datasets = useDatasets(pid);
+  const ds = datasets.data?.find((d) => d.id === tj.dataset_version_id);
+  const demos = ds ? new Set(ds.links.filter((l) => !l.augmentation).map((l) => l.episode_id)).size : null;
+  const technical = [`dataset ${tj.dataset_version_id}`, typeof tj.config.steps === "number" ? `${(tj.config.steps as number).toLocaleString()} steps` : null, tj.estimate.gpu, slurmLine(tj)]
+    .filter(Boolean)
+    .join(" · ");
   if (skipped)
     return (
       <div className="flex items-center gap-2 rounded border border-line px-4 py-2.5 text-sm text-ink-3">
@@ -493,19 +502,17 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
       </div>
     );
   return (
-    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta={autonomous ? "Needs you · over your standing approval" : "Needs approval"}>
+    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta={autonomous ? "Needs you · over your limits" : "Needs your OK"}>
       <p className="text-sm leading-relaxed text-ink-2">
-        <span className="font-medium text-ink">{tj.policy_type.toUpperCase()}</span> on{" "}
-        <span className="font-mono text-[13px] text-ink">{tj.dataset_version_id}</span>
-        {typeof tj.config.steps === "number" ? ` · ${(tj.config.steps as number).toLocaleString()} steps` : ""}
+        <span className="font-medium text-ink">{tj.policy_type.toUpperCase()} policy</span>
+        {demos !== null ? ` on ${demos} demo${demos === 1 ? "" : "s"}` : ""} · {gpuTime(tj.estimate.gpu_hours)} ·{" "}
+        <span className={cn("font-medium", tj.estimate.paid ? "text-caution" : "text-pass")}>{tj.estimate.paid ? `about ${usd(tj.estimate.est_cost_usd)}` : "no charge"}</span> · runs on {whereTraining(tj)}
       </p>
-      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-        <span className="text-ink-2">{tj.estimate.gpu}</span>
-        <span className="text-ink-2">~{num(tj.estimate.gpu_hours, 1)} GPU-hours</span>
-        <span className={cn("font-medium", tj.estimate.paid ? "text-caution" : "text-pass")}>{tj.estimate.paid ? `${usd(tj.estimate.est_cost_usd)} estimate` : "No charge"}</span>
-      </div>
-      {slurmLine(tj) && <p className="mt-1.5 text-xs text-ink-3">{slurmLine(tj)}</p>}
       {tj.backend === "manual" && <p className="mt-1.5 text-xs text-ink-3">No GPU connected · you get a command to run</p>}
+      <details className="mt-1.5 text-xs text-ink-3">
+        <summary className="cursor-pointer select-none hover:text-ink">Technical</summary>
+        <p className="mt-1 font-mono text-[11px]">{technical}</p>
+      </details>
       <div className="mt-3.5 flex items-center gap-2">
         <button
           type="button"
@@ -538,9 +545,9 @@ export function ApprovalItem({ pid, kind, refId, summary, args }: { pid: string;
         episodes_per_branch: typeof args.episodes_per_branch === "number" ? args.episodes_per_branch : 10,
       });
     },
-    onSuccess: (r) => {
+    onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["evaluations", pid] });
-      chat.send(`Approved the evaluation (${r.run.id}). Please continue.`);
+      chat.send("Approved and started the test. Please continue."); // started above, so the agent needs no id
     },
   });
 

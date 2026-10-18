@@ -452,6 +452,7 @@ export interface NextAction {
 
 export interface ProjectState {
   project: Project;
+  /** includes `in_scene`: usable demos recorded since the current scene was built */
   episode_counts: Record<string, number>;
   latest_analysis_id: string | null;
   dataset_versions: string[];
@@ -461,6 +462,8 @@ export interface ProjectState {
   next_actions: NextAction[];
   storage_backend: string;
   db_backend: string;
+  /** autonomous mode may start training on the shared GPU cluster itself (missing: it may not) */
+  autonomy_cluster?: boolean;
 }
 
 // ------------------------------------------------------------- jobs / events
