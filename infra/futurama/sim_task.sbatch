@@ -31,10 +31,20 @@ uv venv -q --python 3.12 "$SCR/venv"
 source "$SCR/venv/bin/activate"
 uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1" "mujoco>=3.3.7"
 
-if [ "$MODE" = demos ]; then
+if [ "$MODE" = demos ]; then  # SHARDS recorders in parallel (rendering is the bottleneck), then one dataset
   rm -rf "$T/dataset" "$T/examples"
-  python -m cortex.sim.tasks.run demos "$TASK" "$T/dataset" --episodes "${EPISODES:-200}" --size "${SIZE:-240x320}" \
-    --examples "$T/examples"
+  mkdir -p "$T"
+  N="${SHARDS:-8}"; pids=(); roots=()
+  for i in $(seq 0 $((N - 1))); do
+    ex=(); [ "$i" = 0 ] && ex=(--examples "$T/examples")
+    python -m cortex.sim.tasks.run demos "$TASK" "$SCR/shard$i" --episodes "${EPISODES:-200}" \
+      --size "${SIZE:-240x320}" --shard "$i" --shards "$N" "${ex[@]}" > "$SCR/shard$i.log" 2>&1 &
+    pids+=($!); roots+=("$SCR/shard$i")
+  done
+  fail=0
+  for i in "${!pids[@]}"; do wait "${pids[$i]}" || { fail=1; echo "[sim] shard $i failed:"; tail -5 "$SCR/shard$i.log"; }; done
+  [ "$fail" = 0 ] || exit 1
+  python -m cortex.sim.tasks.run merge "$TASK" "$T/dataset" "${roots[@]}"
   echo "[sim] DEMOS_DONE"
   exit 0
 fi

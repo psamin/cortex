@@ -1,7 +1,11 @@
 """Record oracle demos and evaluate checkpoints on the hand-built sim tasks (issue #161).
 
-    python -m cortex.sim.tasks.run demos <task> <dataset_root> --episodes 200 [--examples <dir>]
+    python -m cortex.sim.tasks.run demos <task> <dataset_root> --episodes 200 [--examples <dir>] [--shard i --shards n]
+    python -m cortex.sim.tasks.run merge <task> <dataset_root> <shard_root> [<shard_root> ...]
     python -m cortex.sim.tasks.run evaluate <task> <checkpoint_dir> <out_dir> --episodes 50 [--device cuda]
+
+Recording is parallel: n shard processes take seeds shard, shard + n, ... and ``merge`` joins their
+datasets into one (the rendering, not the physics, is the bottleneck, so this scales with processes).
 
 Demos use seeds 0, 1, ... and keep only the oracle's successful episodes (a LeRobotDataset v3 with
 front + wrist video, 6-D state and action). Evaluation runs the checkpoint closed loop on seeds from
@@ -103,12 +107,13 @@ def demos(args: argparse.Namespace) -> None:
     ex_dir = Path(args.examples) if args.examples else None
     if ex_dir:
         ex_dir.mkdir(parents=True, exist_ok=True)
-    kept, failed, seed = [], [], 0
+    kept, failed, seed = [], [], args.shard
+    want = -(-args.episodes // args.shards)  # this shard's share, rounded up
     presenter = None
     if ex_dir:
         env.reset(0)  # the presentation renderer needs the model
         presenter = Presenter(env)
-    while len(kept) < args.episodes and seed < args.episodes * 2:
+    while len(kept) < want and seed < args.episodes * 2:
         ep = episode(env, oracle, seed, record=True, presenter=presenter if len(kept) < args.n_examples else None)
         if ep["success"]:
             for front, wrist, state, action in ep["rows"]:
@@ -121,7 +126,7 @@ def demos(args: argparse.Namespace) -> None:
         else:
             failed.append(seed)
         print(json.dumps({"seed": seed, "success": ep["success"], "steps": ep["steps"], "kept": len(kept)}), flush=True)
-        seed += 1
+        seed += args.shards
     ds.finalize()
     (root / "meta" / "cortex_sim.json").write_text(json.dumps({
         "task": args.task, "instruction": env.instruction, "size": args.size, "kept_seeds": kept,
@@ -129,6 +134,22 @@ def demos(args: argparse.Namespace) -> None:
     if presenter:
         presenter.close()
     env.close()
+
+
+def merge(args: argparse.Namespace) -> None:
+    """Join shard datasets into one, with their oracle statistics combined."""
+    from lerobot.datasets.aggregate import aggregate_datasets
+
+    roots = [Path(r) for r in args.shards_roots]
+    aggregate_datasets([f"cortex/sim_{args.task}_{i}" for i in range(len(roots))], f"cortex/sim_{args.task}",
+                       roots=roots, aggr_root=Path(args.root))
+    metas = [json.loads((r / "meta" / "cortex_sim.json").read_text()) for r in roots]
+    kept = sorted(s for m in metas for s in m["kept_seeds"])
+    failed = sorted(s for m in metas for s in m["failed_seeds"])
+    (Path(args.root) / "meta" / "cortex_sim.json").write_text(json.dumps({
+        **{k: metas[0][k] for k in ("task", "instruction", "size")}, "kept_seeds": kept, "failed_seeds": failed,
+        "oracle_success_rate": len(kept) / max(1, len(kept) + len(failed)), "shards": len(roots)}, indent=1))
+    print(json.dumps({"merged_episodes": len(kept), "failed": len(failed)}), flush=True)
 
 
 def evaluate(args: argparse.Namespace) -> None:
@@ -173,6 +194,12 @@ def main() -> None:
     d.add_argument("--size", default="240x320")
     d.add_argument("--examples")
     d.add_argument("--n-examples", type=int, default=3)
+    d.add_argument("--shard", type=int, default=0)
+    d.add_argument("--shards", type=int, default=1)
+    m = sub.add_parser("merge")
+    m.add_argument("task")
+    m.add_argument("root")
+    m.add_argument("shards_roots", nargs="+")
     e = sub.add_parser("evaluate")
     e.add_argument("task")
     e.add_argument("checkpoint")
@@ -183,7 +210,7 @@ def main() -> None:
     e.add_argument("--device", default="cuda")
     e.add_argument("--cameras", help="policy=env camera names, e.g. camera1=front,camera2=wrist")
     args = p.parse_args()
-    demos(args) if args.cmd == "demos" else evaluate(args)
+    {"demos": demos, "merge": merge, "evaluate": evaluate}[args.cmd](args)
 
 
 if __name__ == "__main__":
