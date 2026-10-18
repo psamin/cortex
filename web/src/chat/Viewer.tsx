@@ -10,6 +10,7 @@ import { cn } from "../lib/format";
 import { DashedOrbit, SketchScene } from "../sketch";
 import { InfoTip } from "../components/ui";
 import { useRolloutVideo, useRollouts, type Camera, type Rollout, type RolloutOrigin } from "./rollouts";
+import { maxDisplayHeight } from "./videoScale";
 import { GpuStage } from "./LivePolicy";
 
 export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
@@ -372,6 +373,9 @@ function CompareStage({ a, b, camera }: { a: Rollout; b: Rollout; camera: Camera
 
 function VideoSurface({ url, loading, videoRef }: { url: string | null | undefined; loading: boolean; videoRef: React.RefObject<HTMLVideoElement> }) {
   const [failed, setFailed] = useState<string | null>(null);
+  // a low-resolution video (an older episode's robot camera) is not stretched past 2x its size
+  const [size, setSize] = useState<{ url: string; w: number; h: number } | null>(null);
+  const cap = size && size.url === url ? maxDisplayHeight(size.w, size.h) : null;
   if (loading) return <CircleDashed className="h-6 w-6 animate-spin text-ink-4" />;
   if (!url || failed === url)
     return (
@@ -381,16 +385,28 @@ function VideoSurface({ url, loading, videoRef }: { url: string | null | undefin
       </div>
     );
   return (
-    <Frame>
-      <video key={url} ref={videoRef} src={url} autoPlay muted loop playsInline onError={() => setFailed(url)} className="block h-full w-auto max-w-full bg-black object-contain" />
+    <Frame maxHeight={cap}>
+      <video
+        key={url}
+        ref={videoRef}
+        src={url}
+        autoPlay
+        muted
+        loop
+        playsInline
+        onError={() => setFailed(url)}
+        onLoadedMetadata={(e) => setSize({ url, w: e.currentTarget.videoWidth, h: e.currentTarget.videoHeight })}
+        className="block h-full w-auto max-w-full bg-black object-contain"
+      />
     </Frame>
   );
 }
 
 /** The drawing frame around a camera image: a hairline border with crop marks at the corners. */
-function Frame({ children }: { children: React.ReactNode }) {
+function Frame({ children, maxHeight }: { children: React.ReactNode; maxHeight?: number | null }) {
   return (
-    <div className="relative h-full max-w-full border border-line-strong bg-plate p-1">
+    // maxHeight limits the image itself: + 10 px for the frame's padding and border
+    <div style={maxHeight ? { maxHeight: maxHeight + 10 } : undefined} className="relative h-full max-w-full border border-line-strong bg-plate p-1">
       {(["-left-2 -top-2 border-l border-t", "-right-2 -top-2 border-r border-t", "-bottom-2 -left-2 border-b border-l", "-bottom-2 -right-2 border-b border-r"] as const).map((c) => (
         <span key={c} aria-hidden className={cn("pointer-events-none absolute h-3 w-3 border-ink", c)} />
       ))}

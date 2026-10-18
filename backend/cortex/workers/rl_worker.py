@@ -38,7 +38,8 @@ from ..rl.types import IterationStats, Pilot, RLSandbox, SandboxResult
 from ..services.simulation_runner import wilson
 from ..sim.so101 import FPS, PickPlaceEnv, configure_gl
 from ..sim import env_factory
-from .sim_worker import Preview, emit, failure_mode, rest_height, write_mp4
+from ..sim.viewer import CAM_EVERY
+from .sim_worker import Preview, emit, failure_mode, rest_height, write_hd, write_mp4
 
 STATS_EVERY = 15  # control steps between sim_stats events
 DEFAULT_MAX_STEPS = 300  # the cube task's episode length
@@ -101,7 +102,8 @@ class Runner:
         self.env = make_env(self.scene, self.max_steps)
         self.env.reset(self.seed_base, draw(self.sb.env, self.seed_base).var)
         self.physics = Physics(self.env)
-        self.preview = Preview(self.env, self.live_dir, live=True) if cfg.get("live", True) else None
+        self.preview = (Preview(self.env, self.live_dir, live=True, policy_cams=True)
+                        if cfg.get("live", True) else None)
         self.last_live = 0.0
         self.phase = "pilot"
         self.sim_steps, self.sim_s, self.episodes = 0, 0.0, 0
@@ -120,7 +122,7 @@ class Runner:
         policy.reset(env, obs, seed)
         if dart:
             dart_perturb(policy.ex, np.random.default_rng(seed + 1))
-        buf: dict[str, list] = {"front": [], "wrist": [], "state": [], "action": [], "reward": []}
+        buf: dict[str, Any] = {"front": [], "wrist": [], "state": [], "action": [], "reward": [], "hd": {}}
         video: list[np.ndarray] = []
         success, settle, t0 = False, 0, time.time()
         for step in range(self.max_steps):
@@ -137,6 +139,8 @@ class Runner:
                 buf["reward"].append(reward)
                 if self.preview:
                     video.append(self.preview.r.render(env.world.data))
+                    if step % CAM_EVERY == 0:
+                        self.preview.grab_cams(buf["hd"])
             if step % STATS_EVERY == 0:
                 self._stats(step, policy, success)
             if policy.ex.done:
@@ -275,6 +279,7 @@ class Runner:
                 reward=np.asarray(buf["reward"], np.float32), timestamp=(np.arange(m) / FPS).astype(np.float32),
                 action_low=np.r_[np.rad2deg(env.world.lo[:5]), 0].astype(np.float32),
                 action_high=np.r_[np.rad2deg(env.world.hi[:5]), 100].astype(np.float32))
+            write_hd(buf["hd"], d)
             if video:
                 write_mp4(video, d / "front.mp4")
                 Image.fromarray(video[min(len(video) - 1, 45)]).save(d / "thumb.jpg", quality=85)

@@ -59,6 +59,37 @@ class DemoCamera:
         self.renderer.close()
 
 
+CAM_H, CAM_W = 480, 640
+CAM_EVERY = 2  # the copies are rendered every other control step (15 fps): about +20 ms per step on a Mac
+
+
+class PolicyCameras:
+    """Display-only copies of the policy's own cameras (same MJCF cameras, scene and lighting) at 640x480
+    with 8x MSAA, for the front and wrist videos people watch. Never fed to policies or written to
+    datasets: those keep the env's 96x128 observation frames."""
+
+    def __init__(self, model: mujoco.MjModel, cameras: dict[str, str]):
+        q, g = model.vis.quality, model.vis.global_
+        saved = (q.offsamples, g.offwidth, g.offheight)
+        q.offsamples = 8
+        g.offwidth, g.offheight = max(g.offwidth, CAM_W), max(g.offheight, CAM_H)
+        try:
+            self.renderer = mujoco.Renderer(model, CAM_H, CAM_W)
+        finally:
+            q.offsamples, g.offwidth, g.offheight = saved
+        self.cameras = dict(cameras)  # observation key -> MJCF camera name
+
+    def render(self, data: mujoco.MjData) -> dict[str, np.ndarray]:
+        out = {}
+        for key, cam in self.cameras.items():
+            self.renderer.update_scene(data, camera=cam)
+            out[key] = self.renderer.render()
+        return out
+
+    def close(self) -> None:
+        self.renderer.close()
+
+
 def grade(img: np.ndarray, vignette: np.ndarray | None = None, sat: float = 1.18, con: float = 1.10) -> np.ndarray:
     x = img.astype(np.float32) / 255.0
     luma = float(x.mean())

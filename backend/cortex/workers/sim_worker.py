@@ -21,6 +21,7 @@ import numpy as np
 from ..errors import worker_error
 
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
+from ..sim.viewer import CAM_EVERY
 from ..sim.viewer import VIEW_H as PREVIEW_H  # noqa: F401  (presentation video size, re-exported)
 from ..sim.viewer import VIEW_W as PREVIEW_W  # noqa: F401
 SETTLE_STEPS = 10
@@ -32,12 +33,14 @@ def emit(**kw: Any) -> None:
 
 class Preview:
     """The presentation camera (cortex.sim.viewer) for the live view and episode videos.
-    Cosmetic only: policies are trained on the env's own observation cameras."""
+    Cosmetic only: policies are trained on the env's own observation cameras. With ``policy_cams`` it
+    also renders sharp display copies of those cameras for the viewer's front and wrist views."""
 
-    def __init__(self, env: PickPlaceEnv, out_dir: Path, live: bool):
-        from ..sim.viewer import DemoCamera
+    def __init__(self, env: PickPlaceEnv, out_dir: Path, live: bool, policy_cams: bool = False):
+        from ..sim.viewer import DemoCamera, PolicyCameras
 
         self.r = DemoCamera(env.world.model)
+        self.cams = PolicyCameras(env.world.model, env.env.cameras) if policy_cams else None
         self.env, self.out_dir, self.live = env, out_dir, live
 
     def grab(self) -> np.ndarray:
@@ -48,8 +51,16 @@ class Preview:
             write_live_jpg(img, self.out_dir)
         return img
 
+    def grab_cams(self, into: dict[str, list[np.ndarray]]) -> None:
+        """Append one display copy of each policy camera (no-op without ``policy_cams``)."""
+        if self.cams is not None:
+            for k, f in self.cams.render(self.env.world.data).items():
+                into.setdefault(k, []).append(f)
+
     def close(self) -> None:
         self.r.close()
+        if self.cams is not None:
+            self.cams.close()
 
 
 def write_mp4(frames: list[np.ndarray], path: Path, fps: int = FPS) -> None:
@@ -102,7 +113,7 @@ def rollout(env: PickPlaceEnv, policy, obs: dict[str, Any], seed: int, max_steps
     SETTLE_STEPS, or with ``settle_max`` until the simulator reports success (at most that many steps)."""
     render = record or getattr(policy, "needs_pixels", True)  # oracles read sim state, not the cameras
     policy.reset(env, obs, seed)
-    buf: dict[str, list] = {"front": [], "wrist": [], "state": [], "action": [], "reward": []}
+    buf: dict[str, Any] = {"front": [], "wrist": [], "state": [], "action": [], "reward": [], "hd": {}}
     video: list[np.ndarray] = []
     success, settle, reward, t0 = False, 0, 0.0, time.time()
     env.max_cube_z = 0.0
@@ -119,6 +130,8 @@ def rollout(env: PickPlaceEnv, policy, obs: dict[str, Any], seed: int, max_steps
             buf["reward"].append(reward)
         if preview is not None:
             video.append(preview.grab())
+            if record and step % CAM_EVERY == 0:
+                preview.grab_cams(buf["hd"])
         if step % 10 == 0:
             emit(type="progress", step=step, max_steps=max_steps, seed=seed)
         ex = getattr(policy, "ex", None)
@@ -154,9 +167,18 @@ def save_npz(env: PickPlaceEnv, buf: dict[str, list], out: Path) -> int:
     return n
 
 
-def save_video(video: list[np.ndarray], out: Path, thumb_at: int = 45) -> None:
+def write_hd(hd: dict[str, list[np.ndarray]] | None, out: Path) -> None:
+    """The policy cameras' display copies as <camera>_hd.mp4 (what the viewer's front/wrist views play)."""
+    for key, frames in (hd or {}).items():
+        if frames:
+            write_mp4(frames, out / f"{key}_hd.mp4", fps=FPS // CAM_EVERY)
+
+
+def save_video(video: list[np.ndarray], out: Path, thumb_at: int = 45,
+               hd: dict[str, list[np.ndarray]] | None = None) -> None:
     from PIL import Image
 
+    write_hd(hd, out)
     if not video:
         return
     write_mp4(video, out / "front.mp4")
@@ -188,11 +210,12 @@ def cmd_record(cfg: dict[str, Any]) -> dict[str, Any]:
                         box_offset=tuple(sc.get("box_offset", (0.0, 0.0))))
         if preview is None:
             env.reset(spec["seed"], var)
-            preview = Preview(env, live_dir, live=True)
+            preview = Preview(env, live_dir, live=True, policy_cams=True)
         emit(type="episode_start", index=i, total=len(cfg["episodes"]), seed=spec["seed"], condition=cond)
         ep = run_episode(env, env_factory.oracle(scene), spec["seed"], var, max_steps, preview, record=True)
-        n = save_npz(env, ep.pop("buf"), out)
-        save_video(ep.pop("video"), out)
+        buf = ep.pop("buf")
+        n = save_npz(env, buf, out)
+        save_video(ep.pop("video"), out, hd=buf["hd"])
         res = {**ep, "num_frames": n, "fps": FPS, "out_dir": str(out)}
         (out / "result.json").write_text(json.dumps(res))
         emit(type="episode", index=i, **res)
@@ -380,7 +403,7 @@ def cmd_cycles(cfg: dict[str, Any]) -> dict[str, Any]:
 
     def initial_reset() -> None:
         env.reset(seed, var)
-        preview.append(Preview(env, live_dir, live=True))
+        preview.append(Preview(env, live_dir, live=True, policy_cams=True))
 
     def run_segment(kind: str, goal: str, k: int, out: Path) -> dict[str, Any]:
         start_pose = object_pose(env)
@@ -395,7 +418,7 @@ def cmd_cycles(cfg: dict[str, Any]) -> dict[str, Any]:
                                        or ep["failure_mode"] or "not in the target")
         buf, video = ep.pop("buf"), ep.pop("video")
         n = save_npz(env, buf, out) if success else 0  # failed segments are diagnostics, never episodes
-        save_video(video, out, thumb_at=len(video) // 2)
+        save_video(video, out, thumb_at=len(video) // 2, hd=buf["hd"] if success else None)
         return {**ep, "success": success, "failure_reason": reason, "num_frames": n, "fps": FPS,
                 "start_pose": start_pose, "planner": "scripted_ik_oracle"}
 

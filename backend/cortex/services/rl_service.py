@@ -327,7 +327,7 @@ def demo_dir(sb: RLSandbox, name: str) -> str:
 async def register_demos(ctx: Ctx, sb: RLSandbox, rnd: RLRound) -> list[Episode]:
     """The sandbox's successful demos as episodes (idempotent). They are oracle demos (the tuned skill reads
     privileged sim state) with provenance ``rl_sandbox:<id>``; each passes the same quality gate as other demos."""
-    from .recording_service import AUTO_ACCEPT_MIN_SCORE, list_episodes, quality_for
+    from .recording_service import AUTO_ACCEPT_MIN_SCORE, HD_FILES, list_episodes, quality_for
 
     eps = await list_episodes(ctx, sb.project_id)
     have = {e.provenance.get("demo"): e for e in eps if e.provenance.get("sandbox_id") == sb.id}
@@ -341,7 +341,7 @@ async def register_demos(ctx: Ctx, sb: RLSandbox, rnd: RLRound) -> list[Episode]
         if not meta_p.exists():
             continue
         meta = json.loads(meta_p.read_text())
-        files = (("episode", "episode.npz"), ("front", "front.mp4"), ("thumb", "thumb.jpg"))
+        files = (("episode", "episode.npz"), ("front", "front.mp4"), ("thumb", "thumb.jpg"), *HD_FILES)
         artifacts = {kind: f"{base}/{f}" for kind, f in files if ctx.local(f"{base}/{f}").exists()}
         if "episode" not in artifacts or not meta.get("success"):
             continue

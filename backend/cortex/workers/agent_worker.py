@@ -28,9 +28,9 @@ from ..errors import worker_error
 
 from ..sim.manipulation import ManipulationSession
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
-from ..sim.viewer import DemoCamera
+from ..sim.viewer import DemoCamera, PolicyCameras
 from .livefile import write_live_jpg
-from .sim_worker import emit, write_mp4
+from .sim_worker import emit, write_hd, write_mp4
 
 
 def live_writer(live_dir: Path):
@@ -55,6 +55,7 @@ def save_attempt(s: ManipulationSession, env: PickPlaceEnv, out: Path, meta: dic
             reward=np.asarray(r.reward, np.float32), timestamp=(np.arange(n) / FPS).astype(np.float32),
             action_low=np.r_[np.rad2deg(env.world.lo[:5]), 0].astype(np.float32),
             action_high=np.r_[np.rad2deg(env.world.hi[:5]), 100].astype(np.float32))
+    write_hd(r.hd, out)
     if r.video:
         write_mp4(r.video, out / "front.mp4")
         Image.fromarray(r.video[min(len(r.video) - 1, len(r.video) // 2)]).save(out / "thumb.jpg", quality=85)
@@ -93,7 +94,9 @@ def main() -> None:
                         cube_offset=tuple(sc.get("cube_offset", (0, 0))), box_offset=tuple(sc.get("box_offset", (0, 0))))
         env.reset(a["seed"], var)
         renderer = DemoCamera(env.world.model)
-        s = ManipulationSession(env, mode=cfg.get("mode", "camera"), on_frame=on_frame, video_renderer=renderer)
+        cams = PolicyCameras(env.world.model, env.env.cameras)
+        s = ManipulationSession(env, mode=cfg.get("mode", "camera"), on_frame=on_frame, video_renderer=renderer,
+                                cam_renderer=cams)
         s.reset_environment(a["seed"], var)
         emit(type="attempt_start", index=i, total=len(cfg["attempts"]), seed=a["seed"], scenario=sc)
         t0 = time.time()
@@ -114,6 +117,7 @@ def main() -> None:
                 "max_cube_z": env.max_cube_z}
         info = save_attempt(s, env, Path(a["out_dir"]), meta)
         renderer.close()
+        cams.close()
         total_cost += float(run.get("usage", {}).get("cost_usd", 0.0))
         res = {**{k: v for k, v in meta.items() if k != "trace"}, **info, "out_dir": a["out_dir"],
                "trace_len": len(run.get("trace", []))}
@@ -137,14 +141,16 @@ def run_cycle_attempts(cfg: dict[str, Any], env: PickPlaceEnv, planner, on_frame
     seed = int(cfg.get("seed", a0.get("seed", 0)))
     var = Variation(cube_region=sc["cube_region"], lighting=sc["lighting"])
     renderer: DemoCamera | None = None
+    cams: PolicyCameras | None = None
     state: dict[str, Any] = {"cost": 0.0, "s": None}
 
     def initial_reset() -> None:
-        nonlocal renderer
+        nonlocal renderer, cams
         env.reset(seed, var)
         renderer = renderer or DemoCamera(env.world.model)
+        cams = cams or PolicyCameras(env.world.model, env.env.cameras)
         state["s"] = ManipulationSession(env, mode=cfg.get("mode", "camera"), on_frame=on_frame,
-                                         video_renderer=renderer)
+                                         video_renderer=renderer, cam_renderer=cams)
         state["s"].reset_environment(seed, var)
 
     def run_segment(kind: str, goal: str, k: int, out: Path) -> dict[str, Any]:
@@ -181,6 +187,8 @@ def run_cycle_attempts(cfg: dict[str, Any], env: PickPlaceEnv, planner, on_frame
     res = run_cycles(env, {**cfg, "seed": seed}, run_segment, initial_reset, keep_going)
     if renderer is not None:
         renderer.close()
+    if cams is not None:
+        cams.close()
     env.close()
     Path(cfg["live_dir"], "result.json").write_text(json.dumps(res, default=str))
     emit(type="result", ok=True, spent_usd=round(state["cost"], 4))
