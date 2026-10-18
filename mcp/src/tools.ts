@@ -751,6 +751,33 @@ const TOOLS: Def[] = [
     annotations: READ,
   },
   {
+    name: "request_gpu",
+    title: "Request a GPU",
+    description:
+      "Request a GPU on Georgia Tech's Futurama cluster through Slurm (the studio's Request a GPU button), or attach to " +
+      "one already running. It loads the newest trained policies so they can run live. Free for the user, but cluster " +
+      "access is limited: one server at a time, and after a failed request Cortex waits 10 min before asking again. " +
+      "Returns at once; poll cortex_get_gpu_status until available.",
+    inputSchema: z.object({ project_id: projectId.optional() }),
+    annotations: WRITE_EXTERNAL,
+  },
+  {
+    name: "get_gpu_status",
+    title: "GPU status",
+    description:
+      "Whether a Futurama GPU server is live, or how far along a requested one is (queued, installing, loading " +
+      "policies, connecting), and which trained policies it serves.",
+    inputSchema: z.object({ project_id: projectId.optional() }),
+    annotations: READ,
+  },
+  {
+    name: "release_gpu",
+    title: "Release the GPU",
+    description: "Stop the Futurama GPU server and cancel its Slurm job, freeing the GPU. Do this when you are done with live policy runs.",
+    inputSchema: z.object({ project_id: projectId.optional() }),
+    annotations: WRITE_EXTERNAL,
+  },
+  {
     name: "log_decision",
     title: "Log a plan or decision",
     description:

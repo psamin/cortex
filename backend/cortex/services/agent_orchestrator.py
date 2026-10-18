@@ -1047,6 +1047,53 @@ async def t_verify_agent_key(ctx, a, actor):
     return {"summary": "This agent key is active.", "ref_ids": [], "valid": True, "key_id": call["key_id"]}
 
 
+class GpuArgs(BaseModel):
+    project_id: str | None = Field(None, description="the project this GPU is for, so the request shows in its Agent log")
+
+
+def _gpu_view(st: dict[str, Any]) -> dict[str, Any]:
+    keep = ("available", "phase", "step", "reason", "error", "job", "gpu", "policies", "sim", "projects")
+    return {k: st[k] for k in keep if k in st}
+
+
+def _gpu_summary(st: dict[str, Any]) -> str:
+    if st.get("available"):
+        gpu = f" ({st['gpu']})" if st.get("gpu") else ""
+        return f"A GPU server is live on Futurama{gpu}."
+    step = (st.get("steps") or {}).get(st.get("step") or "", "")
+    if st.get("phase") == "starting":
+        return f"Bringing up a GPU on Futurama: {step or 'starting'}. Poll cortex_get_gpu_status."
+    return st.get("reason") or st.get("error") or "No GPU server is running."
+
+
+async def t_request_gpu(ctx, a, actor):
+    from . import live_policy_service as lp
+
+    if a.project_id:
+        await get_project(ctx, a.project_id)
+    try:
+        st = await lp.start(ctx)
+    except (ValueError, RuntimeError) as e:  # not configured, VPN off, or inside the failure cooldown
+        raise ValueError(str(e)) from e
+    return {"summary": _gpu_summary(st), "ref_ids": [st["job"]] if st.get("job") else [], **_gpu_view(st)}
+
+
+async def t_gpu_status(ctx, a, actor):
+    from . import live_policy_service as lp
+
+    st = await lp.status(ctx)
+    return {"summary": _gpu_summary(st), "ref_ids": [st["job"]] if st.get("job") else [], **_gpu_view(st)}
+
+
+async def t_release_gpu(ctx, a, actor):
+    from . import live_policy_service as lp
+
+    if a.project_id:
+        await get_project(ctx, a.project_id)
+    st = await lp.stop(ctx)
+    return {"summary": "Released the GPU server (the Slurm job is cancelled).", "ref_ids": [], **_gpu_view(st or {})}
+
+
 class LogDecisionArgs(BaseModel):
     project_id: str
     kind: Literal["plan", "decision", "observation", "question"] = Field(
@@ -1061,6 +1108,15 @@ async def t_log_decision(ctx, a, actor):
 
 
 TOOLS.update({t.name: t for t in [
+    Tool("request_gpu", "Request a GPU on Georgia Tech's Futurama cluster through Slurm (the studio's Request a GPU "
+         "button), or attach to one already running. It loads the newest trained policies so they can run live. Free "
+         "for the user, but cluster access is limited: one server at a time, and after a failed request Cortex waits "
+         "10 min before asking again. Returns at once; poll cortex_get_gpu_status until available. Needs the GT VPN "
+         "and FUTURAMA_SSH_HOST on the backend.", GpuArgs, t_request_gpu),
+    Tool("get_gpu_status", "Whether a Futurama GPU server is live, or how far along a requested one is (queued, "
+         "installing, loading policies, connecting), and which trained policies it serves.", GpuArgs, t_gpu_status),
+    Tool("release_gpu", "Stop the Futurama GPU server and cancel its Slurm job, freeing the GPU. Do this when you are "
+         "done with live policy runs.", GpuArgs, t_release_gpu),
     Tool("log_decision", "Write your plan, a decision and why, or what a result told you into the project's Agent log, "
          "where your human watches you work. Call it at every step: before collecting, training, evaluating or "
          "improving, and whenever a result changes your plan. It changes nothing else.", LogDecisionArgs,
