@@ -24,9 +24,7 @@ export function RobotPage() {
     <div className="space-y-4 px-5 py-5">
       <div>
         <h1 className="kn-display text-[36px] leading-tight">Real SO-101 arm</h1>
-        <p className="mt-0.5 text-sm text-ink-3">
-          Teleop recording and policy runs on the physical arm. Every run needs a human approval here and a held deadman; nothing moves on its own.
-        </p>
+        <p className="mt-0.5 text-sm text-ink-3">Every run needs your approval and a held deadman.</p>
       </div>
       {status.isLoading ? (
         <Skeleton className="h-40 w-full" />
@@ -66,7 +64,7 @@ function Checklist({ hw }: { hw: HardwareStatus }) {
   const leaderReady = hw.teleop_missing.length === 0;
   return (
     <Panel title="Real arm setup" actions={hw.ready_for_motion ? <Badge tone="pass">ready</Badge> : <span className="text-xs text-ink-3">step {current + 1} of {steps.length}</span>}>
-      {!hw.enabled && <p className="mb-3 text-sm text-ink-3">You're using the simulator, and everything works without an arm. Set up a real SO-101 only when you have one.</p>}
+      {!hw.enabled && <p className="mb-3 text-sm text-ink-3">Simulator mode · no arm needed.</p>}
       {hw.driver_error && <InlineError error={hw.driver_error} fallback="The motor driver could not be loaded." className="mb-3" />}
       <ol className="space-y-2">
         {steps.map((st, i) => (
@@ -84,7 +82,7 @@ function Checklist({ hw }: { hw: HardwareStatus }) {
       </ol>
       {hw.ready_for_motion && (
         <p className="mt-3 text-xs text-ink-3">
-          {leaderReady ? "Leader arm ready for recording demos by hand." : "Optional: add and calibrate a leader arm to record demos by hand."} Each run asks you to confirm, and the arm moves only while you hold the deadman.
+          {leaderReady ? "Leader arm ready." : "Optional: calibrate a leader arm for teleop."} The arm moves only while you hold the deadman.
         </p>
       )}
     </Panel>
@@ -132,7 +130,7 @@ function SetupForm({ hw }: { hw: HardwareStatus }) {
             <Plus className="h-3.5 w-3.5" /> Add camera
           </Button>
         </div>
-        {cfg.cameras.length === 0 && <p className="text-xs text-ink-3">No cameras. Policies trained with images need the same camera names here.</p>}
+        {cfg.cameras.length === 0 && <p className="text-xs text-ink-3">No cameras. Image policies need matching camera names.</p>}
         {cfg.cameras.map((c, i) => (
           <div key={i} className="mb-1.5 grid grid-cols-[1fr_1fr_64px_64px_52px_28px] items-center gap-1.5">
             <Input value={c.name} onChange={(e) => setCam(i, { name: e.target.value })} aria-label="Camera name" placeholder="front" />
@@ -181,8 +179,8 @@ function Calibration({ hw }: { hw: HardwareStatus }) {
   const p = proc.data;
   const live = !!p && ["running", "waiting_for_operator"].includes(p.state);
   return (
-    <Panel title="Calibration" meta="lerobot-calibrate, torque off">
-      <p className="text-sm text-ink-2">Torque is off during calibration: you move each joint by hand through its full range when prompted.</p>
+    <Panel title="Calibration" meta="lerobot-calibrate">
+      <p className="text-sm text-ink-2">Torque off: move each joint through its full range when prompted.</p>
       <div className="mt-3 flex flex-wrap gap-2">
         {(["follower", "leader"] as const).map((d) => (
           <Button key={d} size="sm" disabled={live} loading={start.isPending && start.variables === d} onClick={() => start.mutate(d)} title={live ? "A calibration is already running" : undefined}>
@@ -310,7 +308,7 @@ function RunStarters({ pid, hw, busy }: { pid: string; hw: HardwareStatus; busy:
   const num = (v: string, lo: number, hi: number) => Math.min(hi, Math.max(lo, Number(v) || lo));
   return (
     <>
-      <Panel title="Teleop recording" meta="leader arm drives the follower; saved as human demos">
+      <Panel title="Teleop recording" meta="saved as human demos">
         <div className="grid grid-cols-[90px_110px_1fr] gap-2">
           <Field label="Episodes">
             <Input type="number" value={teleop.episodes} onChange={(e) => setTeleop({ ...teleop, episodes: num(e.target.value, 1, 50) })} />
@@ -327,12 +325,12 @@ function RunStarters({ pid, hw, busy }: { pid: string; hw: HardwareStatus; busy:
         </Button>
         {!confirm && startTeleop.error && <InlineError error={startTeleop.error} className="mt-2" />}
       </Panel>
-      <Panel title="Run a trained policy" meta="the policy drives the follower arm">
+      <Panel title="Run a policy">
         {cks.isLoading ? (
           <Skeleton className="h-8 w-full" />
         ) : !cks.data?.length ? (
           <p className="text-sm text-ink-2">
-            Train a policy first. This project has no checkpoints yet; see{" "}
+            No checkpoints yet. See{" "}
             <Link to={`/p/${pid}/improve?tab=training`} className="text-servo hover:underline">
               Improve › Training
             </Link>
@@ -358,10 +356,10 @@ function RunStarters({ pid, hw, busy }: { pid: string; hw: HardwareStatus; busy:
               </Field>
             </div>
             <p className="mt-2 flex items-start gap-1.5 text-xs text-caution">
-              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> A policy trained on simulator demos may behave differently on the real arm. Keep your hand on the deadman and the e-stop in reach.
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" /> Sim-trained policies may act differently on the real arm. Keep a hand on the deadman, e-stop in reach.
             </p>
             <Button className="mt-3" variant="primary" disabled={busy} title={busy ? "A run is already in progress" : undefined} onClick={() => (setAtArm(false), setPolicy((p) => ({ ...p, checkpoint_id: ckId })), setConfirm("policy"))}>
-              Run policy on the arm
+              Run on arm
             </Button>
           </>
         )}
@@ -390,7 +388,7 @@ function RunStarters({ pid, hw, busy }: { pid: string; hw: HardwareStatus; busy:
         <label className="mt-3 flex items-start gap-2 text-sm text-ink">
           <input type="checkbox" checked={atArm} onChange={(e) => setAtArm(e.target.checked)} className="mt-1 accent-[rgb(var(--servo))]" />I am at the arm and the e-stop is in reach
         </label>
-        {!hw.ready_for_motion && <p className="mt-2 text-xs text-ink-3">The readiness checklist is not complete; the backend will refuse and say why.</p>}
+        {!hw.ready_for_motion && <p className="mt-2 text-xs text-ink-3">Setup incomplete; the backend will refuse and say why.</p>}
         {mutation.error && <InlineError error={mutation.error} className="mt-2" />}
       </Dialog>
     </>
@@ -466,7 +464,7 @@ function RunPanel({ run, pid }: { run: HardwareRun; pid: string }) {
           >
             <Hand className="h-6 w-6" /> {dead.held ? "Moving: release to stop" : "Hold to move (mouse or space bar)"}
           </button>
-          <p className="mt-1.5 text-xs text-ink-3">Releasing stops the arm within one control tick, and it holds its position.</p>
+          <p className="mt-1.5 text-xs text-ink-3">Release stops it within one tick; it holds position.</p>
           <div className="mt-3 flex flex-wrap gap-2">
             <Button size="sm" onClick={() => op.mutate("end_episode")}>End episode</Button>
             <Button size="sm" variant="danger" onClick={() => op.mutate("stop")}>
@@ -505,7 +503,7 @@ function RunPanel({ run, pid }: { run: HardwareRun; pid: string }) {
       )}
       {run.import_job_id && (
         <div className="mt-3">
-          <p className="mb-1.5 text-xs text-ink-3">Importing the recorded episodes as demos (human teleop, real SO-101):</p>
+          <p className="mb-1.5 text-xs text-ink-3">Importing as demos (human teleop, real SO-101):</p>
           <ResultCard pid={pid} refId={run.import_job_id} />
         </div>
       )}

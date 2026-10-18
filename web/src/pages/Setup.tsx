@@ -30,7 +30,7 @@ export function SetupPage() {
     <div className="max-w-[880px] space-y-4 px-5 py-5">
       <div>
         <h1 className="kn-display text-[36px] leading-tight">Setup</h1>
-        <p className="mt-0.5 text-sm text-ink-3">Where this project's work runs. Unavailable options say why.</p>
+        <p className="mt-0.5 text-sm text-ink-3">Where this project runs.</p>
       </div>
       {q.isLoading || (d && !draft) ? (
         <Skeleton className="h-64 w-full" />
@@ -38,10 +38,10 @@ export function SetupPage() {
         <ErrorState error={q.error} onRetry={() => q.refetch()} />
       ) : (
         <>
-          <Panel title="Planner" meta="who drives the arm for agent demonstrations">
+          <Panel title="Planner" meta="drives agent demos">
             <Choices options={d.planner} value={draft.planner} onChange={(v) => set("planner", v)} name="planner" />
           </Panel>
-          <Panel title="Training" meta="where lerobot-train runs">
+          <Panel title="Training" meta="lerobot-train">
             <Choices options={d.training_backend} value={draft.training_backend} onChange={(v) => set("training_backend", v)} name="training" />
             <div className="mt-3 grid grid-cols-[1fr_180px] gap-3">
               <Field label="GPU">
@@ -54,7 +54,7 @@ export function SetupPage() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Walltime (minutes)" hint={d.walltime_min.note}>
+              <Field label="Walltime (min)" hint={d.walltime_min.note}>
                 <Input
                   type="number"
                   min={d.walltime_min.min}
@@ -73,13 +73,13 @@ export function SetupPage() {
             {save.isSuccess && !dirty && <span className="text-sm text-pass">Saved</span>}
             {save.error && <InlineError error={save.error} />}
           </div>
-          <Panel title="Evaluation" meta="informational">
+          <Panel title="Evaluation" meta="read-only">
             <Choices options={d.evaluation} readOnly />
           </Panel>
-          <Panel title="Robot" meta="informational">
+          <Panel title="Robot" meta="read-only">
             <Choices options={d.robot} readOnly />
             <Link to={`/p/${pid}/robot`} className="mt-2 inline-block text-sm text-servo hover:underline">
-              Open the Robot page
+              Robot page
             </Link>
           </Panel>
         </>
