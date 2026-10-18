@@ -665,7 +665,7 @@ const TOOLS: Def[] = [
       "Pilots take ~1-5 min; poll cortex.get_rl_sandbox_status.",
     inputSchema: z.object({
       project_id: projectId,
-      checkpoint_id: z.string().optional(),
+      checkpoint_id: z.string().optional().describe("A trained checkpoint (ck_...) whose weaknesses to target; default: the latest evaluated one"),
       max_sandboxes: z.number().int().min(1).max(6).optional().describe("Default 3"),
       budget: z
         .object({
