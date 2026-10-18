@@ -149,3 +149,54 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.55); }
   height: 1px;
   background: rgb(var(--ink));
 }
+
+/*
+  Spotlight edge (components/ui/spotlight-card.tsx). A monochrome shine that follows the
+  pointer along a box's hairline: ink in light mode, white in dark mode. Fixed-attachment
+  gradients are positioned in viewport space, so one pointer position (--gx/--gy on <html>)
+  lights every box at once, exactly where the cursor is.
+*/
+:root,
+[data-theme="light"] {
+  --glow: 23 23 23;
+  --glow-edge-a: 0.5;
+  --glow-surface-a: 0.025;
+}
+[data-theme="dark"] {
+  --glow: 255 255 255;
+  --glow-edge-a: 0.55;
+  --glow-surface-a: 0.035;
+}
+.glow-edge,
+.glow-surface {
+  position: absolute;
+  inset: -1px;
+  border-radius: inherit;
+  pointer-events: none;
+  background-attachment: fixed;
+  background-repeat: no-repeat;
+}
+.glow-edge {
+  z-index: 1;
+  padding: 1px; /* the ring is exactly the 1 px border */
+  background-image: radial-gradient(
+    var(--glow-size, 220px) circle at calc(var(--gx, -9999) * 1px) calc(var(--gy, -9999) * 1px),
+    rgb(var(--glow) / var(--glow-edge-a)),
+    transparent 70%
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  mask-composite: exclude;
+}
+.glow-surface {
+  inset: 0;
+  background-image: radial-gradient(
+    calc(var(--glow-size, 220px) * 1.4) circle at calc(var(--gx, -9999) * 1px) calc(var(--gy, -9999) * 1px),
+    rgb(var(--glow) / var(--glow-surface-a)),
+    transparent 70%
+  );
+}
+@media (pointer: coarse), (prefers-reduced-motion: reduce) {
+  .glow-edge, .glow-surface { display: none; }
+}
