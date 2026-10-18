@@ -62,10 +62,13 @@ def test_agent_intake_to_simulation(client):
     r = client.get(f"/api/projects/{pid}/simulation/frame?camera=top")
     assert r.status_code == 200 and r.headers["content-type"] == "image/jpeg"
 
-    # Any later change invalidates the scene.
+    # A description edit does not change the scene; a lighting change makes it stale.
+    st = tool(client, "update_intake", project_id=pid, patch={"environment": {"description": "oak desk"}})
+    assert st["scene_built"] and not st["scene_stale"]
     st = tool(client, "update_intake", project_id=pid, patch={"environment": {"lighting": "dim"}})
-    assert any("rebuilt" in n for n in st["notes"])
-    assert tool(client, "get_intake_status", project_id=pid)["scene_built"] is False
+    assert st["scene_stale"] and any("build_simulation" in n for n in st["notes"])
+    s = tool(client, "get_intake_status", project_id=pid)
+    assert s["scene_built"] and s["scene_stale"] and s["scene_digest"]
 
 
 def test_intake_errors_are_400_with_reason(client):
@@ -75,3 +78,19 @@ def test_intake_errors_are_400_with_reason(client):
     assert r.status_code == 400 and "pik" in r.text
     r = client.post("/api/tools/build_simulation", json={"project_id": pid}, headers={"X-Cortex-Actor": "mcp"})
     assert r.status_code == 400 and "incomplete" in r.text
+
+
+def test_patch_during_build_is_not_lost(client):
+    import threading
+
+    pid = tool(client, "start_intake", prompt="pick up the cube")["project_id"]
+    tool(client, "update_intake", project_id=pid, patch={
+        "objects": [{"name": "cube", "confirm": True}], "zones": [{"name": "a", "center": [0.22, 0.12]}],
+        "task": {"place": ["a"]}})
+    t = threading.Thread(target=lambda: tool(client, "build_simulation", project_id=pid))
+    t.start()
+    tool(client, "update_intake", project_id=pid, patch={"objects": [{"name": "cube", "mass_kg": 0.02}]})
+    t.join()
+    s = tool(client, "get_intake_status", project_id=pid)
+    assert s["spec"]["objects"][0]["mass_kg"] == 0.02  # the patch survived the build
+    assert s["scene_built"]  # either order: the build saw the patch, or it is marked stale

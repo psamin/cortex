@@ -57,6 +57,7 @@ class SceneInfo:
         d = dict(d)
         p = Path(d.pop("path"))
         d.pop("feasibility", None)
+        d.pop("intake_digest", None)
         d["zones"] = {k: (tuple(c), tuple(h)) for k, (c, h) in d["zones"].items()}
         d["starts"] = {k: tuple(v) for k, v in d["starts"].items()}
         return cls(path=p if p.is_absolute() else data_dir / p, **d)
