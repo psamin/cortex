@@ -202,6 +202,18 @@ results count only once they are verified on it.
   sim and real success with Wilson CIs, and known weak conditions;
 - the `lerobot` command to run the policy on the agent's own arm.
 
+## 3.6 The studio is an agentic chat
+
+People use Cortex through a chat. It drives the same tools an MCP agent uses:
+- The person types what the robot should learn.
+- Intake questions appear as cards with one-click answers (their ready-made patches) or free text.
+- The chat shows the sim scene from `capture_frame` and the feasibility report, with suggested
+  alternatives for anything that fails.
+- Collection, training and evaluation run from the chat, with live progress from the event stream.
+- Training approval is an inline card: a human click. Agents still cannot approve.
+- A **guided planner** walks the pipeline step by step when no model key is configured. With a key, the
+  LLM agent can do the same through tool calls.
+
 ## 4. MCP surface added in v2
 
 | Tool | Purpose |
