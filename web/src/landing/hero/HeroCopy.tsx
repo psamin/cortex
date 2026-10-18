@@ -9,7 +9,7 @@ export function HeroCopy() {
       <div className="reveal flex items-center gap-3 kn-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-3" style={{ animationDelay: "80ms" }}>
         <span className="h-px w-9 bg-ink" />
         <span className="text-ink">FIG.00</span>
-        <span>MCP server for robot learning</span>
+        <span>MCP server for agent-trained robots</span>
       </div>
 
       <h1
@@ -17,9 +17,9 @@ export function HeroCopy() {
         className="reveal mt-5 kn-serif sm:mt-7 text-[clamp(2.6rem,5.4vw,5.1rem)] font-light leading-[1.02] tracking-[-0.022em] text-ink"
         style={{ animationDelay: "160ms" }}
       >
-        Build intelligence
+        Let your agents
         <br />
-        <span className="text-ink-3">for the physical world.</span>
+        <span className="text-ink-3">train a robot.</span>
       </h1>
 
       <p
@@ -53,7 +53,7 @@ export function HeroCopy() {
         style={{ animationDelay: "420ms" }}
       >
         {[
-          ["01", "Describe"],
+          ["01", "Connect"],
           ["04", "Train"],
           ["07", "Deploy"],
         ].map(([n, t]) => (
