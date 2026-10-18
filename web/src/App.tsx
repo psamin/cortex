@@ -8,6 +8,7 @@ import { CollectPage } from "./pages/Collect";
 import { AnalyzePage } from "./pages/Analyze";
 import { ImprovePage } from "./pages/improve/Improve";
 import { LineagePage } from "./pages/Lineage";
+import { ChatPage } from "./pages/Chat";
 
 export function App() {
   return (
@@ -16,7 +17,8 @@ export function App() {
         <Route index element={<HomePage />} />
         <Route path="new" element={<NewProjectPage />} />
         <Route path="p/:pid" element={<ProjectLayout />}>
-          <Route index element={<PlanPage />} />
+          <Route index element={<ChatPage />} />
+          <Route path="autopilot" element={<PlanPage />} />
           <Route path="collect" element={<CollectPage />} />
           <Route path="analyze" element={<AnalyzePage />} />
           <Route path="improve" element={<ImprovePage />} />
