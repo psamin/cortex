@@ -87,14 +87,7 @@ def estimate(sb: RLSandbox, pilot: Pilot, sim_steps_per_s: float, history: list[
         sand_src = "prior"
     w = sb.weakness
     pol = beta_samples(w.successes, w.n, N_MC, seed + 1)
-    hist = [(g, u) for g, u in (history or []) if g > 0.01]
-    if len(hist) >= MIN_ROUNDS:
-        ratios = np.clip([u / g for g, u in hist], 0, 1)
-        t = rng.choice(ratios, size=(N_MC, len(ratios))).mean(axis=1)  # bootstrap mean
-        t_src = "learned"
-    else:
-        t = rng.uniform(*TRANSFER_RANGE, N_MC)
-        t_src = "prior"
+    t, t_src, n_rounds = transfer_samples(history, rng)
     uplift = np.maximum(0.0, sand - pol) * t
     after = np.minimum(1.0, pol + uplift)
     regress = np.minimum(0.0, rng.normal(-0.02, 0.02, N_MC))
@@ -122,7 +115,28 @@ def estimate(sb: RLSandbox, pilot: Pilot, sim_steps_per_s: float, history: list[
         demos_expected=b.demos,
         cost=Cost(episodes=episodes, cpu_hours=round(cpu_h, 3), wall_clock_est_min=round(wall_min, 1),
                   sim_steps_per_s=round(sim_steps_per_s, 1)),
-        assumptions=_assumptions(sand_src, t_src, len(hist)))
+        assumptions=_assumptions(sand_src, t_src, n_rounds))
+
+
+def transfer_samples(history: list[tuple[float, float]] | None, rng: np.random.Generator,
+                     n: int = N_MC) -> tuple[np.ndarray, str, int]:
+    """Samples of the transfer factor t (realised ACT uplift / skill-level gain), its source and the rounds used.
+
+    Learned (a bootstrap mean over this project's measured rounds, clipped to [0, 1]) once >= MIN_ROUNDS rounds
+    with a skill gain above 1 pp exist; until then the labelled prior U(TRANSFER_RANGE)."""
+    hist = [(g, u) for g, u in (history or []) if g > 0.01]
+    if len(hist) >= MIN_ROUNDS:
+        ratios = np.clip([u / g for g, u in hist], 0, 1)
+        return rng.choice(ratios, size=(n, len(ratios))).mean(axis=1), "learned", len(hist)
+    return rng.uniform(*TRANSFER_RANGE, n), "prior", len(hist)
+
+
+def transfer_fit(history: list[tuple[float, float]] | None, seed: int = 0) -> dict:
+    """The refitted transfer curve, as the estimates will use it next (``source`` says what it rests on)."""
+    t, src, n = transfer_samples(history, np.random.default_rng(seed))
+    return {"kind": "estimate", "source": src, "rounds_used": n, "min_rounds": MIN_ROUNDS,
+            "t_mean": round(float(t.mean()), 4), "t_ci90": interval(t),
+            "model": "policy uplift = max(0, sandbox skill success - policy success) * t, capped at success 1"}
 
 
 def _assumptions(sand_src: str = "prior", t_src: str = "prior", rounds: int = 0) -> list[str]:
