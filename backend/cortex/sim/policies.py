@@ -2,13 +2,37 @@
 
 from __future__ import annotations
 
+import os
+import sys
 from pathlib import Path
 from typing import Any, Protocol
 
 import numpy as np
 
+from ..errors import UserError
 from .expert import ScriptedExpert
 from .so101 import TASK_TEXT, PickPlaceEnv
+
+GPU_ONLY = "Trained policies run on the GPU cluster, not this Mac: start the GPU server from the Inference tab"
+CPU_FOR_TESTS = "CORTEX_TEST_ONLY_CPU_INFERENCE"  # tests only: lets a tiny fake checkpoint run on CPU
+
+
+def has_cuda() -> bool:
+    if sys.platform == "darwin":  # macOS has no CUDA; don't import torch to learn that
+        return False
+    import torch
+
+    return torch.cuda.is_available()
+
+
+def inference_device(device: str = "cuda") -> str:
+    """Where a trained policy may run: a CUDA GPU, never this Mac's CPU (#290). Raises UserError otherwise.
+    The scripted oracle has no network and never asks."""
+    if os.environ.get(CPU_FOR_TESTS) == "1":
+        return "cpu"
+    if device.startswith("cuda") and has_cuda():
+        return device
+    raise UserError(GPU_ONLY)
 
 
 class Policy(Protocol):
@@ -31,12 +55,13 @@ class ExpertPolicy:
 
 
 class LeRobotPolicy:
-    """Any LeRobot pretrained_model/ directory (ACT, SmolVLA, ...), run on CPU.
+    """Any LeRobot pretrained_model/ directory (ACT, SmolVLA, ...), run on a CUDA GPU only.
 
     Uses the saved pre/post processors so normalization matches training."""
 
-    def __init__(self, path: str | Path, device: str = "cpu", task: str = TASK_TEXT,
+    def __init__(self, path: str | Path, device: str = "cuda", task: str = TASK_TEXT,
                  cameras: dict[str, str] | None = None):
+        device = inference_device(device)  # before any weights are read
         import json
 
         import torch

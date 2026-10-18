@@ -199,11 +199,13 @@ def test_teleop_recording_writes_a_lerobot_dataset(tmp_path):
     assert "observation.images.front" in ds.meta.features and ds.meta.robot_type == "so101_follower"
 
 
-def test_a_trained_policy_drives_the_arm_under_the_same_rules(tmp_path):
+def test_a_trained_policy_drives_the_arm_under_the_same_rules(tmp_path, monkeypatch):
     from tiny_act import make_tiny_act
 
     from cortex.errors import UserError
+    from cortex.sim.policies import CPU_FOR_TESTS
 
+    monkeypatch.setenv(CPU_FOR_TESTS, "1")  # the tiny fake ACT runs on CPU here; real policies need the GPU (#290)
     ck = make_tiny_act(tmp_path / "ck", cameras=("front",))
     with pytest.raises(UserError, match=r"needs camera\(s\) \['front'\].*\['wrist'\]"):
         aw.PolicySource(str(ck), ["wrist"])  # refused before the arm is touched

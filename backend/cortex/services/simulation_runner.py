@@ -257,7 +257,7 @@ async def run_branch(ctx: Ctx, job: Job, run: EvaluationRun, b: SimulationBranch
         if ctx.jobs.stop_requested(job.id):  # the stop ended the worker before the task saw the cancel
             b.status, b.error = JobStatus.cancelled, "stopped by user"
         else:
-            b.status, b.error = JobStatus.failed, (str(e) if isinstance(e, BranchNeverStarted)
+            b.status, b.error = JobStatus.failed, (str(e) if getattr(e, "user_facing", False)  # written for people
                                                    else f"{type(e).__name__}: {e}")[:500]
         raise
     finally:
