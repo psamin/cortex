@@ -131,10 +131,9 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
         seed = visible_seed(p["task"], env, seed)
     obs = env.reset(seed)
     policy.reset(env, obs, seed)
-    # A plain 640x480 camera for the live view: the studio's high-quality presentation renderer (8x MSAA, huge
-    # shadow maps) renders garbage under headless EGL in this server, and its 1280x960 frames were too big for the
-    # VPN tunnel (~1.5 fps). The policy's own wrist view is inset.
-    view = mujoco.Renderer(env.world.model, 480, 640)
+    # The live view is the policy's own front camera (already rendered every step), scaled up, with its wrist camera
+    # inset. A second MuJoCo renderer in this process drew garbage under headless EGL (mujoco.Renderer does not
+    # re-select its GL context after the env's renderer runs), so the live view adds no renderer of its own.
     held = 0
     try:
         for step in range(env.max_steps):
@@ -150,8 +149,8 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                     break
                 time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
                 continue
-            view.update_scene(env.world.data, camera="front")
-            frame = _inset(view.render(), obs["pixels"]["wrist"])
+            front = Image.fromarray(obs["pixels"]["front"]).resize((640, 480), Image.BILINEAR)
+            frame = _inset(np.asarray(front), obs["pixels"]["wrist"])
             obs, _, success, _, _ = env.step(action)
             held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
             status = ("Task complete (verified by the simulator)", (110, 220, 130)) if success else (
@@ -167,5 +166,4 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                 break
             time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
     finally:
-        view.close()
         env.close()
