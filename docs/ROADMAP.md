@@ -23,7 +23,7 @@ status here.
 | P11 | RL distillation: PPO state expert in sim, then demo generation | `backend/cortex/rl/*`, `infra/futurama/train_rl.sbatch` | P5 | planned |
 | P12 | Autopilot v2 stages (sim pretrain, twin rounds, improve) | `services/autopilot.py` | P6a, P10, P11 | planned |
 | P13 | Deliver: `get_policy` and model card | `services/policy_card.py`, tools | P12 | planned |
-| P14 | Studio: intake and rounds views | `web/src/**` | P3, P12 | planned |
+| P14 | **Agentic chat studio**: a clean chat-first UI where a person teaches and trains a policy end to end (intake question cards, scene previews, feasibility, collection, training approval, evaluation, live progress). Works with the LLM agent or, without a model key, a guided planner. | `web/src/**`, `backend/cortex/services/agent.py`, `backend/cortex/services/guide.py` | P3 | in progress |
 
 ## Post-MVP: hardware track (separate modules; the MVP never imports them)
 
