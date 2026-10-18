@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import importlib
 
-TASKS = {"jenga": "jenga", "suture": "suture", "assembly": "assembly"}
+TASKS = {"jenga": "jenga", "suture": "suture", "assembly": "assembly", "unscrew": "unscrew"}
 
 
 def make(name: str, height: int | None = None, width: int | None = None):
