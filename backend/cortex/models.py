@@ -148,7 +148,8 @@ class AutopilotRun(BaseModel):
 
 class EpisodeSource(StrEnum):
     sim_scripted = "sim_scripted"  # scripted IK oracle in MuJoCo (privileged state)
-    sim_agent = "sim_agent"  # GPT-6 Astra plans, validated IK executes, in MuJoCo
+    sim_agent = "sim_agent"  # an agent planner (Claude Code / VLM) drives validated IK, in MuJoCo
+    imported = "imported"  # demonstrations imported from an existing LeRobot dataset (e.g. real teleop)
     sim_teleop = "sim_teleop"
     real_teleop = "real_teleop"
 
@@ -485,6 +486,8 @@ class StartAgentCollectionRequest(BaseModel):
     reason: str = ""
     base_seed: int | None = Field(None, description="fix scenes and seeds (A/B runs use the same value)")
     task: str | None = Field(None, description="override the project's task text given to the planner")
+    planner: Literal["auto", "claude_code", "model"] = Field(
+        "auto", description="auto = the user's Claude Code when available, else the configured model route")
 
 
 class AgentCollection(BaseModel):
