@@ -106,7 +106,7 @@ function Sessions() {
       </p>
       {sessions.isLoading ? (
         <SkeletonRows rows={3} />
-      ) : sessions.error ? (
+      ) : sessions.error && !sessions.data ? (
         <ErrorState error={sessions.error} onRetry={() => sessions.refetch()} />
       ) : !list.length ? (
         <Panel title="No agents yet">
@@ -166,7 +166,7 @@ export function AgentsPage() {
         <div className="mt-6">
           {me.isLoading ? (
             <SkeletonRows rows={4} />
-          ) : me.error ? (
+          ) : me.error && !me.data ? (
             <ErrorState error={me.error} onRetry={() => me.refetch()} />
           ) : me.data && !me.data.signed_in ? (
             <SignIn onDone={() => void qc.invalidateQueries({ queryKey: ["agents"] })} />

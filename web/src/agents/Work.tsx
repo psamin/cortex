@@ -151,7 +151,7 @@ function EvaluationCard({ e }: { e: EvaluationWithBranches }) {
               <div className="flex items-baseline justify-between gap-2 text-xs">
                 <span className="truncate text-ink-2">{humanize(b.spec.name)}</span>
                 <span className="num shrink-0 text-ink">
-                  {r ? `${r.successes}/${r.n} · ${pct(r.success_rate)}` : b.status === "running" || b.status === "queued" ? "running…" : b.error ? "failed" : "—"}
+                  {r ? `${r.successes}/${r.n} · ${pct(r.success_rate)}` : b.status === "running" || b.status === "queued" ? "running…" : "—"}
                 </span>
               </div>
               <div className="relative mt-1 h-1.5 rounded-full bg-rail">
@@ -271,15 +271,16 @@ export function NowBar({ session, calls, work }: { session: AgentSession; calls:
  */
 export function WorkBoard({ from, work, loading, compact }: { from?: string; work: (ProjectWork | undefined)[]; loading: boolean; compact?: boolean }) {
   const [all, setAll] = useState(!from);
-  const pick = <T extends { created_at?: string }>(xs: T[]) => (all ? xs : since(xs, from));
+  // failed work is left out: its errors stay in the backend logs, not the studio (#328)
+  const pick = <T extends { created_at?: string; status: string }>(xs: T[]) => (all ? xs : since(xs, from)).filter((x) => x.status !== "failed");
   const rows = work.filter(Boolean) as ProjectWork[];
   const collections = rows.flatMap((w) => pick(w.collections));
   const jobs = rows.flatMap((w) => pick(w.jobs).filter((j) => !COVERED.has(j.kind)));
   const demoJobs = jobs.filter((j) => j.kind === "record" || j.kind === "import");
   const otherJobs = jobs.filter((j) => j.kind !== "record" && j.kind !== "import");
   const training = rows.flatMap((w) => pick(w.training).map((t) => ({ t, pid: w.pid })));
-  const evals = rows.flatMap((w) => (all ? w.evaluations : w.evaluations.filter((e) => since([e.run], from).length)));
-  const sandboxes = rows.flatMap((w) => w.sandboxes.filter((s) => s.status !== "dismissed"));
+  const evals = rows.flatMap((w) => (all ? w.evaluations : w.evaluations.filter((e) => since([e.run], from).length)).filter((e) => e.run.status !== "failed"));
+  const sandboxes = rows.flatMap((w) => w.sandboxes.filter((s) => s.status !== "dismissed" && s.status !== "failed"));
   const empty = !collections.length && !demoJobs.length && !otherJobs.length && !training.length && !evals.length && !sandboxes.length;
 
   return (

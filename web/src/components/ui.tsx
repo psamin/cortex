@@ -8,8 +8,8 @@ import {
   type ReactNode,
   type SelectHTMLAttributes,
 } from "react";
-import { CircleDashed, PlugZap, X } from "lucide-react";
-import { ApiError, API_BASE } from "../api/client";
+import { CircleDashed, X } from "lucide-react";
+import { ApiError } from "../api/client";
 import type { JobStatus } from "../api/types";
 import { cn, errorMessage } from "../lib/format";
 import { IsoIcon, SketchScene, type IsoIconName } from "../sketch";
@@ -194,21 +194,26 @@ export function splitError(error: unknown, detail?: string | null, fallback = "S
   return { text, detail: det };
 }
 
-/** "Details" toggle for technical text. */
-export function ErrorDetails({ detail }: { detail?: string }) {
-  const [open, setOpen] = useState(false);
-  if (!detail) return null;
-  return (
-    <>
-      <button type="button" onClick={() => setOpen((o) => !o)} className="mt-0.5 border-b border-line-strong text-xs text-ink-3 hover:border-ink hover:text-ink">
-        {open ? "Hide details" : "Details"}
-      </button>
-      {open && <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-sm border border-line bg-well px-2 py-1.5 font-mono text-[11px] text-ink-3 scroll-thin">{detail}</pre>}
-    </>
-  );
+/** Raw error text: exception names, pydantic dumps, tracebacks, errno, shell/Slurm error lines. */
+const RAW =
+  /Traceback|validation errors? for|Errno|\b[A-Z]\w*(Error|Exception)\b|\b(error|fatal):|errors\.pydantic\.dev|Extra inputs are not permitted|Connection refused|Permission denied|No such file or directory/;
+
+/**
+ * A Cortex sentence without the raw error it quotes (#328): "(…)" asides holding one are dropped, and a raw ": …"
+ * tail is cut (a plain last clause, e.g. "the built-in planner answered instead.", stays). "" when nothing plain is
+ * left. The full text stays in the backend logs.
+ */
+export function plainText(text: string): string {
+  const t = text.replace(/\s*\((?:[^()]|\([^()]*\))*\)/g, (m) => (RAW.test(m) ? "" : m));
+  if (!RAW.test(t)) return t;
+  const i = t.indexOf(": ");
+  if (i <= 0) return "";
+  const j = t.lastIndexOf(": ");
+  const tail = t.slice(j + 2);
+  return j > i && !RAW.test(tail) ? `${t.slice(0, i)}: ${tail}` : `${t.slice(0, i)}.`;
 }
 
-/** One-line inline error: readable text, technical text behind "Details". */
+/** An action that didn't go through, in one plain line. The error itself goes to the console, never the studio (#328). */
 export function InlineError({
   error,
   detail,
@@ -222,53 +227,32 @@ export function InlineError({
   prefix?: string;
   className?: string;
 }) {
-  const e = splitError(error, detail, fallback);
+  useEffect(() => console.warn("[cortex]", error, detail ?? ""), [error, detail]);
   return (
-    <div className={cn("text-xs", className)} role="alert">
-      <p className="text-fault">
-        {prefix}
-        {e.text}
-      </p>
-      <ErrorDetails detail={e.detail} />
-    </div>
+    <p className={cn("text-xs text-ink-3", className)} role="status">
+      {prefix ? `${prefix.replace(/:\s*$/, "")}.` : fallback ?? "That didn't go through. Try again."}
+    </p>
   );
 }
 
+/**
+ * A failed load says so plainly and retries by itself (with `onRetry`); a failed action asks to try again. No raw
+ * error text, HTTP codes or "Request failed" in the studio: the error goes to the console and the backend logs (#328).
+ */
 export function ErrorState({ error, onRetry, compact }: { error: unknown; onRetry?: () => void; compact?: boolean }) {
-  const unreachable = error instanceof ApiError && error.unreachable;
-  const split = splitError(error);
+  useEffect(() => console.warn("[cortex]", error), [error]);
+  const retry = useRef(onRetry);
+  retry.current = onRetry;
+  const retrying = !!onRetry;
+  useEffect(() => {
+    if (!retrying) return;
+    const t = setInterval(() => retry.current?.(), 5000);
+    return () => clearInterval(t);
+  }, [retrying]);
   return (
-    <div
-      role="alert"
-      className={cn(
-        "flex items-start gap-2.5 rounded border border-fault/30 bg-plate text-sm",
-        compact ? "p-2.5" : "p-3.5",
-      )}
-    >
-      {unreachable ? (
-        <PlugZap className="mt-0.5 h-4 w-4 shrink-0 text-fault" />
-      ) : (
-        <IsoIcon name="warning" size={18} className="mt-px" />
-      )}
-      <div className="min-w-0 flex-1">
-        <p className="font-mono text-[11px] font-medium uppercase tracking-[0.14em] text-fault">{unreachable ? "Backend unreachable" : "Request failed"}</p>
-        <p className="mt-0.5 break-words text-xs text-ink-3">
-          {unreachable ? (
-            <>
-              No response from <span className="font-mono">{API_BASE}</span>. Start the API server or set
-              VITE_API_URL.
-            </>
-          ) : (
-            split.text
-          )}
-        </p>
-        {!unreachable && <ErrorDetails detail={split.detail} />}
-      </div>
-      {onRetry && (
-        <Button size="sm" variant="ghost" onClick={onRetry}>
-          Retry
-        </Button>
-      )}
+    <div role="status" className={cn("flex items-center gap-2.5 rounded border border-line bg-plate text-xs text-ink-3", compact ? "p-2.5" : "p-3.5")}>
+      {retrying && <CircleDashed className="h-3.5 w-3.5 shrink-0 animate-spin" />}
+      <p className="min-w-0 flex-1">{retrying ? "Couldn't load this yet — retrying…" : "That didn't go through. Try again."}</p>
     </div>
   );
 }
@@ -284,8 +268,8 @@ export function QueryState<T>({
   skeleton?: ReactNode;
 }) {
   if (q.isLoading) return <>{skeleton ?? <SkeletonRows />}</>;
-  if (q.error) return <ErrorState error={q.error} onRetry={() => q.refetch()} compact />;
-  if (q.data === undefined) return null;
+  // a failed refetch keeps what was already loaded on screen
+  if (q.data === undefined) return q.error ? <ErrorState error={q.error} onRetry={() => q.refetch()} compact /> : null;
   return <>{children(q.data)}</>;
 }
 

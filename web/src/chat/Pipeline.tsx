@@ -70,7 +70,8 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
         if (i === 5) return { name, state: run.iteration > 1 ? "succeeded" : "waiting", note: run.iteration ? `iteration ${run.iteration}` : undefined };
         if (i < idx) return { name, state: "succeeded" };
         if (i > idx) return { name, state: "waiting" };
-        const st: StageState = run.status === "failed" ? "failed" : run.status === "waiting_approval" ? "attention" : run.state === "DONE" ? "succeeded" : "running";
+        // a failed autopilot step shows as waiting, not red: the error stays in the backend logs (#328)
+        const st: StageState = run.status === "failed" ? "waiting" : run.status === "waiting_approval" ? "attention" : run.state === "DONE" ? "succeeded" : "running";
         return { name, state: st, note: run.status === "waiting_approval" ? "needs your OK" : undefined };
       });
     }

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleDashed, Cpu, Square, VideoOff } from "lucide-react";
 import { ApiError, api } from "../api/client";
+import { plainText } from "../components/ui";
 import { cn } from "../lib/format";
 import { initialPick, SIM_TITLE, type Pick } from "./livePick";
 
@@ -34,7 +35,7 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
       <div className="relative flex h-full flex-col items-center justify-center gap-4 px-8">
         {busy ? <CircleDashed className="h-6 w-6 animate-spin text-ink-3" /> : <Cpu className="h-6 w-6 text-ink-3" />}
         <p className="max-w-md text-center text-xs leading-5 text-ink-2">
-          {start.isPending && !s?.step ? "Requesting a GPU on Georgia Tech's Futurama cluster…" : s?.reason ?? "Checking the GPU server…"}
+          {start.isPending && !s?.step ? "Requesting a GPU on Georgia Tech's Futurama cluster…" : (s?.reason && plainText(s.reason)) || "Checking the GPU server…"}
         </p>
         {at >= 0 && (
           <ol className="space-y-1 text-xs">
@@ -61,7 +62,7 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
             </button>
           )}
         </div>
-        {err && err.message !== s?.reason && <p className="max-w-sm text-center text-xs text-fault">{err.message}</p>}
+        {err && err.message !== s?.reason && <p className="max-w-sm text-center text-xs text-ink-3">Couldn't reach the GPU server. Try again.</p>}
       </div>
     );
   }

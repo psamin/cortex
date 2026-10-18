@@ -314,17 +314,22 @@ export function buildBlocks(items: ChatItem[]): Block[] {
   const seen = new Set<string>();
   let trainingApproval = false;
   for (const it of items) {
+    // Only what went right is shown: failed calls, turn errors and failed jobs stay in the backend's logs (#328).
+    if (it.kind === "error" || (it.kind === "job_done" && it.status === "failed")) continue;
     if (it.kind === "tool") {
+      // a spent planner budget still asks you to raise it (its call row is not shown)
+      const budgetError = it.status === "error" && /budget/i.test(it.summary) ? it.summary : null;
+      if (it.status === "error" && !budgetError) continue;
+      const shown = it.status === "error" ? [] : [it];
       const last = out[out.length - 1];
       const group = last?.type === "tools" ? last : null;
-      const refs = it.refIds.filter((r) => isCardRef(r) && !seen.has(r));
+      const refs = shown.length ? it.refIds.filter((r) => isCardRef(r) && !seen.has(r)) : [];
       refs.forEach((r) => seen.add(r));
-      const budgetError = it.status === "error" && /budget/i.test(it.summary) ? it.summary : null;
       if (group) {
-        group.tools.push(it);
+        group.tools.push(...shown);
         group.cards.push(...refs);
         group.budgetError = budgetError ?? group.budgetError;
-      } else out.push({ type: "tools", tools: [it], cards: refs, budgetError, key: `t${it.id}` });
+      } else out.push({ type: "tools", tools: shown, cards: refs, budgetError, key: `t${it.id}` });
       if (refs.some((r) => prefixOf(r) === "tj")) trainingApproval = true;
       continue;
     }

@@ -5,7 +5,7 @@ import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Downlo
 import { api } from "../api/client";
 import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
-import { Segmented } from "../components/ui";
+import { plainText, Segmented } from "../components/ui";
 import { cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
@@ -178,7 +178,7 @@ export function Conversation({ pid }: { pid: string }) {
                 <div className="skeleton h-16 w-full rounded-sm" />
               </div>
             )}
-            {!!chat.loadError && <p className="text-sm text-fault">Couldn't load the chat. Is the backend running?</p>}
+            {!!chat.loadError && <p className="text-sm text-ink-3">Couldn't load the chat yet — retrying…</p>}
             {empty && (
               <div className="pt-6">
                 <p className="kn-display text-[36px]">
@@ -275,7 +275,7 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
   if (b.type === "tools")
     return (
       <div className="space-y-2.5">
-        {b.tools.length === 1 ? <ToolRow it={b.tools[0]} /> : <ToolGroup tools={b.tools} />}
+        {b.tools.length === 1 ? <ToolRow it={b.tools[0]} /> : b.tools.length > 1 && <ToolGroup tools={b.tools} />}
         {b.budgetError && <BudgetCard pid={pid} message={b.budgetError} />}
         {b.cards.length > 0 && <ResultCards pid={pid} refs={b.cards} />}
       </div>
@@ -311,17 +311,12 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
       return (
         <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
           <span className="h-px flex-1 bg-[var(--line)]" />
-          {it.isError ? "Ended with an error" : `Done${it.durationMs ? ` in ${Math.round(it.durationMs / 1000)}s` : ""}`}
+          {it.isError ? "Stopped" : `Done${it.durationMs ? ` in ${Math.round(it.durationMs / 1000)}s` : ""}`}
           <span className="h-px flex-1 bg-[var(--line)]" />
         </div>
       );
     case "error":
-      return (
-        <div className="flex items-start gap-2.5 rounded border border-fault/35 bg-plate px-4 py-2.5 text-sm text-fault">
-          <IsoIcon name="warning" size={18} className="mt-px" />
-          <span className="min-w-0 flex-1">{it.text}</span>
-        </div>
-      );
+      return null; // never reaches here: buildBlocks leaves errors out (they stay in the backend logs, #328)
   }
 }
 
@@ -350,7 +345,6 @@ function StatusIcon({ status }: { status: "running" | "ok" | "error" | "cancelle
 function ToolGroup({ tools }: { tools: ToolItem[] }) {
   const [open, setOpen] = useState(false);
   const running = tools.find((t) => t.status === "running");
-  const failed = tools.some((t) => t.status === "error");
   const calls = tools.reduce((n, t) => n + t.count, 0);
   const labels = [...new Set(tools.map((t) => toolLabel(t.tool, t.args)))];
   return (
@@ -359,7 +353,7 @@ function ToolGroup({ tools }: { tools: ToolItem[] }) {
       <button type="button" onClick={() => setOpen((o) => !o)} className="group flex w-full items-center gap-2.5 px-3 py-2 text-left" aria-expanded={open}>
         <IsoIcon name={toolIcon((running ?? tools[tools.length - 1]).tool)} size={20} accent={!!running} />
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
-          <StatusIcon status={running ? "running" : failed ? "error" : "ok"} />
+          <StatusIcon status={running ? "running" : "ok"} />
         </span>
         <span className={cn("shrink-0 text-sm", running ? "text-ink" : "text-ink-2")}>
           {running ? `${toolLabel(running.tool, running.args)}…` : `${calls} tool calls`}
@@ -431,7 +425,8 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
 function ToolRow({ it, nested }: { it: ToolItem; nested?: boolean }) {
   const [open, setOpen] = useState(false);
   const args = Object.entries(it.args).filter(([k]) => k !== "project_id");
-  const hasDetails = !!it.summary || args.length > 0;
+  const summary = plainText(it.summary);
+  const hasDetails = !!summary || args.length > 0;
   return (
     <div className={cn("enter", !nested && "sk-depth relative rounded border border-line-strong bg-plate")}>
       {!nested && <GlowEdge />}
@@ -445,12 +440,12 @@ function ToolRow({ it, nested }: { it: ToolItem; nested?: boolean }) {
           {it.status === "running" ? "…" : ""}
         </span>
         {it.count > 1 && <span className="num font-mono text-[11px] text-ink-3">×{it.count}</span>}
-        {!open && it.summary && it.status !== "running" && <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{it.summary}</span>}
+        {!open && summary && it.status !== "running" && <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{summary}</span>}
         {hasDetails && <ChevronRight className={cn("ml-auto h-3.5 w-3.5 shrink-0 text-ink-4 transition-transform group-hover:text-ink-3", open && "rotate-90")} />}
       </button>
       {open && (
         <div className={cn("space-y-1.5 text-xs", nested ? "ml-[50px] mt-1 border-l border-line pl-3" : "border-t border-line px-3 py-2.5")}>
-          {it.summary && <p className="text-ink-2">{it.summary}</p>}
+          {summary && <p className="text-ink-2">{summary}</p>}
           {args.length > 0 && (
             <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1">
               {args.map(([k, v]) => (
@@ -726,7 +721,7 @@ function NoticeRow({ it, pid }: { it: Extract<ChatItem, { kind: "notice" }>; pid
       <Icon className={cn("mt-0.5 h-3.5 w-3.5 shrink-0", needs ? "text-caution" : "text-ink-3")} strokeWidth={1.5} />
       <p className="min-w-0">
         <span className={cn("mr-1.5 font-mono text-[10px] uppercase tracking-[0.14em]", needs ? "text-caution" : "text-ink-3")}>{needs ? "Needs you" : it.tone === "engine" ? "Agent" : "Autonomous"}</span>
-        {it.text}
+        {plainText(it.text)}
         {other && (
           <Link to={`/p/${other}`} className="ml-1.5 whitespace-nowrap text-ink-2 underline underline-offset-2 hover:text-ink">
             Open project →

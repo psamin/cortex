@@ -237,7 +237,7 @@ function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: b
                     </span>
                   </span>
                 ) : (
-                  <span className="text-xs text-ink-3">{b.status === "running" || b.status === "queued" ? "running…" : b.error ? "failed" : "no result"}</span>
+                  <span className="text-xs text-ink-3">{b.status === "running" || b.status === "queued" ? "running…" : "no result"}</span>
                 )}
               </div>
               <div className={cn("relative overflow-hidden bg-[var(--line)]", large ? "h-2" : "h-1.5")}>
@@ -300,7 +300,8 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
         ) : t.status === "approved" ? (
           <Pill tone="wait">approved</Pill>
         ) : (
-          <Pill tone={t.status === "failed" ? "bad" : "muted"}>{t.status}</Pill>
+          // a failed run reads "stopped": its error stays in the backend logs (#328)
+          <Pill tone="muted">{t.status === "failed" ? "stopped" : t.status}</Pill>
         )
       }
     >
@@ -309,7 +310,6 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
       {t.backend === "manual" && t.status !== "succeeded" && (
         <div className="mt-1 text-xs text-ink-3">No GPU connected · command in Improve › Training</div>
       )}
-      {t.error && <InlineError error={t.error} fallback="Training stopped with an error." className="mt-1" />}
     </CardShell>
   );
 }
@@ -417,12 +417,11 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
       icon={active ? <CircleDashed className="h-4 w-4 animate-spin" /> : <IsoIcon name="gpu" size={22} />}
       title={j.message || j.kind.replace(/_/g, " ")}
       meta={j.kind.replace(/_/g, " ")}
-      status={active ? <Pill tone="live">{pct(j.progress)}</Pill> : j.status === "succeeded" ? <Pill tone="ok">done</Pill> : <Pill tone="bad">{j.status}</Pill>}
+      status={active ? <Pill tone="live">{pct(j.progress)}</Pill> : j.status === "succeeded" ? <Pill tone="ok">done</Pill> : <Pill tone="muted">{j.status === "failed" ? "stopped" : j.status}</Pill>}
     >
       <div className="h-1 overflow-hidden bg-[var(--line)]">
         <div className="h-full bg-servo transition-[width] duration-500 ease-out" style={{ width: `${j.progress * 100}%` }} />
       </div>
-      {j.error && <InlineError error={j.error} detail={j.error_detail} className="mt-1.5" />}
     </CardShell>
   );
 }
