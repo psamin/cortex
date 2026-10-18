@@ -1,8 +1,8 @@
 """Autonomous demonstration collection.
 
 Collectors:
-  agent   a vision-language planner (our self-hosted Qwen3-VL, or GPT-6 Astra via OpenRouter)
-          plans through the validated tool API; IK executes in MuJoCo
+  agent   the user's Claude Code (headless, through the Cortex MCP robot tools), or the opt-in
+          self-hosted Qwen3-VL, plans through the validated tool API; IK executes in MuJoCo
   oracle  the existing scripted IK expert (privileged state) on the same scenes
 
 Every attempt is persisted (agent_attempts + trace/video/trajectory in storage).
@@ -58,14 +58,13 @@ LIVE: dict[str, dict[str, Any]] = {}
 # ------------------------------------------------------------------ planner routing
 
 def resolve_planner(ctx: Ctx) -> dict[str, Any] | None:
-    """The configured model route (self-hosted first, else OpenRouter). Never substitutes
-    another model or provider when the configured one is unavailable."""
+    """The opt-in self-hosted model route, if configured. Never substitutes another model or provider
+    when the configured one is unavailable."""
     r = ctx.model
     if r is None:
         return None
     return {"provider": r.provider, "model": r.planner_model, "label": r.label, "api_key": r.api_key,
-            "endpoint": r.chat_url, "point_format": r.point_format, "openrouter_extras": r.openrouter_extras,
-            "price_per_m": r.price_per_m}
+            "endpoint": r.chat_url, "point_format": r.point_format, "price_per_m": r.price_per_m}
 
 
 async def selfhosted_reachable(ctx: Ctx) -> str | None:
@@ -89,25 +88,6 @@ async def selfhosted_reachable(ctx: Ctx) -> str | None:
                 "scripts/vlm_futurama.sh up (needs the GT VPN)")
 
 
-async def openrouter_balance_problem(ctx: Ctx) -> str | None:
-    """None if the OpenRouter account behind the route has credit left, else why not."""
-    import httpx
-
-    r = ctx.model
-    if r is None or r.provider not in ("openrouter", "insforge"):
-        return None
-    try:
-        async with httpx.AsyncClient(timeout=5) as c:
-            resp = await c.get("https://openrouter.ai/api/v1/credits", headers={"Authorization": f"Bearer {r.api_key}"})
-        if resp.status_code >= 400:
-            return None  # can't tell (some keys can't read credits); let the call itself report
-        d = resp.json().get("data", {})
-        left = float(d.get("total_credits", 0)) - float(d.get("total_usage", 0))
-        return None if left > 0.05 else f"the OpenRouter account has ${max(left, 0):.2f} of credit; add credits to use {r.planner_model}"
-    except Exception:
-        return None
-
-
 async def planner_status(ctx: Ctx) -> dict[str, Any]:
     from . import claude_code_agent as cc
 
@@ -117,10 +97,10 @@ async def planner_status(ctx: Ctx) -> dict[str, Any]:
                 "pricing_per_m_tokens": "your Claude Code subscription (not charged by Cortex)"}
     p = resolve_planner(ctx)
     if not p:
-        reason = (f"InsForge Model Gateway: {ctx.gateway_error}" if ctx.gateway_error else
-                  "No model endpoint: set PLANNER_BASE_URL (self-hosted) or an InsForge/OpenRouter key.")
+        reason = (f"{cc.available() or 'the Cortex MCP server (' + cc.MCP_URL + ') is not running'}, so Claude Code "
+                  "cannot plan; no self-hosted endpoint (PLANNER_BASE_URL) either.")
         return {"available": False, "model": None, "provider": None, "reason": reason}
-    down = await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)
+    down = await selfhosted_reachable(ctx)
     if down:
         return {"available": False, "model": p["model"], "provider": p["provider"], "route": p["label"],
                 "reason": down}
@@ -191,10 +171,12 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
         return await _start_claude_code_collection(ctx, project, req, actor)
     planner = resolve_planner(ctx) if req.collector == "agent" else None
     if req.collector == "agent" and planner is None:
-        raise PlannerUnavailable("No agent planner is configured (self-hosted endpoint or InsForge/OpenRouter key). "
-                                 "Cortex does not substitute another model; use collector='oracle' for "
-                                 "scripted-oracle demos.")
-    if req.collector == "agent" and (down := await selfhosted_reachable(ctx) or await openrouter_balance_problem(ctx)):
+        from .claude_code_agent import MCP_URL
+
+        raise PlannerUnavailable("No agent planner is available: Claude Code is not reachable (the `claude` CLI and the "
+                                 f"Cortex MCP server at {MCP_URL}) and no self-hosted endpoint is set. Cortex does not "
+                                 "substitute another model; use collector='oracle' for scripted-oracle demos.")
+    if req.collector == "agent" and (down := await selfhosted_reachable(ctx)):
         raise PlannerUnavailable(down)
     paid = bool(planner and planner["price_per_m"])
     cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
@@ -272,7 +254,7 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                    "live_dir": str(live_dir), "scene": scene,
                    "max_total_usd": cap if paid else 1e9,
                    "planner": {"provider": p["provider"], "model": p["model"], "endpoint": p["endpoint"],
-                               "point_format": p["point_format"], "openrouter_extras": p["openrouter_extras"],
+                               "point_format": p["point_format"],
                                "price_per_m": p["price_per_m"],
                                "max_calls": req.max_calls_per_episode, "max_usd": req.max_usd_per_episode,
                                "reasoning_effort": "low"},

@@ -1,6 +1,6 @@
 """Failure diagnosis by the connected MCP client's own model ("bring your own model").
 
-When Cortex has no model route of its own (no OpenRouter key, the InsForge gateway refuses), the
+When Cortex cannot run a model itself (Claude Code is not on this machine, no self-hosted endpoint), the
 MCP client can lend its model instead. Two backend tools carry it:
 
   get_diagnosis_inputs       runs the measured part of an analysis (quality checks, simulator

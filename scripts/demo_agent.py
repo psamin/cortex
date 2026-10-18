@@ -59,7 +59,8 @@ def main() -> None:
     pl = c.get("/planner").json()
     print("planner:", pl.get("route") or pl.get("reason"))
     if a.collector == "astra" and not pl["available"]:
-        sys.exit("GPT-6 Astra is not configured. Add the InsForge key (or rerun with --collector oracle).")
+        sys.exit(f"The agent planner is not available ({pl.get('reason')}). Start Claude Code and the MCP "
+                 "server, or rerun with --collector oracle.")
 
     pid = a.project or c.post("/projects", json={"task_prompt": "Train my SO-101 to pick up a cube and place it "
                                                                 "in a bowl."}).json()["id"]

@@ -36,7 +36,7 @@ def test_requests_never_exceed_the_image_limit():
 
     planner = AstraPlanner(PlannerConfig(provider="selfhosted", api_key="none", model="Qwen/Qwen3-VL-8B-Instruct",
                                          endpoint="http://vllm.test/v1/chat/completions", price_per_m=None,
-                                         openrouter_extras=False, max_images=4),
+                                         max_images=4),
                            transport=httpx.MockTransport(handler))
     planner._complete([{"role": "system", "content": "s"}, *[image_msg(i) for i in range(12)]], Usage())
     assert len(urls(sent[0]["messages"])) == 4

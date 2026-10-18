@@ -63,15 +63,14 @@ def redact_secrets(value: Any) -> Any:
 class ModelRoute:
     """Where every model call goes. One route serves planning, diagnostics and chat."""
 
-    provider: str  # selfhosted | insforge | openrouter
+    provider: str  # selfhosted
     label: str  # shown in the studio and recorded on every attempt
-    base_url: str  # OpenAI-compatible base, e.g. https://openrouter.ai/api/v1
+    base_url: str  # OpenAI-compatible base, e.g. http://127.0.0.1:8001/v1 (vLLM)
     api_key: str
     planner_model: str
     vlm_model: str
     agent_model: str
     point_format: str = "pixels"  # how the model reports image points: pixels | norm1000
-    openrouter_extras: bool = True  # send OpenRouter-only fields (reasoning, usage.include)
     price_per_m: dict[str, float] | None = None  # None = no per-token charge (self-hosted)
 
     @property
@@ -90,7 +89,6 @@ class Ctx:
     data_dir: Path
     model: ModelRoute | None = None
     vlm_source: str = "disabled"
-    gateway_error: str | None = None  # why the InsForge Model Gateway gave no key (e.g. plan restriction)
     # signed media URLs, reused until close to expiry so polling doesn't reload every <video>
     signed_urls: dict[str, tuple[str, float]] = field(default_factory=dict)
     notes: list[str] = field(default_factory=list)
@@ -198,42 +196,29 @@ async def build_ctx(s: Settings) -> Ctx:
     })
     # #endregion
 
-    route, gw_err = await resolve_model_route(s)
+    route = resolve_model_route(s)
     src = route.label if route else "disabled"
     if not route:
-        why = f"InsForge Model Gateway: {gw_err}" if gw_err else "no model endpoint configured"
-        notes.append(f"Models disabled ({why}). Agent planning and VLM diagnostics are off; the scripted "
-                     "oracle, telemetry analysis and everything else still run.")
+        from .services.claude_code_agent import available
+
+        if why := available():
+            notes.append(f"Models disabled ({why}; no self-hosted endpoint either). Scene-from-photo, agent "
+                         "planning and VLM diagnostics are off; the scripted oracle, telemetry analysis and "
+                         "everything else still run.")
 
     bus = EventBus()
     return Ctx(settings=s, store=store, blobs=blobs, repo=Repo(store), bus=bus,
                jobs=JobManager(bus, persist=s.data_dir / "jobs.json"),
-               data_dir=s.data_dir, model=route, vlm_source=src, gateway_error=gw_err, notes=notes)
+               data_dir=s.data_dir, model=route, vlm_source=src, notes=notes)
 
 
-OPENROUTER_BASE = "https://openrouter.ai/api/v1"
-ASTRA = "openai/gpt-6-astra"
-
-
-async def resolve_model_route(s: Settings) -> tuple[ModelRoute | None, str | None]:
-    """Self-hosted endpoint first (our own model), then OpenRouter via the InsForge gateway
-    (or a self-hosted InsForge's OPENROUTER_API_KEY). Never mixes providers within a run."""
-    if s.planner_base_url:
-        m = s.selfhosted_model
-        return ModelRoute(provider="selfhosted", label=f"self-hosted {m} ({s.planner_base_url})",
-                          base_url=s.planner_base_url, api_key=s.planner_api_key or "none", planner_model=m,
-                          vlm_model=m, agent_model=m, point_format=s.selfhosted_point_format,
-                          openrouter_extras=False, price_per_m=None), None
-    key, gw_err, label, provider = None, None, "", ""
-    if s.openrouter_api_key:
-        key, label, provider = s.openrouter_api_key, "OpenRouter (OPENROUTER_API_KEY)", "openrouter"
-    elif s.insforge_enabled:
-        from .store.insforge import gateway_key
-
-        key, gw_err = await gateway_key(s.insforge_base_url, s.insforge_api_key)  # type: ignore[arg-type]
-        label, provider = "InsForge Model Gateway → OpenRouter", "insforge"
-    if not key:
-        return None, gw_err
-    return ModelRoute(provider=provider, label=label, base_url=OPENROUTER_BASE, api_key=key, planner_model=ASTRA,
-                      vlm_model=s.vlm_model, agent_model=s.agent_model, point_format="pixels",
-                      openrouter_extras=True, price_per_m={"input": 10.0, "output": 50.0}), None
+def resolve_model_route(s: Settings) -> ModelRoute | None:
+    """The opt-in self-hosted endpoint (our own model), or None. Everything else that needs a model
+    (scene from a photo, agent demos, diagnosis, the studio agent) runs on the user's Claude Code,
+    which is resolved per call (services/claude_code_agent.py), never on a paid model gateway."""
+    if not s.planner_base_url:
+        return None
+    m = s.selfhosted_model
+    return ModelRoute(provider="selfhosted", label=f"self-hosted {m} ({s.planner_base_url})",
+                      base_url=s.planner_base_url, api_key=s.planner_api_key or "none", planner_model=m,
+                      vlm_model=m, agent_model=m, point_format=s.selfhosted_point_format, price_per_m=None)

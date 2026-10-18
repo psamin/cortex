@@ -76,8 +76,7 @@ def main() -> None:
         reasoning_effort=pc.get("reasoning_effort", "low"),
         # CORTEX_PLANNER_BASE_URL: test hook (a local stub); the endpoint actually called is recorded per attempt
         endpoint=os.environ.get("CORTEX_PLANNER_BASE_URL") or pc.get("endpoint", ""),
-        point_format=pc.get("point_format", "pixels"), openrouter_extras=pc.get("openrouter_extras", True),
-        price_per_m=pc.get("price_per_m", {"input": 10.0, "cached": 1.0, "output": 50.0})))
+        point_format=pc.get("point_format", "pixels"), price_per_m=pc.get("price_per_m")))
     from ..sim import env_factory
 
     env = env_factory.make_env(cfg.get("scene"), 10_000)

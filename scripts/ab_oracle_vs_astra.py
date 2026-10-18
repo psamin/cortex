@@ -78,7 +78,7 @@ def save(name: str, data: dict) -> Path:
 
 def cmd_collect(c: httpx.Client, a) -> None:
     if not c.get("/planner").json().get("available"):
-        sys.exit("GPT-6 Astra is not configured; the A/B needs it (no other model is substituted).")
+        sys.exit("The agent planner is not available; the A/B needs it (no other model is substituted).")
     pid = a.project or c.post("/projects", json={"task_prompt": "Pick up the cube and place it in the bowl",
                                                  "demo_budget": a.n}).json()["id"]
     base = {"num_demos": a.n, "diversity": a.diversity, "base_seed": a.base_seed}

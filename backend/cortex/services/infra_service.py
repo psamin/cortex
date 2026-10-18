@@ -44,18 +44,18 @@ async def options(ctx: Ctx, project: Project) -> dict[str, Any]:
     s = ctx.settings
     cc_ok = cc.available() is None and await cc.mcp_up()
     route = acs.resolve_planner(ctx)
-    problem = (await acs.openrouter_balance_problem(ctx) or await acs.selfhosted_reachable(ctx)) if route else None
+    problem = await acs.selfhosted_reachable(ctx) if route else None
     host = s.futurama_ssh_host
     reach = await futurama_reachable(host) if host else False
     hwst = hw.status(ctx.data_dir, s.cortex_enable_hardware)
     return {
         "choice": project.infra.model_dump(),
         "planner": [
-            opt("auto", "Automatic (your Claude Code when it's running, else the model route)", True),
+            opt("auto", "Automatic (your Claude Code when it's running, else the self-hosted model)", True),
             opt("claude_code", "Claude Code (your agent)", cc_ok,
                 cc.available() or "the Cortex MCP server (http://localhost:3000/mcp) isn't running"),
-            opt("model", route["label"] if route else "Model route", bool(route) and not problem,
-                problem or "no model is configured (self-hosted endpoint, OpenRouter or InsForge key)"),
+            opt("model", route["label"] if route else "Self-hosted model", bool(route) and not problem,
+                problem or "no self-hosted endpoint is configured (PLANNER_BASE_URL)"),
         ],
         "training_backend": [
             opt("auto", "Automatic (Futurama when configured, else run it yourself)", True),

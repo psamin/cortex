@@ -42,8 +42,8 @@
   "session": [
     {
       "tool": "cortex.start_intake",
-      "args": { "prompt": "pick up the small water bottle and put it on the mat" },
-      "returns": "prj_… and typed questions, each with a ready patch"
+      "args": { "prompt": "pick up the small water bottle and put it on the mat", "image_path": "~/Pictures/my-desk.jpg" },
+      "returns": "prj_…, the scene Claude Code read from the photo (or pass description, or scene_source: default) and typed questions, each with a ready patch"
     },
     {
       "tool": "cortex.update_intake",

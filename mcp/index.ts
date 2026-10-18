@@ -18,8 +18,8 @@ const server = new MCPServer({
   title: "Cortex",
   version: "0.1.0",
   description:
-    "Cortex robot-learning studio: create projects, record simulated demonstrations, analyze failures, build datasets, " +
-    "propose training (human-approved) and evaluate policies in simulation.",
+    "Cortex robot-learning studio: rebuild your robot's workspace in simulation from a photo, a description or a default " +
+    "scene, collect demonstrations, analyze failures, build datasets, propose training (human-approved) and evaluate policies.",
   // Verifies the HMAC-signed state that intake forms (input_required) carry between rounds.
   requestState: intakeRequestState,
   // Branding for clients and Manufact's publish checks; files live in public/ (same mark as the studio favicon).
@@ -41,10 +41,13 @@ const server = new MCPServer({
     "line the name and watch link it returns (\"Connected to Cortex as <your name>. Watch me work at ...\").",
     "",
     "GOLDEN PATH (use these tools in this order unless the user asks for something else):",
-    "1. cortex_create_policy_project: creates the project and starts autonomous demonstration collection. This is the fast",
-    "   path for the built-in tabletop pick-and-place scene (red cube into a box). For a custom scene (the user's own objects, zones or",
-    "   obstacles), use cortex_start_intake -> cortex_update_intake (answer the questions) -> cortex_build_simulation",
-    "   instead, then collect with cortex_start_agent_collection.",
+    "1. SET UP THE SCENE. Ask the human how (cortex_start_intake shows them a form when your client supports one):",
+    "   - a photo of their real setup: cortex_start_intake with image_path (Cortex's Claude Code rebuilds the scene from it);",
+    "   - their own detailed description: cortex_start_intake with description;",
+    "   - the default scene (red cube into a box): cortex_create_policy_project, which also starts collecting (skip to step 2).",
+    "   For a photo or description, show the human what was estimated (scene_setup) and the open questions, send their",
+    "   answers with cortex_update_intake, then cortex_build_simulation, compare cortex_capture_frame with their setup,",
+    "   and collect with cortex_start_agent_collection.",
     "2. cortex_get_collection_progress: poll with the collection_id until the collection is done.",
     "3. cortex_train_from_agent_demonstrations: builds the dataset version AND proposes ACT training in one call.",
     "   (Custom path: cortex_create_dataset_version -> cortex_propose_training_job. propose_training_job needs a",
@@ -66,6 +69,10 @@ const server = new MCPServer({
     "open, stream progress and return the finished result: no wait_s and no polling needed. Otherwise they return a job_id:",
     "poll it with cortex_get_job (or cortex_get_collection_progress). Use cortex_get_next_actions when you are unsure",
     "what comes next. Report only measured simulator results; VLM failure clusters are hypotheses.",
+    "",
+    "MODELS: Cortex's own model work (reading a scene photo, planning agent demos, diagnosing failures) runs on the Claude",
+    "Code installed on the Cortex machine (the user's subscription; no per-call charge from Cortex), or an opt-in",
+    "self-hosted model. If Claude Code is not available, the tool says so: offer the default scene and scripted-oracle demos.",
     "",
     "INTAKE: never guess answers to intake questions. If the client supports forms, cortex_start_intake / cortex_update_intake",
     "ask the human directly; otherwise relay the questions to the human and send their answers with cortex_update_intake.",

@@ -163,7 +163,8 @@ RECIPES = [
         "cortex.capture_frame", "cortex.start_agent_collection", "cortex.get_collection_progress",
         "cortex.create_dataset_version", "cortex.propose_training_job", "cortex.launch_training_job",
         "cortex.get_project_state"],
-     "Answer intake questions with the patch each one carries until complete. Only simulator-verified successes "
+     "Start from a photo of the real setup (image_path), the person's description, or scene_source='default'; ask "
+     "them which. Answer intake questions with the patch each one carries until complete. Only simulator-verified successes "
      "become LeRobotDataset v3 episodes. Stop after propose_training_job and ask the person to approve it in the "
      "studio; never invent an approval token. A checkpoint (ck_...) appears in get_project_state when training ends."),
     ("Collect demonstrations by driving the arm yourself", [

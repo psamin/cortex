@@ -1,5 +1,5 @@
 """Integration: REST/MCP tool -> collection service -> agent worker subprocess ->
-planner loop (against the local FakePlanner test double, never GPT-6 Astra) ->
+planner loop (against the local FakePlanner test double on the self-hosted route) ->
 MuJoCo + IK -> attempts/episodes in the store -> LeRobot dataset.
 Takes ~1 minute (real physics, subprocesses)."""
 
@@ -11,12 +11,15 @@ from fastapi.testclient import TestClient
 
 from fake_planner import FakePlanner
 
+MODEL = "test/fake-planner"  # FakePlanner's default model id
+
 
 @pytest.fixture(scope="module")
 def client(tmp_path_factory):
     data = tmp_path_factory.mktemp("cortex-data")
     with FakePlanner(sabotage={1}) as fp:
-        env = {"DATA_DIR": str(data), "OPENROUTER_API_KEY": "test-key", "CORTEX_PLANNER_BASE_URL": fp.url,
+        env = {"DATA_DIR": str(data), "PLANNER_BASE_URL": fp.base, "SELFHOSTED_MODEL": fp.model_id,
+               "SELFHOSTED_POINT_FORMAT": "pixels", "CORTEX_PLANNER_BASE_URL": "",
                "INSFORGE_BASE_URL": "", "INSFORGE_API_KEY": "", "AGENT_ENGINE": "model"}
         old = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
@@ -46,12 +49,12 @@ def wait(c, cid, timeout=300):
 def test_agent_collection_end_to_end(client):
     c = client
     pl = c.get("/api/planner").json()
-    assert pl["available"] and pl["model"] == "openai/gpt-6-astra" and pl["provider"] == "openrouter"
+    assert pl["available"] and pl["model"] == MODEL and pl["provider"] == "selfhosted"
 
     p = c.post("/api/projects", json={"task_prompt": "Train my SO-101 to pick up a cube and put it in a bowl"}).json()
     col = c.post(f"/api/projects/{p['id']}/agent-collections",
                  json={"num_demos": 3, "diversity": "medium", "max_usd_per_episode": 1.0}).json()
-    assert col["collector"] == "agent" and col["model"] == "openai/gpt-6-astra" and len(col["scenarios"]) == 3
+    assert col["collector"] == "agent" and col["model"] == MODEL and len(col["scenarios"]) == 3
     r = wait(c, col["id"])
     att = r["attempts"]
     assert len(att) == 3 and r["collection"]["status"] == "succeeded"
@@ -60,12 +63,12 @@ def test_agent_collection_end_to_end(client):
     ok = [a for a in att if a["status"] == "success"]
     assert len(ok) == 2, [a.get("error") or a.get("stop_reason") for a in att]
     for a in att:
-        assert a["provider"] == "OpenRouter (OPENROUTER_API_KEY)" and a["endpoint"].startswith("http://127.0.0.1")
+        assert a["provider"].startswith("self-hosted") and a["endpoint"].startswith("http://127.0.0.1")
         assert {"trace", "episode", "front"} <= set(a["artifacts"])
     # failures are diagnostics only: no Episode row
     eps = c.get(f"/api/projects/{p['id']}/episodes").json()
     assert {e["provenance"]["attempt_id"] for e in eps} == {a["id"] for a in ok}
-    assert all(e["source"] == "sim_agent" and e["provenance"]["planner"] == "openai/gpt-6-astra" for e in eps)
+    assert all(e["source"] == "sim_agent" and e["provenance"]["planner"] == MODEL for e in eps)
     # trace is inspectable and phases come from executed tools
     tr = c.get(f"/api/agent-attempts/{ok[0]['id']}").json()
     phases = [s["phase"] for s in tr["trace"]]
@@ -110,21 +113,27 @@ def test_astra_is_never_substituted(client, monkeypatch):
         ctx.model = saved
 
 
-def test_budget_gate_blocks_mcp_overspend(client):
+async def test_budget_gate_blocks_overspend(client):
+    """A priced planner route is capped by the project's standing model budget."""
+    from cortex.api import app as appmod
+    from cortex.models import Project, StartAgentCollectionRequest
+    from cortex.services import agent_collection_service as acs
+
+    ctx = appmod.ctx()
     p = client.post("/api/projects", json={"task_prompt": "pick up the cube"}).json()
-    r = client.post("/api/tools/start_agent_collection", headers={"X-Cortex-Actor": "mcp"},
-                    json={"project_id": p["id"], "num_demos": 1, "max_total_usd": 500})
-    assert r.status_code == 403 and "budget" in r.json()["detail"].lower()
+    project = await ctx.repo.get("projects", p["id"], Project)
+    with pytest.raises(acs.PlannerBudgetExceeded, match="budget"):
+        await acs.check_budget(ctx, project, StartAgentCollectionRequest(num_demos=1, max_total_usd=500))
 
 
 def test_selfhosted_qwen_route_converts_norm1000_points(tmp_path):
     """Our own model behind an OpenAI-compatible endpoint (the vLLM route), answering in
-    Qwen3-VL's relative 0-1000 coordinates: reachability check, point conversion, no
-    OpenRouter-only fields, zero per-token cost, and the real model id in provenance."""
+    Qwen3-VL's relative 0-1000 coordinates: reachability check, point conversion, plain
+    OpenAI-compatible request fields, zero per-token cost, and the real model id in provenance."""
     model = "Qwen/Qwen3-VL-8B-Instruct"
     with FakePlanner(point_format="norm1000", model_id=model) as fp:
         env = {"DATA_DIR": str(tmp_path), "PLANNER_BASE_URL": fp.base, "PLANNER_API_KEY": "local",
-               "OPENROUTER_API_KEY": "", "INSFORGE_BASE_URL": "", "INSFORGE_API_KEY": "",
+               "INSFORGE_BASE_URL": "", "INSFORGE_API_KEY": "",
                "CORTEX_PLANNER_BASE_URL": "", "AGENT_ENGINE": "model"}
         old = {k: os.environ.get(k) for k in env}
         os.environ.update(env)

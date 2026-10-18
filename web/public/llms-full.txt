@@ -527,11 +527,14 @@ Arguments:
 - `prompt` (string, default ""): The task in plain language, e.g. 'pick up the water bottle and put it on the coaster'. Objects named here are pre-filled from a catalogue.
 - `mode` ("sim" | "real", default "sim"): 'sim' (the MVP runs everything in physics sim) or 'real'
 - `project_id` (string | null, default null): Start this existing project's intake over from the prompt instead of creating a new project
+- `scene_source` ("photo" | "description" | "default" | null, default null): Where the scene comes from. 'photo': Cortex's Claude Code reads the photo of the user's setup (image_b64) and rebuilds it. 'description': it reads the user's detailed description. 'default': the built-in cube-and-target tabletop, no model call. Omitted: photo if image_b64 is given, else description if given, else the prompt alone.
+- `image_b64` (string | null, default null): The photo of the setup, base64 (JPEG, PNG or WebP, up to 15 MB)
+- `description` (string | null, default null): The user's description of the setup: objects, sizes, where they sit relative to the arm, the target, obstacles
 
 JSON schema:
 
 ```json
-{"$defs":{"Mode":{"enum":["sim","real"],"type":"string"}},"properties":{"prompt":{"default":"","description":"The task in plain language, e.g. 'pick up the water bottle and put it on the coaster'. Objects named here are pre-filled from a catalogue.","type":"string"},"mode":{"$ref":"#/$defs/Mode","default":"sim","description":"'sim' (the MVP runs everything in physics sim) or 'real'"},"project_id":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Start this existing project's intake over from the prompt instead of creating a new project"}},"type":"object"}
+{"$defs":{"Mode":{"enum":["sim","real"],"type":"string"}},"properties":{"prompt":{"default":"","description":"The task in plain language, e.g. 'pick up the water bottle and put it on the coaster'. Objects named here are pre-filled from a catalogue.","type":"string"},"mode":{"$ref":"#/$defs/Mode","default":"sim","description":"'sim' (the MVP runs everything in physics sim) or 'real'"},"project_id":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"Start this existing project's intake over from the prompt instead of creating a new project"},"scene_source":{"anyOf":[{"enum":["photo","description","default"],"type":"string"},{"type":"null"}],"default":null,"description":"Where the scene comes from. 'photo': Cortex's Claude Code reads the photo of the user's setup (image_b64) and rebuilds it. 'description': it reads the user's detailed description. 'default': the built-in cube-and-target tabletop, no model call. Omitted: photo if image_b64 is given, else description if given, else the prompt alone."},"image_b64":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"The photo of the setup, base64 (JPEG, PNG or WebP, up to 15 MB)"},"description":{"anyOf":[{"maxLength":4000,"type":"string"},{"type":"null"}],"default":null,"description":"The user's description of the setup: objects, sizes, where they sit relative to the arm, the target, obstacles"}},"type":"object"}
 ```
 
 ### update_intake

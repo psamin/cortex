@@ -81,7 +81,7 @@ def test_the_command_allows_only_read_and_no_mcp():
 
 def route(monkeypatch, planner, cli_ok, model=None, engine="auto"):
     monkeypatch.setattr(cc, "available", lambda: None if cli_ok else "the `claude` CLI is not on PATH")
-    ctx = SimpleNamespace(settings=SimpleNamespace(agent_engine=engine), model=model, vlm_source="OpenRouter")
+    ctx = SimpleNamespace(settings=SimpleNamespace(agent_engine=engine), model=model, vlm_source="self-hosted")
     return ccd.diagnoser(ctx, SimpleNamespace(infra=InfraChoice(planner=planner)))[0]
 
 

@@ -89,7 +89,7 @@ def parse_hypotheses(text: str) -> list[Hypothesis]:
 
 async def diagnose(route, ref_id: str, frames: list[np.ndarray], task: str,
                    telemetry: dict[str, Any]) -> EpisodeDiagnosis:
-    """route: context.ModelRoute (self-hosted or OpenRouter); its vlm_model reviews the keyframes."""
+    """route: context.ModelRoute (the self-hosted endpoint); its vlm_model reviews the keyframes."""
     model = route.vlm_model
     img = base64.b64encode(contact_sheet(frames)).decode()
     text = PROMPT.format(task=task, n=len(frames), telemetry=json.dumps(telemetry),
