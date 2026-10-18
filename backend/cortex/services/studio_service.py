@@ -19,6 +19,37 @@ from ..models import (
 )
 from .recording_service import npz_key
 
+STUDIO = {"id": "presentation", "label": "Studio view",
+          "detail": "Three-quarter view rendered for people at 640x480. The policy never sees this camera."}
+SIM_POLICY_CAMS = [
+    {"id": "front", "label": "Front camera (policy input)",
+     "detail": "Fixed camera facing the arm, 128x96: what the trained policy sees."},
+    {"id": "wrist", "label": "Wrist camera (policy input)",
+     "detail": "Camera on the gripper, 128x96: what the trained policy sees."},
+]
+
+
+def cameras_for(kind: str, provenance: dict[str, Any] | None = None) -> list[dict[str, str]]:
+    """The views that exist for one rollout, labelled by what they actually show.
+
+    Recorded files: `presentation` is the episode's main video, `front`/`wrist` are the two
+    low-resolution image streams in episode.npz (for imported data: the dataset's first two cameras).
+    """
+    if kind != "demo":
+        return [STUDIO]  # failed attempts and evaluations keep only the studio render
+    prov = provenance or {}
+    if prov.get("planner") != "human demonstration (imported)":
+        return [STUDIO, *SIM_POLICY_CAMS]
+    keys = list(prov.get("cameras") or [])
+    name = lambda k: k.removeprefix("observation.images.")  # noqa: E731
+    first = name(keys[0]) if keys else "camera 1"
+    out = [{"id": "presentation", "label": f"{first} camera (recorded)",
+            "detail": f"{keys[0] if keys else 'first camera'} from {prov.get('source', 'the dataset')}, shown at 640x480."}]
+    if len(keys) > 1:
+        out.append({"id": "wrist", "label": f"{name(keys[1])} camera (recorded, 128x96)",
+                    "detail": f"{keys[1]} from {prov.get('source', 'the dataset')}, at Cortex's 128x96 check size."})
+    return out
+
 
 async def rollouts(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
@@ -29,13 +60,13 @@ async def rollouts(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                     "status": str(e.status), "condition": e.condition.key, "seed": e.seed,
                     "planner": e.provenance.get("planner", "scripted_ik_oracle"),
                     "video_url": await ctx.media_url(e.artifacts["front"]),
-                    "cameras": ["presentation", "front", "wrist"], "created_at": e.created_at})
+                    "cameras": cameras_for("demo", e.provenance), "created_at": e.created_at})
     for a in await ctx.repo.list("agent_attempts", AgentAttempt, project_id=pid):
         if a.status == "failed" and "front" in a.artifacts:
             out.append({"kind": "attempt", "id": a.id, "label": f"Failed attempt ({a.collector})", "success": False,
                         "condition": a.scenario.condition.key, "seed": a.seed, "planner": a.model,
                         "failure": a.error or a.stop_reason, "video_url": await ctx.media_url(a.artifacts["front"]),
-                        "cameras": ["presentation"], "created_at": a.created_at})
+                        "cameras": cameras_for("attempt"), "created_at": a.created_at})
     versions = await policy_versions(ctx, pid)
     for run in await ctx.repo.list("evaluation_runs", EvaluationRun, project_id=pid):
         policy = versions.get(run.policy.checkpoint_id or "", "oracle reference")
@@ -50,7 +81,7 @@ async def rollouts(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                             "label": f"{policy} · {b.spec.name} · seed {ep.seed}", "success": ep.success,
                             "failure_mode": ep.failure_mode, "condition": b.spec.condition.key, "branch": b.spec.name,
                             "seed": ep.seed, "policy": policy, "evaluation_id": run.id,
-                            "video_url": await ctx.media_url(ep.video_key), "cameras": ["presentation"],
+                            "video_url": await ctx.media_url(ep.video_key), "cameras": cameras_for("eval"),
                             "created_at": run.created_at})
     out.sort(key=lambda r: str(r["created_at"]), reverse=True)
     return out
