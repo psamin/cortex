@@ -579,6 +579,7 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       prompt: z.string().optional().describe("The task in plain language, e.g. 'pick up the small water bottle and put it on the coaster'"),
       mode: z.enum(["sim", "real"]).optional().describe("'sim' (default; the MVP runs everything in physics sim) or 'real'"),
+      project_id: projectId.optional().describe("Start this existing project's intake over from the prompt instead of creating a new project"),
     }),
     annotations: WRITE,
   },

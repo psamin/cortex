@@ -100,7 +100,7 @@ class ObjectSpec(Strict):
 
     @property
     def height(self) -> float:
-        return {"box": self.size[-1], "cylinder": self.size[1], "sphere": self.size[0]}[self.shape]
+        return self.size[0] if self.shape == "sphere" else self.size[-1]  # box [x, y, z], cylinder [d, h]
 
 
 class PlaceZone(Strict):

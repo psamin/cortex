@@ -746,6 +746,8 @@ class IntakeArgs:
         prompt: str = Field("", description="The task in plain language, e.g. 'pick up the water bottle and put it "
                                             "on the coaster'. Objects named here are pre-filled from a catalogue.")
         mode: Mode = Field(Mode.sim, description="'sim' (the MVP runs everything in physics sim) or 'real'")
+        project_id: str | None = Field(None, description="Start this existing project's intake over from the "
+                                                         "prompt instead of creating a new project")
 
     class Update(BaseModel):
         project_id: str
@@ -765,7 +767,11 @@ class IntakeArgs:
 async def t_start_intake(ctx, a, actor):
     from . import intake_service
 
-    p, st = await intake_service.start_intake(ctx, a.prompt, a.mode.value, actor)
+    if a.project_id:
+        p = await get_project(ctx, a.project_id)
+        st = await intake_service.seed_intake(ctx, p, a.prompt, a.mode.value, actor)
+    else:
+        p, st = await intake_service.start_intake(ctx, a.prompt, a.mode.value, actor)
     n = sum(1 for q in st["questions"] if q["required"])
     return {"summary": f"Project {p.id}: intake started, {n} questions open", "ref_ids": [p.id], "project_id": p.id,
             **st}
@@ -812,7 +818,8 @@ async def t_capture_frame(ctx, a, actor):
 
 
 TOOLS.update({t.name: t for t in [
-    Tool("start_intake", "Start describing a robot-learning task: creates a draft project and returns typed "
+    Tool("start_intake", "Start describing a robot-learning task: creates a draft project (with project_id: starts "
+         "that project's intake over) and returns typed "
          "questions (each with a ready-to-send patch) about the arm, cameras, objects, place zones, environment and "
          "task.", IntakeArgs.Start, t_start_intake),
     Tool("update_intake", "Answer intake questions by merging a partial spec. Returns the merged spec, what changed, "

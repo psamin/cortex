@@ -31,6 +31,9 @@ Rules:
 - Distinguish measured results (sim evaluations, quality checks) from VLM hypotheses (unverified).
 - Never invent numbers; only cite tool outputs.
 {mode_rules}
+- Work in this project's sim scene. When the user describes a different task or different objects, rebuild it:
+  start_intake with their words, update_intake with the suggested patch for anything they did not say, then
+  build_simulation.
 - To run the whole loop unattended, call start_autopilot.
 Current state summary: {state}"""
 
@@ -225,24 +228,114 @@ async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor:
     hist.append({"role": "user", "content": message})
     await ctx.audit(actor, "agent_message", pid, {"message": message[:500]}, "ok",
                     "user message" if actor == "gui" else "autonomous mode: continue after background work")
+    scene: list[str] = []
+    project = await orch.get_project(ctx, pid)
+    if actor == "gui" and _wants_scene(project, message):
+        async for chunk in _scene_from_prompt(ctx, pid, message, project.mode.value, scene):
+            yield chunk
+    # the agents hear what Cortex just built, so they work in that scene instead of rebuilding or using the cube
+    prompt = message + (f"\n\n[Cortex built this project's sim scene from that message: {scene[0]}]" if scene else "")
     eng = await engine(ctx)
     if eng == "claude_code":
         from . import claude_code_agent as cc
 
         text = []
-        async for chunk in cc.chat(ctx, pid, message, _sse, tid):
+        async for chunk in cc.chat(ctx, pid, prompt, _sse, tid):
             if chunk.startswith("event: text"):
                 text.append(json.loads(chunk.split("data: ", 1)[1])["delta"])
             yield chunk
         hist.append({"role": "assistant", "content": "".join(text)})
         return
     if ctx.model:
+        hist[-1]["content"] = prompt
         async for chunk in _llm(ctx, pid, hist):
             yield chunk
     else:
-        async for chunk in _rules(ctx, pid, message, hist):
+        async for chunk in _rules(ctx, pid, message, hist, scene[0] if scene else None):
             yield chunk
     yield _sse("done", {})
+
+
+# ------------------------------------------------- a new task prompt becomes this project's own scene (#192)
+
+# where things get put, in the user's words: the place zone is named after the last one the prompt mentions
+PLACES = ("bin", "bowl", "box", "basket", "tray", "plate", "mat", "coaster", "bucket", "container", "dish", "crate",
+          "shelf", "drawer")
+
+
+def _wants_scene(project, message: str) -> bool:
+    """The message names catalogue objects this project's sim doesn't have. The cube alone keeps the built-in
+    tabletop task (the fast path)."""
+    from ..intake import catalogue
+
+    named = set(catalogue.mentioned(message))
+    if project.intake is None:
+        return bool(named - {"cube"})
+    return bool(named - {catalogue.lookup(o.name.replace("_", " ")) for o in project.intake.objects})
+
+
+def _merge_patch(a: dict[str, Any], b: dict[str, Any]) -> dict[str, Any]:
+    out = dict(a)
+    for k, v in b.items():
+        if isinstance(out.get(k), dict) and isinstance(v, dict):
+            out[k] = _merge_patch(out[k], v)
+        elif isinstance(out.get(k), list) and isinstance(v, list):
+            out[k] = out[k] + v  # intake lists merge by name, so two answers' items both land
+        else:
+            out[k] = v
+    return out
+
+
+def _default_answers(st: dict[str, Any], message: str) -> dict[str, Any]:
+    """One patch answering every open required question with its suggested value."""
+    from ..intake.service import DEFAULT_ZONES
+
+    patch: dict[str, Any] = {}
+    for q in st.get("questions", []):
+        if q.get("required") and q.get("patch"):
+            patch = _merge_patch(patch, q["patch"])
+    hits = [(m.start(), w) for w in PLACES for m in re.finditer(rf"\b{w}\b", message.lower())]
+    if patch.get("zones") == DEFAULT_ZONES and hits:
+        patch["zones"] = [{**DEFAULT_ZONES[0], "name": max(hits)[1]}, *DEFAULT_ZONES[1:]]
+    return patch
+
+
+def _describe_scene(p, feasibility: str) -> str:
+    objs = ", ".join(f"{o.name.replace('_', ' ')} ({o.shape}, {' x '.join(f'{s:g}' for s in o.size)} m, {o.mass_kg:g} kg)"
+                     for o in p.intake.objects)
+    zone = (p.intake.task.place or ["?"])[0].replace("_", " ")
+    check = ("The arm can reach and grasp everything." if feasibility == "feasible" else
+             f"The feasibility check flags {feasibility.removeprefix('not feasible: ').replace('_', ' ')}: "
+             "the arm may not grasp or reach these as described.")
+    return (f"{objs}; place zone '{zone}'. {check} Sizes, weights and positions are defaults: "
+            "say what differs in your setup and it gets rebuilt.")
+
+
+async def _scene_from_prompt(ctx: Ctx, pid: str, message: str, mode: str, out: list[str]) -> AsyncIterator[str]:
+    """start_intake with the prompt on this project, the suggested answer to every open question, build_simulation.
+    Appends a one-line description of the built scene to `out`; a failed step is shown and the turn goes on."""
+    name, args = "start_intake", {"prompt": message, "mode": mode}
+    try:
+        for _ in range(5):  # start, then answers (a later question only gets a suggestion once earlier ones exist)
+            yield _sse("tool_call", {"tool": name, "args": args})
+            yield _sse("status", {"state": "running", "tool": name, "text": tool_line(name, args)})
+            st, _ = await run_tool(ctx, pid, name, args)
+            yield _sse("tool_result", {"tool": name, "summary": st.get("summary"), "ref_ids": st.get("ref_ids", [])})
+            if st.get("complete") or not (patch := _default_answers(st, message)):
+                break
+            name, args = "update_intake", {"patch": patch}
+        if not st.get("complete"):
+            return
+        name, args = "build_simulation", {}
+        yield _sse("tool_call", {"tool": name, "args": args})
+        yield _sse("status", {"state": "running", "tool": name, "text": tool_line(name, args)})
+        res, _ = await run_tool(ctx, pid, name, args)
+        yield _sse("tool_result", {"tool": name, "summary": res.get("summary"), "ref_ids": res.get("ref_ids", [])})
+        out.append(_describe_scene(await orch.get_project(ctx, pid), res["feasibility"].get("summary", "")))
+    except Exception as e:
+        from ..errors import friendly
+
+        yield _sse("tool_result", {"tool": name, "summary": friendly(str(e))[0], "ref_ids": [], "ok": False})
 
 
 async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[str]:
@@ -305,9 +398,16 @@ INTENTS: list[tuple[str, str]] = [
 ]
 
 
-async def _rules(ctx: Ctx, pid: str, message: str, hist: list[dict[str, Any]]) -> AsyncIterator[str]:
+async def _rules(ctx: Ctx, pid: str, message: str, hist: list[dict[str, Any]],
+                 scene: str | None = None) -> AsyncIterator[str]:
     m = message.lower()
-    name = next((t for pat, t in INTENTS if re.search(pat, m)), "get_next_actions")
+    name = next((t for pat, t in INTENTS if re.search(pat, m)), None)
+    if scene and name is None:  # the message described a new task: the scene built from it is the answer
+        text = f"I built the simulation from your description: {scene} Next, ask me to collect demonstrations."
+        yield _sse("text", {"delta": text})
+        hist.append({"role": "assistant", "content": text})
+        return
+    name = name or "get_next_actions"
     project = await orch.get_project(ctx, pid)
     st = await orch.project_state(ctx, project)
     args: dict[str, Any] = {}

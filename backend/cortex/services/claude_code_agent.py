@@ -32,6 +32,9 @@ happened and what the evidence shows. No JSON, no ids unless the user asks, no m
 Rules:
 - Only report numbers that tools returned. Simulator results are measured; VLM/agent diagnoses are hypotheses.
 {mode_rules}
+- Work in THIS project's sim scene; never create another project. When the user describes a different task or
+  different objects, rebuild this project's scene: cortex_start_intake with project_id="{pid}" and ask_human=false,
+  cortex_update_intake with the suggested patch for anything the user did not say, then cortex_build_simulation.
 - For work with several steps, keep a short TodoWrite checklist (at most 6 items, plain words) and update it as
   steps finish: the user sees it live.
 - Long jobs (collection, analysis, datasets, evaluation) return a job id. Start the job, then END YOUR TURN
