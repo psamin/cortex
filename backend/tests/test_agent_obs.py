@@ -231,3 +231,16 @@ def test_verify_agent_key_tool_works_through_the_tools_path(client):
     for key in (k["key"], "ck_nope"):
         r = client.post("/api/tools/verify_agent_key", json={}, headers=agent(key))
         assert r.status_code == 403 and r.json()["code"] == "agent_key_invalid"
+
+
+def test_project_log_shows_every_agent_on_the_project(client):
+    """The chat's log mode: MCP sessions and the studio agent, on one project, in order, live via entity events."""
+    pid = client.post("/api/tools/start_intake", json={"prompt": "pick up the cube"}, headers=agent()).json()["project_id"]
+    q = _ctx().bus.subscribe(pid)
+    client.post("/api/tools/get_intake_status", json={"project_id": pid}, headers={"X-Cortex-Actor": "agent"})
+    calls = client.get(f"/api/agents/projects/{pid}/calls").json()
+    assert [c["tool"] for c in calls] == ["start_intake", "get_intake_status"]
+    assert calls[0]["client"] == "claude-code" and calls[1]["actor"] == "agent"
+    assert all("image_urls" in c for c in calls)
+    assert any(ev == "entity" and d.get("table") == "tool_audit_logs" for ev, d in drain(q))
+    assert client.get("/api/agents/projects/prj_missing/calls").json() == []

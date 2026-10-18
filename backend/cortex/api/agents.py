@@ -98,6 +98,12 @@ async def session_calls(sid: str, request: Request):
     return await obs.session_calls(_ctx(), (await current_owner(request))["id"], sid)
 
 
+@router.get("/projects/{pid}/calls")
+async def project_calls(pid: str):
+    """The project's agent log: every agent's tool calls on it, with image URLs (the chat's log mode)."""
+    return await obs.project_calls(_ctx(), pid)
+
+
 @router.get("/events")
 async def events(request: Request):
     """session_start, tool_start, tool_end, approval_required, session_idle - for this user's agents only."""
