@@ -38,7 +38,7 @@ class Settings(BaseSettings):
     # agent_engine: auto (Claude Code if the `claude` CLI and the MCP server are up) | claude_code | model | rules
     agent_engine: str = "auto"
     claude_code_model: str | None = None  # e.g. "sonnet" for faster turns; default = the user's Claude Code default
-    hf_token: str | None = None  # optional: private Hugging Face datasets
+    hf_token: str | None = None  # fallback only: imports use the local `hf auth login` first
     # Only needed on self-hosted InsForge; InsForge Cloud provisions it via its Model Gateway.
     openrouter_api_key: str | None = None
 

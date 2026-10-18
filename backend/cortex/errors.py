@@ -22,7 +22,8 @@ KNOWN: list[tuple[str, str]] = [
     (r"Could not connect on port '([^']+)'",
      "Couldn't reach the arm on {0}. Check the USB cable and the port in the hardware setup."),
     (r"RepositoryNotFoundError|Repository Not Found|401 Client Error|404 Client Error.*huggingface",
-     "That Hugging Face dataset wasn't found. Check the repo id; private datasets need HF_TOKEN in .env."),
+     "That Hugging Face dataset wasn't found. Check the repo id, and for a private dataset that your Hugging Face "
+     "login (`hf auth login`) can read it."),
     (r"ConnectError|ConnectTimeout|Temporary failure in name resolution|nodename nor servname|Network is unreachable",
      "Cortex couldn't reach the network. Check your connection and try again."),
     (r"No space left on device", "The disk is full. Free some space and run it again."),
