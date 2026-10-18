@@ -26,10 +26,25 @@ export type ChatItem =
     }
   | { kind: "meta"; id: number; turns?: number | null; durationMs?: number | null; costUsd?: number | null; isError?: boolean | null }
   | { kind: "error"; id: number; text: string }
+  /** the agent's live task list for one turn (updated in place; `done` once the turn ends) */
+  | { kind: "todos"; id: number; items: TodoItem[]; done: boolean; firstCount: number }
+  /** measured changes at the end of a turn ("+1 demo") */
+  | { kind: "changes"; id: number; items: ChangeItem[] }
   /** A demo import started from this studio (not in agent history): upload progress, then the live job card. */
   | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; errorDetail?: string; jobId?: string }
   /** Written by Cortex (not the LLM) when a background job finishes. */
   | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[]; detail?: string | null; superseded?: boolean };
+
+export interface TodoItem {
+  text: string;
+  status: "pending" | "in_progress" | "completed";
+  active?: string;
+}
+export interface ChangeItem {
+  what: string;
+  delta: number;
+  text: string;
+}
 
 export type ChatEvent =
   | { type: "user"; text: string }
@@ -40,6 +55,8 @@ export type ChatEvent =
   | { type: "done"; turns?: number | null; cost_usd?: number | null; duration_ms?: number | null; is_error?: boolean | null }
   | { type: "status"; state: string; tool?: string }
   | { type: "error"; message: string }
+  | { type: "todos"; items: TodoItem[] }
+  | { type: "changes"; items: ChangeItem[] }
   | { type: "job_done"; job_id: string; job_kind: string; status: string; text: string; ref_ids: string[]; detail?: string | null; superseded?: boolean };
 
 // ------------------------------------------------------------------ friendly labels
@@ -184,11 +201,24 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
     }
     case "done": {
       // a finished turn has no running tools left
-      const settled = items.map((it) => (it.kind === "tool" && it.status === "running" ? { ...it, status: "ok" as const } : it));
+      const settled = items.map((it) =>
+        it.kind === "tool" && it.status === "running" ? { ...it, status: "ok" as const } : it.kind === "todos" && !it.done ? { ...it, done: true } : it,
+      );
       return [...settled, { kind: "meta", id: id(), turns: ev.turns, durationMs: ev.duration_ms, costUsd: ev.cost_usd, isError: ev.is_error }];
     }
     case "error":
       return [...items, { kind: "error", id: id(), text: ev.message }];
+    case "todos": {
+      // one checklist per turn, kept right after the turn's user message so it sits above the tool rows
+      let u = items.length - 1;
+      while (u >= 0 && items[u].kind !== "user") u--;
+      const at = items.findIndex((it, i) => i > u && it.kind === "todos");
+      if (at >= 0) return items.map((it, i) => (i === at && it.kind === "todos" ? { ...it, items: ev.items } : it));
+      const card: ChatItem = { kind: "todos", id: id(), items: ev.items, done: false, firstCount: ev.items.length };
+      return [...items.slice(0, u + 1), card, ...items.slice(u + 1)];
+    }
+    case "changes":
+      return ev.items.length ? [...items, { kind: "changes", id: id(), items: ev.items }] : items;
     case "job_done":
       // the same line can arrive live (SSE) and again from history: one row per job
       if (items.some((it) => it.kind === "job_done" && it.jobId === ev.job_id)) return items;
@@ -224,6 +254,8 @@ export function historyToEvents(rows: Record<string, unknown>[]): ChatEvent[] {
         args: (r.args as Record<string, unknown>) ?? {},
       });
     else if (k === "job_done") out.push(jobDoneEvent(r));
+    else if (k === "todos" && Array.isArray(r.items)) out.push({ type: "todos", items: r.items as TodoItem[] });
+    else if (k === "changes" && Array.isArray(r.items)) out.push({ type: "changes", items: r.items as ChangeItem[] });
     else if (k === "done") out.push({ type: "done", turns: r.turns as number, cost_usd: r.cost_usd as number, duration_ms: r.duration_ms as number, is_error: r.is_error as boolean });
   }
   return out;
