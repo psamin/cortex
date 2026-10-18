@@ -142,25 +142,36 @@ function Glyph({ kind, stroke, fill, top }: { kind: GlyphKind; stroke: string; f
 
   switch (kind) {
     case "describe": {
-      // The agent's terminal (a standing panel) describing the layout, with leaders to the objects and the zone.
-      const v = -62;
-      const rows = [48, 36, 24, 12];
-      const lens = [70, 104, 58, 86];
+      // An agent chatting with Cortex: the agent's message, Cortex's reply with a question, the input bar.
+      const v = -40;
+      const panel: P3[] = [[-88, v, 0], [72, v, 0], [72, v, 84], [-88, v, 84]];
+      const bubble = (u0: number, u1: number, z0: number, z1: number, solid: boolean) => (
+        <path
+          d={path([[u0, v, z0], [u1, v, z0], [u1, v, z1], [u0, v, z1]], true)}
+          strokeWidth={1}
+          style={{ ...st, fill: solid ? fill : top }}
+        />
+      );
       return (
         <g>
-          <path d={path([[-84, v, 0], [60, v, 0], [60, v, 72], [-84, v, 72]], true)} strokeWidth={1} style={{ ...st, fill: top }} />
-          {line([[-84, v, 60], [60, v, 60]], { strokeOpacity: 0.5 })}
-          {[-78, -72, -66].map((u) => (
-            <g key={u}>{dot([u, v, 66], 1.6)}</g>
-          ))}
-          {rows.map((z, i) => (
-            <g key={z}>{line([[-74, v, z], [-74 + lens[i], v, z]], { strokeWidth: i === 0 ? 1.3 : 1 })}</g>
-          ))}
-          {line([[10, v, 24], [-18, 30, 0]], { strokeDasharray: "2 3", strokeOpacity: 0.7 })}
-          {line([[40, v, 12], [52, 40, 0]], { strokeDasharray: "2 3", strokeOpacity: 0.7 })}
-          <Zone u={52} v={44} w={20} st={st} />
-          <Cyl u={-18} v={34} r={11} h={34} st={st} fill={fill} top={top} />
-          <Cube u={-58} v={54} s={9} st={st} fill={fill} top={top} />
+          <path d={path(panel, true)} strokeWidth={1} style={{ ...st, fill: top }} />
+          {line([[-88, v, 74], [72, v, 74]], { strokeOpacity: 0.5 })}
+          {dot([-80, v, 79], 1.6)}
+          {dot([-74, v, 79], 1.6)}
+          {dot([-68, v, 79], 1.6)}
+          {/* agent: avatar + message */}
+          {dot([-78, v, 60], 4.2, true)}
+          {bubble(-70, 14, 52, 68, false)}
+          {line([[-64, v, 63], [6, v, 63]])}
+          {line([[-64, v, 57], [-20, v, 57]])}
+          {/* Cortex: reply bubble on the right */}
+          {bubble(-24, 62, 28, 46, true)}
+          {line([[-18, v, 40], [52, v, 40]])}
+          {line([[-18, v, 34], [30, v, 34]])}
+          {/* input bar with a caret */}
+          {bubble(-80, 62, 6, 18, false)}
+          {line([[-72, v, 9], [-72, v, 15]], { strokeWidth: 1.4 })}
+          {dot([54, v, 12], 3, true)}
         </g>
       );
     }
@@ -183,44 +194,32 @@ function Glyph({ kind, stroke, fill, top }: { kind: GlyphKind; stroke: string; f
       );
     }
     case "demonstrate": {
-      // One demonstration: home, pick, place, home, traced in the air above the scene.
-      const home: P3 = [-24, 24, 44];
+      // One demonstration: the arm carries the bottle from where it stands to the zone.
       const pick: P3 = [8, 10, 34];
       const place: P3 = [46, -38, 22];
-      const trace = [...arc(home, pick, 8), ...arc(pick, place, 14).slice(1), ...arc(place, home, 10).slice(1)];
       return (
         <g>
           <Zone u={46} v={-38} w={18} st={st} />
           <Cyl u={8} v={10} r={10} h={30} st={st} fill={fill} top={top} />
-          <Arm u={-50} v={50} to={[home[0], home[1], home[2] - 12]} st={st} fill={fill} top={top} />
-          <path d={path(trace)} fill="none" strokeWidth={1.2} strokeDasharray="4 3" style={st} />
-          {dot(pick, 3.2, true)}
+          <Arm u={-50} v={50} to={[pick[0], pick[1], pick[2] - 12]} st={st} fill={fill} top={top} />
+          <path d={path(arc(pick, place, 22))} fill="none" strokeWidth={1.2} strokeDasharray="4 3" style={st} />
           {dot(place, 3.2, true)}
-          {dot(home, 3.2)}
         </g>
       );
     }
     case "train": {
-      // Demonstration frames feed the policy, and the training loss falls.
+      // The training loss falling, on a standing panel.
       const loss: P3[] = [];
-      for (let u = -20; u <= 84; u += 6) loss.push([u, 30, 8 + 52 * Math.exp(-(u + 20) / 26) + 2.5 * Math.sin(u / 4)]);
+      for (let u = -76; u <= 76; u += 6) loss.push([u, 20, 8 + 58 * Math.exp(-(u + 76) / 38) + 2.5 * Math.sin(u / 4)]);
       return (
         <g>
-          {[-78, -64, -50].map((u, i) => (
-            <path
-              key={u}
-              d={path([[u, -10 + i * 14, 0], [u + 34, -10 + i * 14, 0], [u + 34, 24 + i * 14, 0], [u, 24 + i * 14, 0]], true)}
-              strokeWidth={1}
-              style={{ ...st, fill: i === 2 ? fill : top }}
-            />
+          <path d={path([[-76, 20, 0], [76, 20, 0], [76, 20, 76], [-76, 20, 76]], true)} strokeWidth={1} style={{ ...st, fill: top, strokeOpacity: 0.5 }} />
+          {[19, 38, 57].map((z) => (
+            <g key={z}>{line([[-76, 20, z], [76, 20, z]], { strokeOpacity: 0.3, strokeDasharray: "2 4" })}</g>
           ))}
-          {line([[-28, 30, 0], [-16, 30, 0]], { strokeWidth: 1.2 })}
-          {line([[-20, 26, 0], [-16, 30, 0], [-20, 34, 0]], { strokeWidth: 1.2 })}
-          <path d={path([[-12, 30, 0], [84, 30, 0], [84, 30, 72], [-12, 30, 72]], true)} strokeWidth={1} style={{ ...st, fill: top, strokeOpacity: 0.5 }} />
-          {[18, 36, 54].map((z) => (
-            <g key={z}>{line([[-12, 30, z], [84, 30, z]], { strokeOpacity: 0.3, strokeDasharray: "2 4" })}</g>
-          ))}
-          <path d={path(loss.filter((p) => p[0] >= -12))} fill="none" strokeWidth={1.4} style={st} />
+          {line([[-76, 20, 0], [-76, 20, 76]])}
+          {line([[-76, 20, 0], [76, 20, 0]])}
+          <path d={path(loss)} fill="none" strokeWidth={1.4} style={st} />
         </g>
       );
     }
@@ -247,46 +246,77 @@ function Glyph({ kind, stroke, fill, top }: { kind: GlyphKind; stroke: string; f
       );
     }
     case "improve": {
-      // The weakest scene gets new demonstrations (extra paths), then the loop returns to training.
-      const [wu, wv] = [40, -40];
-      const back = ring(-6, 6, 70, Math.PI * 0.62, Math.PI * 1.32, 40);
-      const e = back[back.length - 1];
+      // Success per test condition as bars: the weakest one gets new demos and rises (dashed = after).
+      const bars: [number, number, number][] = [
+        [-56, 56, 58],
+        [0, 0, 50],
+        [56, -56, 18],
+      ];
+      const col = (u: number, v: number, h: number, dashed = false) => {
+        const b = box(u - 9, u + 9, v - 9, v + 9, h);
+        return (
+          <g strokeDasharray={dashed ? "3 3" : undefined}>
+            <path d={b.faceV} strokeWidth={1} style={{ ...st, fill: dashed ? "none" : fill }} />
+            <path d={b.faceU} strokeWidth={1} style={{ ...st, fill: dashed ? "none" : fill }} />
+            <path d={b.top} strokeWidth={1} style={{ ...st, fill: dashed ? "none" : top }} />
+          </g>
+        );
+      };
+      const [wu, wv] = [56, -56];
       return (
         <g>
-          <path d={square(-50, 50, 24)} strokeWidth={1} style={{ ...st, fill: top, strokeOpacity: 0.6 }} />
-          <path d={square(wu, wv, 30)} strokeWidth={1.2} style={{ ...st, fill }} />
-          {[16, 30, 44].map((lift, i) => (
+          {line([[-84, 84, 0], [84, -84, 0]], { strokeOpacity: 0.4 })}
+          {col(wu, wv, 54, true)}
+          {bars.map(([u, v, h]) => (
+            <g key={u}>{col(u, v, h)}</g>
+          ))}
+          {line([[wu + 22, wv + 22, 22], [wu + 22, wv + 22, 50]], { strokeWidth: 1.3 })}
+          {line([[wu + 18, wv + 18, 44], [wu + 22, wv + 22, 50], [wu + 26, wv + 26, 44]], { strokeWidth: 1.3 })}
+          {[0, 1, 2].map((i) => (
             <path
-              key={lift}
-              d={path(arc([wu - 30 + i * 4, wv + 34, 6], [wu + 22 + i * 4, wv - 26, 6], lift))}
-              fill="none"
-              strokeWidth={1.1}
-              strokeDasharray="4 3"
-              style={st}
+              key={i}
+              d={path([[wu - 30 + i * 6, wv + 30 - i * 6, 0], [wu - 14 + i * 6, wv + 30 - i * 6, 0], [wu - 14 + i * 6, wv + 46 - i * 6, 0], [wu - 30 + i * 6, wv + 46 - i * 6, 0]], true)}
+              strokeWidth={1}
+              style={{ ...st, fill: top }}
             />
           ))}
-          <path d={path(back)} fill="none" strokeWidth={1} style={st} />
-          {line([[e[0] - 10, e[1] + 2, 0], e, [e[0] - 2, e[1] + 10, 0]])}
-          {dot([wu, wv, 0], 3, true)}
         </g>
       );
     }
     case "deploy": {
-      // The physical arm runs the policy (a chip plugged in), with an e-stop in reach.
-      const chip = box(34, 70, -70, -34, 10);
+      // Deployment: a line of physical arms working parts on an assembly conveyor.
+      const belt = (u0: number, u1: number, v0: number, v1: number, z0: number, z1: number) => ({
+        top: path([[u0, v0, z1], [u1, v0, z1], [u1, v1, z1], [u0, v1, z1]], true),
+        faceV: path([[u0, v1, z0], [u1, v1, z0], [u1, v1, z1], [u0, v1, z1]], true),
+        faceU: path([[u1, v0, z0], [u1, v1, z0], [u1, v1, z1], [u1, v0, z1]], true),
+      });
+      const b = belt(-96, 96, 14, 34, 0, 8);
+      const parts = [-74, -24, 26, 76];
       return (
         <g>
-          <path d={square(0, 0, 70)} fill="none" strokeWidth={1} strokeOpacity={0.45} style={st} />
-          <Arm u={-46} v={46} to={[10, -6, 18]} st={st} fill={fill} top={top} scale={1.15} />
-          <path d={chip.faceV} strokeWidth={1} style={{ ...st, fill }} />
-          <path d={chip.faceU} strokeWidth={1} style={{ ...st, fill }} />
-          <path d={chip.top} strokeWidth={1} style={{ ...st, fill: top }} />
-          {[40, 52, 64].map((u) => (
-            <g key={u}>{line([[u, -34, 0], [u, -26, 0]])}</g>
+          <path d={b.faceV} strokeWidth={1} style={{ ...st, fill }} />
+          <path d={b.faceU} strokeWidth={1} style={{ ...st, fill }} />
+          <path d={b.top} strokeWidth={1} style={{ ...st, fill: top }} />
+          {[-80, -60, -40, -20, 0, 20, 40, 60, 80].map((u) => (
+            <g key={u}>{line([[u, 14, 8], [u, 34, 8]], { strokeOpacity: 0.45 })}</g>
           ))}
-          {line([[52, -26, 0], [-34, 36, 0]], { strokeDasharray: "2 3" })}
-          <Cyl u={48} v={44} r={12} h={8} st={st} fill={fill} top={top} />
-          <path d={path(ring(48, 44, 6, 0, Math.PI * 2, 24, 8), true)} strokeWidth={1} style={{ ...st, fill: stroke }} />
+          {parts.map((u) => {
+            const p = belt(u - 6, u + 6, 18, 30, 8, 18);
+            return (
+              <g key={u}>
+                <path d={p.faceV} strokeWidth={1} style={{ ...st, fill }} />
+                <path d={p.faceU} strokeWidth={1} style={{ ...st, fill }} />
+                <path d={p.top} strokeWidth={1} style={{ ...st, fill: top }} />
+              </g>
+            );
+          })}
+          {[-50, 0, 50].map((u) => (
+            <g key={u}>
+              <Arm u={u} v={-36} to={[u + 2, 22, 20]} st={st} fill={fill} top={top} scale={0.75} />
+            </g>
+          ))}
+          {line([[-96, 50, 0], [-80, 50, 0]], { strokeWidth: 1.2 })}
+          {line([[-86, 46, 0], [-80, 50, 0], [-86, 54, 0]], { strokeWidth: 1.2 })}
         </g>
       );
     }
