@@ -30,7 +30,7 @@ from ..sim.manipulation import ManipulationSession
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
 from ..sim.viewer import DemoCamera, PolicyCameras
 from .livefile import write_live_jpg
-from .sim_worker import emit, write_hd, write_mp4
+from .sim_worker import early_stop_reason, emit, write_hd, write_mp4
 
 
 def live_writer(live_dir: Path):
@@ -123,6 +123,10 @@ def main() -> None:
                "trace_len": len(run.get("trace", []))}
         results.append(res)
         emit(type="attempt", index=i, **res)
+        why = [(r["success"], r.get("error") or r.get("stop_reason") or "not in the target") for r in results]
+        if stopped := early_stop_reason(why):
+            emit(type="stopped_early", reason=stopped, index=i, total=len(cfg["attempts"]))
+            break
     env.close()
     Path(cfg["live_dir"], "result.json").write_text(json.dumps({"attempts": results}, default=str))
     emit(type="result", ok=True, spent_usd=round(total_cost, 4))

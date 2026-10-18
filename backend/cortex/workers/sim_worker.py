@@ -13,6 +13,7 @@ from __future__ import annotations
 import json
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -99,6 +100,22 @@ def failure_mode(success: bool, max_z: float, steps: int, max_steps: int, final_
     if final_dist > 0.06:
         return "dropped_before_target"
     return "released_outside_target"
+
+
+EARLY_STOP_AFTER = 3  # a collection whose first attempts all fail stops instead of running the rest
+
+
+def early_stop_reason(outcomes: list[tuple[bool, str | None]]) -> str | None:
+    """Why a collection should stop now, or None to go on. ``outcomes``: (success, failure reason) of each finished
+    attempt, in order. When the first EARLY_STOP_AFTER all fail, the problem is systematic (the scene, the task, a
+    broken grasp), not bad luck, and more attempts only burn sim time and planner spend."""
+    if len(outcomes) != EARLY_STOP_AFTER or any(ok for ok, _ in outcomes):
+        return None
+    why = Counter(r or "failed" for _, r in outcomes)
+    return (f"Stopped early: the first {EARLY_STOP_AFTER} attempts all failed ("
+            + ", ".join(f"{k} x{n}" for k, n in why.most_common())
+            + "), so the rest were not run. Look at the failed attempts' videos and the scene (capture_frame) "
+              "before collecting again.")
 
 
 def run_episode(env: PickPlaceEnv, policy, seed: int, var: Variation, max_steps: int,
@@ -200,6 +217,7 @@ def cmd_record(cfg: dict[str, Any]) -> dict[str, Any]:
     env = env_factory.make_env(scene, max_steps)
     preview: Preview | None = None
     results = []
+    stopped = None
     for i, spec in enumerate(cfg["episodes"]):
         out = Path(spec["out_dir"])
         out.mkdir(parents=True, exist_ok=True)
@@ -220,10 +238,13 @@ def cmd_record(cfg: dict[str, Any]) -> dict[str, Any]:
         (out / "result.json").write_text(json.dumps(res))
         emit(type="episode", index=i, **res)
         results.append(res)
+        if stopped := early_stop_reason([(r["success"], r["failure_mode"]) for r in results]):
+            emit(type="stopped_early", reason=stopped, index=i, total=len(cfg["episodes"]))
+            break
     if preview:
         preview.close()
     env.close()
-    return {"episodes": results}
+    return {"episodes": results, "stopped_early": stopped}
 
 
 # ------------------------------------------------------------------ cycle protocol (PRODUCT_SPEC 3.2)
