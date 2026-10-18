@@ -21,10 +21,38 @@ DOWN = np.array([0.0, 0.0, -1.0])
 MAX_DEG_PER_STEP = 4.0
 
 
-def side_approach(xy: np.ndarray) -> np.ndarray:
-    """Horizontal approach axis pointing away from the arm base, for side grasps of tall objects."""
+def side_approach(xy: np.ndarray, pitch_deg: float = 0.0) -> np.ndarray:
+    """Approach axis for side grasps of tall objects: away from the arm base, tilted `pitch_deg` below
+    horizontal (a downward tilt brings the grasp closer to the base)."""
     v = np.array([xy[0], xy[1], 0.0])
+    v /= np.linalg.norm(v) or 1.0
+    p = np.deg2rad(pitch_deg)
+    return np.array([v[0] * np.cos(p), v[1] * np.cos(p), -np.sin(p)])
+
+
+def _jaw_tips(m: mujoco.MjModel) -> tuple[list[int], list[int]]:
+    fixed = [i for i in range(m.ngeom) if m.geom(i).name.startswith("fixed_jaw_sph_tip")]
+    moving = [i for i in range(m.ngeom) if m.geom(i).name.startswith("moving_jaw_sph_tip")]
+    return fixed, moving
+
+
+def closing_direction(m: mujoco.MjModel, d: mujoco.MjData) -> np.ndarray:
+    """Unit vector from the fixed jaw's tips to the moving jaw's tips: the direction the jaws close along."""
+    fixed, moving = _jaw_tips(m)
+    v = d.geom_xpos[moving].mean(axis=0) - d.geom_xpos[fixed].mean(axis=0)
     return v / (np.linalg.norm(v) or 1.0)
+
+
+def approach_error_deg(env: PickPlaceEnv, q_deg: np.ndarray, approach: np.ndarray | None = None) -> float:
+    """Angle between the gripper's approach axis at q and the wanted axis (default: straight down)."""
+    w = env.world
+    d = mujoco.MjData(w.model)
+    d.qpos[:] = w.data.qpos
+    d.qpos[w.qadr[:ARM]] = np.deg2rad(q_deg[:ARM])
+    mujoco.mj_kinematics(w.model, d)
+    a = d.site_xmat[env.site].reshape(3, 3)[:, 0]
+    want = DOWN if approach is None else approach / np.linalg.norm(approach)
+    return float(np.rad2deg(np.arccos(np.clip(a @ want, -1, 1))))
 
 
 def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw: float | None = None,
@@ -60,11 +88,31 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
         dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), e)
         d.qpos[qadr] = np.clip(d.qpos[qadr] + np.clip(dq, -0.2, 0.2), lo, hi)
     q = np.rad2deg(d.qpos[qadr]).copy()
+    if approach is not None:
+        q[4] = _horizontal_jaw_roll(m, d, qadr, lo[4], hi[4], q[4])
     if yaw is not None and approach is None:
         # Align the jaws with the cube faces: roll relative to the arm's pan angle.
         rel = (yaw - d.qpos[qadr[0]] + np.pi / 4) % (np.pi / 2) - np.pi / 4
         q[4] = np.clip(np.rad2deg(rel), np.rad2deg(lo[4]), np.rad2deg(hi[4]))
     return q, err_p
+
+
+def _horizontal_jaw_roll(m: mujoco.MjModel, d: mujoco.MjData, qadr: np.ndarray, lo: float, hi: float,  # rad
+                         current_deg: float) -> float:
+    """Side grasps: the wrist roll (degrees) that makes the jaws close horizontally around a standing
+    object, nearest the current roll. Roll does not move the gripper site, so reach is unchanged."""
+    best, best_key = current_deg, (np.inf, np.inf)
+    for r in np.arange(-180.0, 181.0, 15.0):
+        if not lo <= np.deg2rad(r) <= hi:  # lo, hi: joint limits in radians
+            continue
+        d.qpos[qadr[4]] = np.deg2rad(r)
+        mujoco.mj_kinematics(m, d)
+        key = (round(abs(closing_direction(m, d)[2]), 2), abs(r - current_deg))
+        if key < best_key:
+            best, best_key = r, key
+    d.qpos[qadr[4]] = np.deg2rad(best)
+    mujoco.mj_kinematics(m, d)
+    return float(best)
 
 
 class ScriptedExpert:

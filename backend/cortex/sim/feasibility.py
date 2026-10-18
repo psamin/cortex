@@ -24,15 +24,17 @@ from pydantic import BaseModel
 
 from ..intake import catalogue
 from ..intake.spec import IntakeSpec, ObjectSpec
-from .expert import side_approach, solve_ik
-from .grasp import grasp_height, grasp_mode, ik_seeds
+from .expert import approach_error_deg, solve_ik
+from .grasp import approaches, grasp_height, grasp_mode, ik_seeds
 from .scene import SceneInfo
 from .scene_env import SceneEnv
 
 GRIP_OPEN_CMD = 60.0  # ManipulationSession's open command (0-100)
 GRASP_MARGIN = 0.008  # m of clearance the jaws need around the object
 PAYLOAD_FRACTION = 0.7
-REACH_TOL = 0.012
+REACH_TOL = 0.012  # carry and release poses
+GRASP_TOL = 0.004  # grasp poses: under half the jaw clearance per side
+APPROACH_TOL_DEG = 10.0
 TALL_RATIO = 2.5
 LIFT = 0.06  # carry height above the grasp height
 
@@ -85,7 +87,8 @@ def jaw_opening(env: SceneEnv, command: float = GRIP_OPEN_CMD) -> float:
     fixed = [i for i in range(m.ngeom) if m.geom(i).name.startswith("fixed_jaw")]
     tips = [i for i in range(m.ngeom) if m.geom(i).name.startswith("moving_jaw") and "tip" in m.geom(i).name]
     fr = np.zeros(6)
-    return float(max(min(mujoco.mj_geomDistance(m, d, t, f, 0.3, fr) for f in fixed) for t in tips))
+    # The smallest gap over the tips: an object sits deeper than the very tip, where a rotary jaw is narrower.
+    return float(min(min(mujoco.mj_geomDistance(m, d, t, f, 0.3, fr) for f in fixed) for t in tips))
 
 
 def static_torque(env: SceneEnv, q_arm_deg: np.ndarray, payload_kg: float) -> np.ndarray:
@@ -108,14 +111,18 @@ def static_torque(env: SceneEnv, q_arm_deg: np.ndarray, payload_kg: float) -> np
 
 
 def _ik_err(env: SceneEnv, xyz: np.ndarray, mode: str = "top") -> tuple[np.ndarray, float]:
+    """Best IK over seeds and approach tilts. Solutions whose approach axis is off by more than
+    APPROACH_TOL_DEG are discarded: a tilted gripper can reach a point it cannot grasp at."""
     best_q, best_e = None, np.inf
-    approach = side_approach(xyz[:2]) if mode == "side" else None
-    for seed in ik_seeds(xyz, np.asarray(env.module.HOME, dtype=np.float64)):
-        q, e = solve_ik(env, xyz, seed, approach=approach, iters=150)
-        if e < best_e:
-            best_q, best_e = q, e
-        if e < 0.002:
-            break
+    for axis in approaches(xyz[:2], mode):
+        for seed in ik_seeds(xyz, np.asarray(env.module.HOME, dtype=np.float64)):
+            q, e = solve_ik(env, xyz, seed, approach=axis, iters=150)
+            if approach_error_deg(env, q, axis) > APPROACH_TOL_DEG:
+                continue
+            if e < best_e:
+                best_q, best_e = q, e
+            if e < 0.002:
+                return best_q, best_e
     return best_q, best_e  # type: ignore[return-value]
 
 
@@ -135,7 +142,7 @@ def check(spec: IntakeSpec, info: SceneInfo, env: SceneEnv | None = None) -> Fea
             sx, sy = info.starts[o.name]
             qg, eg = _ik_err(env, np.array([sx, sy, gz]), mode)
             qc, ec = _ik_err(env, np.array([sx, sy, gz + LIFT]), mode)
-            ok = max(eg, ec) < REACH_TOL
+            ok = eg < GRASP_TOL and ec < REACH_TOL
             places.append(PlaceReport(name=o.name, kind="start", ok=ok, grasp_err_mm=round(eg * 1000, 1),
                                       carry_err_mm=round(ec * 1000, 1),
                                       suggestion=None if ok else _nearest_reachable(env, sx, sy, gz, mode)))
@@ -171,7 +178,8 @@ def _nearest_reachable(env: SceneEnv, x: float, y: float, z: float, mode: str) -
         if not 0.10 <= r <= 0.42:
             continue
         p = np.array([r * np.cos(th), r * np.sin(th)])
-        if max(_ik_err(env, np.array([*p, z]), mode)[1], _ik_err(env, np.array([*p, z + LIFT]), mode)[1]) < REACH_TOL:
+        if _ik_err(env, np.array([*p, z]), mode)[1] < GRASP_TOL and \
+                _ik_err(env, np.array([*p, z + LIFT]), mode)[1] < REACH_TOL:
             return (round(float(p[0]), 3), round(float(p[1]), 3))
     return None
 
