@@ -6,14 +6,15 @@ Only files matching the include patterns are copied, so checkpoints never come a
 
 from __future__ import annotations
 
+import re
 import subprocess
 from pathlib import Path
 
 
 def is_remote(src: str) -> bool:
-    """host:path (rsync/scp syntax), as opposed to a local path."""
-    head = src.split("/", 1)[0]
-    return ":" in head and not Path(src).exists()
+    """host:path (rsync/scp syntax), as opposed to a local path (including C:\\ on Windows)."""
+    head = src.replace("\\", "/").split("/", 1)[0]
+    return ":" in head and not re.fullmatch(r"[A-Za-z]:", head) and not Path(src).exists()
 
 
 def fetch(src: str, dst: Path, include: list[str]) -> Path:

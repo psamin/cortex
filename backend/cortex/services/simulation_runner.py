@@ -12,7 +12,6 @@ import logging
 import asyncio
 import json
 import math
-from pathlib import Path
 from typing import Any
 
 from ..context import Ctx
@@ -97,9 +96,9 @@ async def resolve_policy(ctx: Ctx, req: LaunchEvaluationRequest) -> tuple[dict[s
     ck = await ctx.repo.get("checkpoints", req.policy.checkpoint_id or "", Checkpoint)
     if ck is None:
         raise NotFound(f"checkpoint {req.policy.checkpoint_id} not found")
-    path = Path(ck.path)
-    if not path.is_absolute():
-        path = ctx.local(ck.path)
+    from .training_service import checkpoint_dir
+
+    path = checkpoint_dir(ctx, ck)
     if not (path / "config.json").exists():
         raise FileNotFoundError(f"checkpoint files missing at {path}")
     return {"kind": "checkpoint", "checkpoint_path": str(path)}, f"{ck.policy_type} checkpoint {ck.id} (step {ck.step})"
