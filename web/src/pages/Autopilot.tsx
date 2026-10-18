@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, ChevronDown, Copy, Pause, Play, ShieldAlert, Upload } from "lucide-react";
 import { api } from "../api/client";
 import { useAutopilot, useTraining } from "../api/hooks";
-import { AUTOPILOT_STATES, type AutopilotPolicy, type AutopilotRun, type AutopilotStep, type Project } from "../api/types";
+import { AUTOPILOT_STATES, isAgent, type AutopilotPolicy, type AutopilotRun, type AutopilotStep, type Project } from "../api/types";
 import { ProvenanceBadge } from "../components/AgentTrace";
 import { RefChip, useApprover } from "../components/refs";
-import { Badge, Button, ErrorState, Input, Segmented, Skeleton, Toggle, type Tone } from "../components/ui";
-import { cn, errorMessage, evidenceValue, humanize, pct } from "../lib/format";
+import { Badge, Button, ErrorState, Input, Segmented, Skeleton, Toggle, type Tone, InlineError } from "../components/ui";
+import { cn, evidenceValue, humanize, pct } from "../lib/format";
 
 // ------------------------------------------------------------------ policy fields
 /** Standing approvals: what autopilot may do without asking. Shared by onboarding and the hero. */
@@ -60,12 +60,12 @@ export function PolicyFields({ value, onChange }: { value: AutopilotPolicy; onCh
             onChange={(v) => set("collector", v)}
             ariaLabel="Collector"
             options={[
-              { value: "astra", label: "GPT-6 Astra" },
+              { value: "agent", label: "Agent" },
               { value: "oracle", label: "Scripted oracle" },
             ]}
           />
         </label>
-        {value.collector === "astra" && (
+        {isAgent(value.collector) && (
           <>
             <label className="block space-y-1">
               <span className="block text-2xs font-medium text-ink-3">Planning mode</span>
@@ -221,7 +221,7 @@ export function AutopilotHero({ project }: { project: Project }) {
       ) : (
         <>
           <StateMachine run={run} />
-          {run.error && <p className="px-4 pt-3 text-xs text-fault">{run.error}</p>}
+          {run.error && <InlineError error={run.error} fallback="Autopilot stopped with an error." className="px-4 pt-3" />}
           <Best best={run.best} />
           <Timeline run={run} pid={pid} />
         </>
@@ -250,7 +250,7 @@ function PolicyEditor({ project }: { project: Project }) {
           Save policy
         </Button>
         {m.isSuccess && !dirty && <span className="text-2xs text-pass">Saved</span>}
-        {m.error && <span className="text-xs text-fault">{errorMessage(m.error)}</span>}
+        {m.error && <InlineError error={m.error} />}
       </div>
     </div>
   );
@@ -351,7 +351,7 @@ function ApproveTraining({ tid, pid, cost, paid }: { tid: string; pid: string; c
         <Check className="h-3.5 w-3.5" /> Approve{paid ? ` $${cost.toFixed(2)}` : ""}
       </Button>
       <span className="text-2xs text-ink-3">Autopilot launches it once approved.</span>
-      {m.error && <span className="w-full text-xs text-fault">{errorMessage(m.error)}</span>}
+      {m.error && <InlineError error={m.error} className="w-full" />}
     </div>
   );
 }
@@ -402,7 +402,7 @@ export function ManualTraining({ pid, tid }: { pid: string; tid: string }) {
         </Button>
       </div>
       {reg.isSuccess && <p className="text-2xs text-pass">Checkpoint registered. Autopilot will pick it up.</p>}
-      {reg.error && <p className="text-xs text-fault">{errorMessage(reg.error)}</p>}
+      {reg.error && <InlineError error={reg.error} />}
     </div>
   );
 }

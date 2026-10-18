@@ -6,7 +6,7 @@ import { FlaskConical, GitCompare, Play } from "lucide-react";
 import { api, resolveMediaUrl } from "../../api/client";
 import { useCheckpoints, useEvaluations } from "../../api/hooks";
 import type { EpisodeResult, EvaluationWithBranches, ExperimentComparison, LaunchEvaluationRequest, SimulationBranch } from "../../api/types";
-import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Panel, QueryState, Select, SkeletonRows, StatusBadge } from "../../components/ui";
+import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Panel, QueryState, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
 import { NextActionsPanel } from "../Plan";
 import { ago, cn, evidenceValue, num, pct } from "../../lib/format";
@@ -195,7 +195,7 @@ function BranchCard({ b }: { b: SimulationBranch }) {
         <div className="mt-3 space-y-1.5">
           <div className={cn("h-7 w-20 rounded", live ? "skeleton" : "bg-rail")} />
           <p className="text-2xs text-ink-3">
-            {live ? `${b.seeds.length} episodes · running` : b.error ? <span className="text-fault">{b.error}</span> : "No result"}
+            {live ? `${b.seeds.length} episodes · running` : b.error ? <InlineError error={b.error} fallback="This branch failed." /> : "No result"}
           </p>
         </div>
       )}

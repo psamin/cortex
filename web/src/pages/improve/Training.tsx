@@ -8,7 +8,7 @@ import { useCheckpoints, useDatasets, useTraining } from "../../api/hooks";
 import type { PolicyType, TrainingJob } from "../../api/types";
 import { useApprover } from "../../components/refs";
 import { ManualTraining } from "../Autopilot";
-import { Badge, Button, EmptyState, ErrorState, Field, Input, Panel, QueryState, Segmented, Select, SkeletonRows, StatusBadge } from "../../components/ui";
+import { Badge, Button, EmptyState, ErrorState, Field, Input, Panel, QueryState, Segmented, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
 import { ago, cn, evidenceValue, usd } from "../../lib/format";
 
 export function TrainingTab() {
@@ -137,7 +137,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
               ))}
             </dl>
           </details>
-          {t.error && <p className="text-xs text-fault">{t.error}</p>}
+          {t.error && <InlineError error={t.error} fallback="Training stopped with an error." />}
           {t.backend === "manual" && t.status !== "proposed" && t.status !== "succeeded" && (
             <div>
               <div className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Manual training</div>
@@ -210,7 +210,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
                 )}
               </p>
             )}
-            {(approve.error || launch.error) && <p className="mt-2 text-xs text-fault">{(approve.error ?? launch.error)!.message}</p>}
+            {(approve.error || launch.error) && <InlineError error={approve.error ?? launch.error} className="mt-2" />}
           </div>
         </div>
       </div>

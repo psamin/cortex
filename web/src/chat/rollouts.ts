@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, resolveMediaUrl } from "../api/client";
 import { useEpisodes, useEvaluations } from "../api/hooks";
-import { isImported, type Condition, type Episode, type EvaluationWithBranches, type Iteration } from "../api/types";
+import { agentLabel, isImported, type Condition, type Episode, type EvaluationWithBranches, type Iteration } from "../api/types";
 
 /** One playable MuJoCo episode: a demonstration or an evaluation rollout. */
 export interface Rollout {
@@ -63,7 +63,7 @@ function parseCondition(c: Condition | string | null | undefined): Condition | n
 }
 
 const plannerLabel = (p: string | null | undefined) =>
-  !p || /imported/i.test(p) ? null : p === "scripted_ik_oracle" ? "Scripted oracle" : p === "gpt-6-astra" ? "GPT-6 Astra" : p === "claude-code" ? "Claude Code agent" : p.replace(/_/g, " ");
+  !p || /imported/i.test(p) ? null : p === "scripted_ik_oracle" ? "Scripted oracle" : agentLabel(p);
 
 /** 404 → null (endpoint not shipped yet); other errors propagate. */
 async function optional<T>(fn: () => Promise<T>): Promise<T | null> {
@@ -99,7 +99,7 @@ function fromEpisodes(eps: Episode[]): Rollout[] {
       episodeId: e.id,
       videoKey: null,
       evaluationId: null,
-      policy: e.provenance?.planner === "gpt-6-astra" ? "GPT-6 Astra" : "Scripted oracle",
+      policy: plannerLabel(e.provenance?.planner) ?? (e.source === "sim_scripted" ? "Scripted oracle" : null),
       iteration: null,
       createdAt: e.created_at,
       cameras: FALLBACK_DEMO_CAMERAS,

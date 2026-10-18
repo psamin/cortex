@@ -1,8 +1,8 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, streamAgent } from "../api/client";
-import { errorMessage } from "../lib/format";
 import { useChatStream } from "../api/events";
+import { splitError } from "../components/ui";
 import { applyEvent, historyToEvents, jobDoneEvent, newItemId, type ChatEvent, type ChatItem } from "./model";
 
 interface ChatState {
@@ -132,7 +132,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         }
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
-          const msg = e instanceof ApiError && e.unreachable ? "The Cortex backend is not responding." : errorMessage(e);
+          const msg = e instanceof ApiError && e.unreachable ? "The Cortex backend is not responding." : splitError(e, undefined, "The agent request failed.").text;
           setItems((xs) => applyEvent(xs, { type: "error", message: msg }));
         }
       } finally {

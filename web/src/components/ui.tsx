@@ -2,6 +2,7 @@ import {
   forwardRef,
   useEffect,
   useRef,
+  useState,
   type ButtonHTMLAttributes,
   type InputHTMLAttributes,
   type ReactNode,
@@ -167,8 +168,66 @@ export function EmptyState({
   );
 }
 
+/** Python exception text, tracebacks, stack frames: never a headline. */
+const TECHNICAL = /Traceback|\b[A-Z][A-Za-z]*(Error|Exception)\b|File ".*", line \d+|\n\s+at /;
+
+/**
+ * Split an error into a readable headline and optional technical details.
+ * `fallback` replaces a headline that is itself technical (raw exception text).
+ */
+export function splitError(error: unknown, detail?: string | null, fallback = "Something went wrong."): { text: string; detail?: string } {
+  let text = typeof error === "string" ? error : errorMessage(error);
+  let det = detail ?? (error instanceof ApiError ? error.technical : undefined) ?? undefined;
+  if (!text || TECHNICAL.test(text)) {
+    det = [text, det].filter(Boolean).join("\n\n") || undefined;
+    text = fallback;
+  }
+  return { text, detail: det };
+}
+
+/** "Details" toggle for technical text. */
+export function ErrorDetails({ detail }: { detail?: string }) {
+  const [open, setOpen] = useState(false);
+  if (!detail) return null;
+  return (
+    <>
+      <button type="button" onClick={() => setOpen((o) => !o)} className="mt-0.5 text-xs text-ink-3 hover:text-ink-2">
+        {open ? "Hide details" : "Details"}
+      </button>
+      {open && <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-rail px-2 py-1.5 font-mono text-[11px] text-ink-3 scroll-thin">{detail}</pre>}
+    </>
+  );
+}
+
+/** One-line inline error: readable text, technical text behind "Details". */
+export function InlineError({
+  error,
+  detail,
+  fallback,
+  prefix,
+  className,
+}: {
+  error: unknown;
+  detail?: string | null;
+  fallback?: string;
+  prefix?: string;
+  className?: string;
+}) {
+  const e = splitError(error, detail, fallback);
+  return (
+    <div className={cn("text-xs", className)} role="alert">
+      <p className="text-fault">
+        {prefix}
+        {e.text}
+      </p>
+      <ErrorDetails detail={e.detail} />
+    </div>
+  );
+}
+
 export function ErrorState({ error, onRetry, compact }: { error: unknown; onRetry?: () => void; compact?: boolean }) {
   const unreachable = error instanceof ApiError && error.unreachable;
+  const split = splitError(error);
   return (
     <div
       role="alert"
@@ -191,9 +250,10 @@ export function ErrorState({ error, onRetry, compact }: { error: unknown; onRetr
               VITE_API_URL.
             </>
           ) : (
-            errorMessage(error)
+            split.text
           )}
         </p>
+        {!unreachable && <ErrorDetails detail={split.detail} />}
       </div>
       {onRetry && (
         <Button size="sm" variant="ghost" onClick={onRetry}>

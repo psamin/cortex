@@ -19,13 +19,14 @@ import {
   Segmented,
   SkeletonRows,
   StatusBadge,
+  InlineError,
 } from "../components/ui";
 import { ConditionLabel, WorkcellGrid } from "../components/Workcell";
 import { SupportBadge, EvidenceList } from "./improve/Recommendations";
 import { AgentCollect } from "./AgentCollect";
 import { AttemptDrawer, EpisodeProvenance, ImportedSource } from "../components/AgentTrace";
 import { resolveMediaUrl } from "../api/client";
-import { cn, errorMessage, pct } from "../lib/format";
+import { cn, pct } from "../lib/format";
 
 const randSeed = () => Math.floor(Math.random() * 100_000);
 
@@ -71,7 +72,7 @@ export function CollectPage() {
       ) : project.mode !== "sim" ? (
         <ErrorState error={new Error("Autonomous collection runs in simulation only. Use Manual for the real robot.")} compact />
       ) : (
-        <AgentCollect key={mode} project={project} collector={mode === "agent" ? "astra" : "oracle"} onUseOracle={() => setMode("oracle")} />
+        <AgentCollect key={mode} project={project} collector={mode === "agent" ? "agent" : "oracle"} onUseOracle={() => setMode("oracle")} />
       )}
     </div>
   );
@@ -189,7 +190,7 @@ function ManualCollect({ pid }: { pid: string }) {
             </div>
           )}
           {job?.status === "failed" && (
-            <p className="px-3 pb-3 text-xs text-fault">Recording failed: {job.error ?? job.message}</p>
+            <InlineError prefix="Recording failed: " error={job.error ?? job.message} detail={job.error_detail} className="px-3 pb-3" />
           )}
           {lastEpisodeId && !recording && (
             <LastTake
@@ -332,7 +333,7 @@ function LastTake({
       <Button size="sm" variant="primary" disabled={!episode} loading={m.isPending && m.variables === "accepted"} onClick={() => m.mutate("accepted")}>
         <Check className="h-3.5 w-3.5" /> Accept
       </Button>
-      {m.error && <p className="w-full text-xs text-fault">{errorMessage(m.error)}</p>}
+      {m.error && <InlineError error={m.error} className="w-full" />}
     </div>
   );
 }
@@ -455,7 +456,7 @@ function SuggestedDemos({ pid, onRecorded }: { pid: string; onRecorded: (j: Job)
           ))}
         </ul>
       )}
-      {m.error && <p className="mt-2 text-xs text-fault">{errorMessage(m.error)}</p>}
+      {m.error && <InlineError error={m.error} className="mt-2" />}
     </Panel>
   );
 }

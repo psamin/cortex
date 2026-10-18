@@ -3,7 +3,7 @@ import { FileArchive, Upload, X } from "lucide-react";
 import { api, uploadDemos } from "../api/client";
 import { useTrackJob } from "../api/events";
 import type { Job } from "../api/types";
-import { errorMessage } from "../lib/format";
+import { InlineError, splitError } from "../components/ui";
 import { ResultCard } from "./cards";
 import { useChat } from "./ChatProvider";
 import type { ChatItem } from "./model";
@@ -41,7 +41,10 @@ export function useImporter(pid: string) {
           ...(again ? { title: `Already imported: ${file.name}`, detail: "This dataset was imported earlier with the same settings, so nothing new was added." } : {}),
         });
       })
-      .catch((e) => chat.patchImport(id, { status: "error", error: errorMessage(e) }));
+      .catch((e) => {
+        const err = splitError(e, undefined, "The import could not start.");
+        chat.patchImport(id, { status: "error", error: err.text, errorDetail: err.detail });
+      });
   };
   const fromHub = (repoId: string, maxEpisodes: number) => {
     const n = clampEpisodes(maxEpisodes);
@@ -58,7 +61,10 @@ export function useImporter(pid: string) {
           ...(again ? { title: `Already imported: ${repoId}`, detail: "This dataset was imported earlier with the same settings, so nothing new was added." } : {}),
         });
       })
-      .catch((e) => chat.patchImport(id, { status: "error", error: errorMessage(e) }));
+      .catch((e) => {
+        const err = splitError(e, undefined, "The import could not start.");
+        chat.patchImport(id, { status: "error", error: err.text, errorDetail: err.detail });
+      });
   };
   return { upload, fromHub };
 }
@@ -83,7 +89,7 @@ export function ImportRow({ it, pid }: { it: Extract<ChatItem, { kind: "import" 
             </div>
           )}
           {it.status === "uploading" && it.total === 0 && <p className="mt-1 text-xs text-ink-3">Starting…</p>}
-          {it.status === "error" && <p className="mt-1.5 rounded-lg bg-fault/5 px-2.5 py-1.5 text-xs text-fault shadow-[0_0_0_1px_rgb(var(--fault)/.25)]">{it.error}</p>}
+          {it.status === "error" && <InlineError error={it.error} detail={it.errorDetail} className="mt-1.5 rounded-lg bg-fault/5 px-2.5 py-1.5 shadow-[0_0_0_1px_rgb(var(--fault)/.25)]" />}
         </div>
       </div>
       {it.status === "started" && it.jobId && <ResultCard pid={pid} refId={it.jobId} />}
