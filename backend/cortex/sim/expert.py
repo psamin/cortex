@@ -59,7 +59,13 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
              iters: int = 200, ori_weight: float = 0.3, approach: np.ndarray | None = None) -> tuple[np.ndarray, float]:
     """Joint degrees (5 arm joints) placing the gripper site at `target` with its
     approach axis along `approach` (default: pointing down, a top grasp).
-    Returns (q_deg, position error in metres)."""
+    Returns (q_deg, position error in metres).
+
+    Side grasps set the wrist roll after the damped-least-squares solve. That roll
+    shifts the gripper site, so the Cartesian target is corrected and the solve is
+    repeated until the reported error is the site's distance to `target` with the
+    horizontal jaw roll applied.
+    """
     axis = DOWN if approach is None else np.asarray(approach, dtype=np.float64)
     w = env.world
     m = w.model
@@ -71,25 +77,55 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
     lo, hi = w.lo[:ARM], w.hi[:ARM]
     d.qpos[qadr] = np.clip(np.deg2rad(q_init_deg[:ARM]), lo, hi)
     jp, jr = np.zeros((3, m.nv)), np.zeros((3, m.nv))
-    err_p = np.inf
-    for _ in range(iters):
-        mujoco.mj_kinematics(m, d)
-        mujoco.mj_comPos(m, d)
-        x = d.site_xpos[env.site]
-        R = d.site_xmat[env.site].reshape(3, 3)
-        e_p = target - x
-        e_o = np.cross(R[:, 0], axis) * ori_weight
-        err_p = float(np.linalg.norm(e_p))
-        if err_p < 1e-3 and np.linalg.norm(e_o) < 1e-2:
-            break
-        mujoco.mj_jacSite(m, d, jp, jr, env.site)
-        J = np.vstack([jp[:, dofs], jr[:, dofs] * ori_weight])
-        e = np.concatenate([e_p, e_o])
-        dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), e)
-        d.qpos[qadr] = np.clip(d.qpos[qadr] + np.clip(dq, -0.2, 0.2), lo, hi)
+    goal = np.asarray(target, dtype=np.float64)
+
+    def dls(cmd: np.ndarray, n_iters: int) -> float:
+        err = np.inf
+        for _ in range(n_iters):
+            mujoco.mj_kinematics(m, d)
+            mujoco.mj_comPos(m, d)
+            x = d.site_xpos[env.site]
+            R = d.site_xmat[env.site].reshape(3, 3)
+            e_p = cmd - x
+            e_o = np.cross(R[:, 0], axis) * ori_weight
+            err = float(np.linalg.norm(e_p))
+            if err < 1e-3 and np.linalg.norm(e_o) < 1e-2:
+                break
+            mujoco.mj_jacSite(m, d, jp, jr, env.site)
+            J = np.vstack([jp[:, dofs], jr[:, dofs] * ori_weight])
+            e = np.concatenate([e_p, e_o])
+            dq = J.T @ np.linalg.solve(J @ J.T + 1e-4 * np.eye(6), e)
+            d.qpos[qadr] = np.clip(d.qpos[qadr] + np.clip(dq, -0.2, 0.2), lo, hi)
+        return err
+
+    err_p = dls(goal, iters)
     q = np.rad2deg(d.qpos[qadr]).copy()
     if approach is not None:
-        q[4] = _horizontal_jaw_roll(m, d, qadr, lo[4], hi[4], q[4])
+        # The residual above is from before the jaw roll. Roll then translates the site
+        # (it is not on the wrist-roll axis), so shift the IK target by the miss and
+        # re-solve. The returned error is measured with the roll applied.
+        commanded = goal.copy()
+        best_q, best_err = q.copy(), np.inf
+        for _ in range(5):
+            q[4] = _horizontal_jaw_roll(m, d, qadr, lo[4], hi[4], q[4])
+            q = np.rad2deg(d.qpos[qadr]).copy()
+            miss = goal - d.site_xpos[env.site]
+            err_p = float(np.linalg.norm(miss))
+            if err_p < best_err:
+                best_q, best_err = q.copy(), err_p
+            if err_p < 1e-3:
+                break
+            commanded = commanded + miss
+            d.qpos[qadr] = np.clip(np.deg2rad(q), lo, hi)
+            dls(commanded, iters)
+            q = np.rad2deg(d.qpos[qadr]).copy()
+        else:
+            q[4] = _horizontal_jaw_roll(m, d, qadr, lo[4], hi[4], q[4])
+            q = np.rad2deg(d.qpos[qadr]).copy()
+            err_p = float(np.linalg.norm(goal - d.site_xpos[env.site]))
+            if err_p < best_err:
+                best_q, best_err = q.copy(), err_p
+        q, err_p = best_q, best_err
     if yaw is not None and approach is None:
         # Align the jaws with the cube faces: roll relative to the arm's pan angle.
         rel = (yaw - d.qpos[qadr[0]] + np.pi / 4) % (np.pi / 2) - np.pi / 4
@@ -106,17 +142,24 @@ def _horizontal_jaw_roll(m: mujoco.MjModel, d: mujoco.MjData, qadr: np.ndarray, 
     """Side grasps: the wrist roll (degrees) that makes the jaws close horizontally around a standing
     object. Two rolls do that (the fixed jaw on either side); always pick the one whose jaws close
     toward the arm's left of the approach, so every IK solution puts the fixed jaw on the same side
-    and grasp offsets computed from one solution hold for the others. Roll does not move the site."""
-    best, best_key = current_deg, (np.inf, np.inf, np.inf)
+    and grasp offsets computed from one solution hold for the others. The roll shifts the gripper
+    site, so callers that need the site on a target must re-solve after this (``solve_ik`` does)."""
+    mujoco.mj_kinematics(m, d)
+    best, best_key = current_deg, (np.inf, np.inf, np.inf, np.inf)
     approach = d.site_xmat[_site(m)].reshape(3, 3)[:, 0].copy()
     left = np.cross(np.array([0.0, 0.0, 1.0]), approach)
+    # Prefer the left-closing roll among jaws that are actually horizontal. A finer
+    # |cz| bucket must not flip the fixed jaw onto the other side: that is what
+    # pushes a bottle over when the grasp is off the arm's centre line.
     for r in np.arange(-180.0, 181.0, 15.0):
         if not lo <= np.deg2rad(r) <= hi:  # lo, hi: joint limits in radians
             continue
         d.qpos[qadr[4]] = np.deg2rad(r)
         mujoco.mj_kinematics(m, d)
         c = closing_direction(m, d)
-        key = (round(abs(c[2]), 1), 0 if c @ left > 0 else 1, abs(r - current_deg))
+        horizontal = abs(c[2]) < 0.25
+        key = (0 if horizontal and c @ left > 0 else 1 if horizontal else 2,
+               abs(c[2]), 0 if c @ left > 0 else 1, abs(r - current_deg))
         if key < best_key:
             best, best_key = r, key
     d.qpos[qadr[4]] = np.deg2rad(best)

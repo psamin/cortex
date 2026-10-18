@@ -29,7 +29,7 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .expert import GRIP_CLOSED, GRIP_OPEN, MAX_DEG_PER_STEP, approach_error_deg, solve_ik
+from .expert import GRIP_CLOSED, GRIP_OPEN, MAX_DEG_PER_STEP, closing_direction, solve_ik
 from .grasp import approaches, grasp_height, grasp_mode, ik_seeds
 
 LIFT = 0.06
@@ -37,6 +37,9 @@ GRIP_HOME = 30.0
 # Site frame for side grasps (x = approach, z = jaw closing), measured on the Menagerie SO-101.
 OPEN_GAP_OFFSET = np.array([-0.020, 0.0, 0.017])  # object centre in the middle of the open jaws
 SLIDE_DEPTH = -0.020
+# A horizontal side grasp at the edge of the arc solves to just over 10 degrees; past this the
+# jaws are no longer approaching the bottle.
+MAX_APPROACH_ERR_DEG = 12.0
 
 
 def pad_z(depth_x: float) -> float:
@@ -69,17 +72,40 @@ class PickPlaceSkill:
     # ------------------------------------------------------------------ IK helpers
     def _ik(self, xyz: np.ndarray, axis: np.ndarray | None, seed: np.ndarray | None = None,
             yaw: float | None = None, only_seed: bool = False) -> tuple[float, np.ndarray | None]:
-        best_e, best_q = np.inf, None
+        best_e, best_q, best_wrong = np.inf, None, True
         seeds = ([seed] if seed is not None else []) + ([] if only_seed else ik_seeds(xyz, self.home))
         for s in seeds:
             q, e = solve_ik(self.env, xyz, s, yaw=yaw, approach=axis, iters=150)
-            if axis is not None and approach_error_deg(self.env, q, axis) > 10:
-                continue
-            if e < best_e:
-                best_e, best_q = e, q
-                if e < 0.002:
+            if axis is None:
+                wrong = False
+            else:
+                ang, leftness = self._jaw_metrics(q, axis)
+                if ang > MAX_APPROACH_ERR_DEG:
+                    continue
+                # Off-axis, a slightly nearer solution can close the jaws the other way and
+                # push the bottle over. Keep the deterministic left-closing roll when one exists.
+                wrong = leftness <= 0
+            if (wrong, e) < (best_wrong, best_e):
+                best_e, best_q, best_wrong = e, q, wrong
+                if e < 0.002 and not wrong:
                     break
         return best_e, best_q
+
+    def _jaw_metrics(self, q: np.ndarray, axis: np.ndarray) -> tuple[float, float]:
+        """Approach error (degrees) and how far the open jaws close toward the arm's left of the approach."""
+        w = self.env.world
+        d = mujoco.MjData(w.model)
+        d.qpos[:] = w.data.qpos
+        d.qpos[w.qadr[:5]] = np.deg2rad(q[:5])
+        lo, hi = w.lo[5], w.hi[5]
+        d.qpos[w.qadr[5]] = lo + GRIP_OPEN / 100.0 * (hi - lo)
+        mujoco.mj_kinematics(w.model, d)
+        ax = d.site_xmat[self.env.site].reshape(3, 3)[:, 0]
+        want = np.asarray(axis, dtype=np.float64)
+        want = want / (np.linalg.norm(want) or 1.0)
+        ang = float(np.rad2deg(np.arccos(np.clip(float(ax @ want), -1, 1))))
+        left = np.cross(np.array([0.0, 0.0, 1.0]), ax)
+        return ang, float(closing_direction(w.model, d) @ left)
 
     def _site_R(self, q: np.ndarray) -> np.ndarray:
         w = self.env.world
@@ -101,6 +127,28 @@ class PickPlaceSkill:
             target = centre - self._site_R(q) @ offset
             seed = q
         e, q = self._ik(target, axis, seed)
+        return e, q, target
+
+    def _site_for_object(self, xy: np.ndarray, z: float, axis: np.ndarray,
+                         seed: np.ndarray | None = None) -> tuple[float, np.ndarray | None, np.ndarray]:
+        """IK so the held object's centre (a site-x offset of SLIDE_DEPTH behind the site) is at xy.
+
+        The slide leaves the bottle about 2 cm short of the gripper site along the approach. Aiming
+        the site at the zone centre therefore drops the bottle about 2 cm short.
+        """
+        target = np.array([float(xy[0]), float(xy[1]), float(z)])
+        e, q = self._ik(target, axis, seed)
+        if q is None:
+            return e, None, target
+        for _ in range(3):
+            shift = (self._site_R(q) @ np.array([SLIDE_DEPTH, 0.0, 0.0]))[:2]
+            target = np.array([float(xy[0]) - shift[0], float(xy[1]) - shift[1], float(z)])
+            e2, q2 = self._ik(target, axis, q, only_seed=True)
+            if q2 is None:
+                break
+            e, q = e2, q2
+            if e < 0.002:
+                break
         return e, q, target
 
     # ------------------------------------------------------------------ plan
@@ -195,18 +243,22 @@ class PickPlaceSkill:
         yield from self._line(gs, lift, axis, GRIP_CLOSED, 8, "lift")
         r = np.r_[dst[0] + p.get("release_dx", 0.0), dst[1] + p.get("release_dy", 0.0)]
         rz = gz + 0.006 + p.get("release_dz", 0.0)
-        ax2 = next((a for a in approaches(r, "side")
-                    if self._ik(np.r_[r, gz + LIFT], a, self._measured())[0] < 0.01
-                    and self._ik(np.r_[r, rz], a, self._measured())[0] < 0.006), None)
-        if ax2 is None:
+        place = None
+        for a in approaches(r, "side"):
+            ec, qc, tc = self._site_for_object(r, gz + LIFT, a, self._measured())
+            el, ql, tl = self._site_for_object(r, rz, a, qc)
+            if qc is not None and ql is not None and ec < 0.01 and el < 0.006:
+                place = (a, qc, tc, tl)
+                break
+        if place is None:
             self.failed = "no reachable side placement at the target"
             return
-        _, qc = self._ik(np.r_[r, gz + LIFT], ax2, self._measured())
+        ax2, qc, carry_site, low_site = place
         yield Target(qc, GRIP_CLOSED, rate=2.0, settle=6, phase="carry")
-        yield from self._line(np.r_[r, gz + LIFT], np.r_[r, rz], ax2, GRIP_CLOSED, 8, "lower")
+        yield from self._line(carry_site, low_site, ax2, GRIP_CLOSED, 8, "lower")
         yield Target(self._measured()[:5], GRIP_OPEN, settle=10, phase="release")
-        back = np.r_[r, rz] - ax2 * 0.06 + [0, 0, 0.03]
-        yield from self._line(np.r_[r, rz], back, ax2, GRIP_OPEN, 8, "retreat")
+        back = low_site - ax2 * 0.06 + [0, 0, 0.03]
+        yield from self._line(low_site, back, ax2, GRIP_OPEN, 8, "retreat")
         yield from self._go_home()
 
     # ------------------------------------------------------------------ act
