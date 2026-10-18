@@ -81,7 +81,9 @@ async def rollouts(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                     continue
                 out.append({"kind": "eval", "id": f"{run.id}/{b.id}/seed{ep.seed}",
                             "label": f"{policy} · {b.spec.name} · seed {ep.seed}", "success": ep.success,
-                            "failure_mode": ep.failure_mode, "condition": b.spec.condition.key, "branch": b.spec.name,
+                            "failure_mode": ep.failure_mode, "branch": b.spec.name,
+                            # imported sim-task runs have no cube/lighting cell
+                            "condition": b.spec.condition.key if b.executor == "local" else None,
                             "seed": ep.seed, "policy": policy, "evaluation_id": run.id,
                             "video_url": await ctx.media_url(ep.video_key), "cameras": cameras_for("eval"),
                             "created_at": run.created_at})

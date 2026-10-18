@@ -364,7 +364,7 @@ class TrainingJob(BaseModel):
     id: str = Field(default_factory=lambda: new_id("tj"))
     project_id: str
     dataset_version_id: str
-    policy_type: Literal["act", "smolvla"]
+    policy_type: Literal["act", "smolvla", "diffusion"]  # diffusion: imported sim-task runs (#179)
     backend: Literal["futurama_slurm", "hf_jobs", "manual"]
     config: dict[str, Any]
     estimate: ResourceEstimate
@@ -434,7 +434,7 @@ class SimulationBranch(BaseModel):
     evaluation_id: str
     spec: BranchSpec
     seeds: list[int]
-    executor: Literal["local"] = "local"
+    executor: Literal["local", "futurama_slurm"] = "local"  # futurama_slurm: imported sim-task evaluations
     project_id: str = ""
     sandbox_id: str | None = None
     created_at: datetime = Field(default_factory=now)
