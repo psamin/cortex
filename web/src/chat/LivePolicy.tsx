@@ -23,7 +23,6 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
   const stop = useMutation({ mutationFn: api.stopLivePolicy, onSettled: refresh });
   const [pick, setPick] = useState<Pick | null>(null);
   const s = st.data;
-  const policies = Object.entries(s?.policies ?? {});
   const err = (start.error ?? stop.error) as ApiError | null;
 
   // a GPU is only ever requested by an explicit click (#221): the cluster is shared and access can be revoked
@@ -83,20 +82,18 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
             {SIM_TITLE[task] ?? task} · sim
           </button>
         ))}
-        {policies.map(([task, p]) => (
-          // one chip per trained policy: each click runs it on a random held-out real demo it never trained on
-          <button key={task} type="button"
-            onClick={() => setPick({ kind: "replay", task, ep: p.held_out[Math.floor(Math.random() * p.held_out.length)] })}
-            title={`Trained on real robot demos (${p.checkpoint}); runs on a held-out demo it never saw`}
-            className={cn("h-6 rounded-full border px-2.5", cur?.kind === "replay" && cur.task === task ? "border-ink bg-ink text-bench" : "border-line-strong text-ink-3 hover:text-ink")}>
-            {REAL_TITLE[task] ?? task} · real demo
-          </button>
-        ))}
         <button type="button" onClick={() => stop.mutate()} disabled={stop.isPending}
-          className="ml-auto inline-flex h-6 items-center gap-1 rounded-full border border-line-strong px-2.5 text-ink-3 hover:text-ink">
-          <Square className="h-3 w-3" /> Stop GPU
+          title="Ends the live session and gives the GPU back to the cluster (the next run needs a new GPU)"
+          className="ml-auto inline-flex h-6 items-center gap-1.5 rounded-full border border-line-strong px-2.5 text-ink-3 hover:text-ink disabled:opacity-70">
+          {stop.isPending ? <CircleDashed className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+          {stop.isPending ? "Stopping… releasing the GPU" : "Stop & release GPU"}
         </button>
       </div>
+      {stop.isPending && (
+        <p className="px-4 pt-2 text-xs text-ink-3">
+          Stopping the live session and handing the GPU back to the cluster. This takes a few seconds.
+        </p>
+      )}
       {!pick && first.note && <p className="px-4 pt-2 text-xs text-ink-3">{first.note}</p>}
       {curSim && cur?.kind === "sim" && (
         <div className="flex items-center gap-3 px-4 pt-2 text-xs text-ink-2">
@@ -116,7 +113,6 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
   );
 }
 
-const REAL_TITLE: Record<string, string> = { jenga: "Jenga", conveyor: "Conveyor sort", suture: "Suture" };
 
 /** The live stream, with a "loading onto the GPU" state until the first frame and a clear failure state. */
 function LiveFrame({ src, label }: { src: string; label: string }) {

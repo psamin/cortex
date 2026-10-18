@@ -32,7 +32,10 @@ uv venv -q --python 3.12 "$SCR/venv"
 source "$SCR/venv/bin/activate"
 uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1" "mujoco>=3.3.7"
 
+# Real-data replays are off by default (the studio shows only policies trained in our sim); SERVE_REAL=1 turns
+# them back on. Skipping their dataset prep cuts startup from ~5 min to ~1-2 min.
 for t in conveyor suture jenga; do  # held-out episodes for every task that has a checkpoint
+  [ "${SERVE_REAL:-0}" = 1 ] || continue
   ls -d "$JOB_DIR/output/$t"/*_[0-9]* >/dev/null 2>&1 || continue
   echo "[live] Preparing held-out episodes: $t"
   python "$SCR/prepare_dataset.py" "$t" "$SCR/data-$t"
