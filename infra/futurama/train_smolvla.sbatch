@@ -42,7 +42,7 @@ cp "$SCR/data/split.json" "$OUT/split.json"
 
 # keep only the newest checkpoint's weights in home (the optimizer state stays in RAM scratch)
 ( while true; do
-    for ck in $(ls -d "$SCR"/out-*/checkpoints/*/pretrained_model 2>/dev/null | sort); do
+    for ck in $(ls -dtr "$SCR"/out-*/checkpoints/*/pretrained_model 2>/dev/null); do  # oldest -> newest, across stages
       [ -f "$ck/model.safetensors" ] || continue
       run=$(basename "$(dirname "$(dirname "$(dirname "$ck")")")"); step=$(basename "$(dirname "$ck")")
       dest="$OUT/${run#out-}_$step"

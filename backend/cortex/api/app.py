@@ -506,12 +506,13 @@ class ProposeReq(BaseModel):
     dataset_version_id: str
     policy_type: str = "act"
     steps: int | None = None
+    base_checkpoint_id: str | None = None  # continue fine-tuning this policy
 
 
 @app.post("/api/projects/{pid}/training/proposals")
 async def propose(pid: str, req: ProposeReq, request: Request) -> TrainingJob:
     return await training_service.propose(ctx(), await orch.get_project(ctx(), pid), req.dataset_version_id,
-                                          req.policy_type, req.steps, actor(request))
+                                          req.policy_type, req.steps, actor(request), req.base_checkpoint_id)
 
 
 class ApproveReq(BaseModel):

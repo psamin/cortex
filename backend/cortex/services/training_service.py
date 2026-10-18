@@ -55,11 +55,26 @@ def estimate(policy_type: str, steps: int, backend: str, n_frames: int, gres: st
                + ("Free GT allocation; queue wait not included." if backend == "futurama_slurm" else "")))
 
 
+def robot_type_of(ds: DatasetVersion) -> str | None:
+    """The robot a dataset was recorded on (LeRobot info.json), e.g. so101_follower or so100."""
+    import json
+
+    info = Path(ds.lerobot_root or "") / "meta" / "info.json"
+    return json.loads(info.read_text()).get("robot_type") if ds.lerobot_root and info.exists() else None
+
+
 async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_type: str = "act",
-                  steps: int | None = None, actor: str = "gui") -> TrainingJob:
+                  steps: int | None = None, actor: str = "gui", base_checkpoint_id: str | None = None) -> TrainingJob:
+    """Propose training a policy. With `base_checkpoint_id` the run continues fine-tuning that policy (from any
+    project, so a policy can be carried to a new task or a specific arm) instead of starting from scratch."""
     ds = await ctx.repo.get("dataset_versions", dataset_version_id, DatasetVersion)
     if ds is None:
         raise NotFound(dataset_version_id)
+    base = await ctx.repo.get("checkpoints", base_checkpoint_id, Checkpoint) if base_checkpoint_id else None
+    if base_checkpoint_id and base is None:
+        raise NotFound(f"checkpoint {base_checkpoint_id}")
+    if base is not None:
+        policy_type = base.policy_type if base.policy_type in ("act", "smolvla") else policy_type
     infra = project.infra
     backend = infra.training_backend if infra.training_backend != "auto" else (
         "futurama_slurm" if ctx.settings.futurama_ssh_host else "manual")
@@ -74,13 +89,27 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
         "slurm": {"partition": ctx.settings.futurama_partition, "gres": infra.training_gres,
                   "time_min": infra.training_walltime_min},
     }
-    if policy_type == "smolvla":
+    robot = robot_type_of(ds)
+    cfg["robot_type"] = robot
+    if base is not None:
+        base_tj = await ctx.repo.get("training_jobs", base.training_job_id or "", TrainingJob)
+        base_robot = (base_tj.config.get("robot_type") if base_tj else None)
+        cfg.update({"policy.path": base.path, "base_checkpoint_id": base.id, "base_robot_type": base_robot,
+                    "cross_embodiment": bool(robot and base_robot and robot != base_robot)})
+    elif policy_type == "smolvla":
         cfg["policy.path"] = "lerobot/smolvla_base"
+        # smolvla_base expects observation.images.camera1..3; map this dataset's cameras onto them in order
+        cfg["rename_map"] = {c: f"observation.images.camera{i + 1}" for i, c in enumerate(cfg["cameras"][:3])}
     n_train = sum(1 for ln in ds.links if ln.split == "train")
     why = (f"ACT imitation learning on {ds.num_source_episodes} source demos ({n_train} train LeRobot episodes "
            f"incl. augmented views): it trains in minutes, fits 30 fps joint control and needs no language "
            f"conditioning for a single task.") if policy_type == "act" else (
            "SmolVLA fine-tuning: language-conditioned and pretrained, but ~5x slower per step.")
+    if base is not None:
+        why = (f"Continue fine-tuning {base.policy_type} checkpoint {base.id} (step {base.step}) on "
+               f"{ds.num_source_episodes} source demos" + (f" recorded on {robot}" if robot else "") +
+               (": a different robot than the base was trained on, so expect a larger adaptation" if
+                cfg["cross_embodiment"] else "") + ".")
     tj = TrainingJob(project_id=project.id, dataset_version_id=ds.id, policy_type=policy_type,  # type: ignore[arg-type]
                      backend=backend, config=cfg, rationale=why,  # type: ignore[arg-type]
                      estimate=estimate(policy_type, steps, backend, ds.num_frames, infra.training_gres))
@@ -189,6 +218,23 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     c = tj.config
     export = (f"ALL,STEPS={c['steps']},BATCH={c['batch_size']},SAVE={c['save_freq']},"
               f"REPO_ID={c['dataset.repo_id']}")
+    base = c.get("policy.path")
+    if base and Path(base).is_dir():  # a project checkpoint: ship it next to the dataset
+        rc, out = await _sh("rsync", "-az", "--delete", f"{base}/", f"{host}:{remote}/base/")
+        if rc != 0:
+            raise RuntimeError(f"rsync base checkpoint failed ({rc}): {out[-400:]}")
+        export += ",POLICY_PATH=base"
+    elif base:  # a hub id such as lerobot/smolvla_base
+        export += f",POLICY_PATH={base}"
+    if c.get("rename_map"):  # JSON has commas, which sbatch --export would split: ship it as a file
+        import json
+        import tempfile
+
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(c["rename_map"], f)
+        rc, out = await _sh("rsync", "-az", f.name, f"{host}:{remote}/rename_map.json")
+        if rc != 0:
+            raise RuntimeError(f"rsync rename map failed ({rc}): {out[-400:]}")
     slurm = c.get("slurm") or {}  # chosen in the studio; older jobs fall back to the .env defaults
     rc, out = await _sh(*ssh, f"cd {remote} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
                               f"--gres={slurm.get('gres', ctx.settings.futurama_gres)} "
