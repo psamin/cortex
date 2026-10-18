@@ -89,13 +89,22 @@ async def open_tunnel(ctx: Ctx, node: str, port: int) -> None:
     s = ctx.settings
     close_tunnel()
     local = int(url(ctx).rsplit(":", 1)[-1])
-    user = s.futurama_ssh_host.split("@")[0] if "@" in s.futurama_ssh_host else None
+    user = await _remote_user(s.futurama_ssh_host)
     target = f"{user}@{node}" if user else node
     STATE["tunnel"] = await asyncio.create_subprocess_exec(
         "ssh", "-N", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes",
         "-J", s.futurama_ssh_host, "-L", f"{local}:127.0.0.1:{port}", f"{target}.{s.futurama_node_domain}"
         if s.futurama_node_domain else target, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
     STATE["phase"] = "ready"
+
+
+async def _remote_user(host: str) -> str | None:
+    """The cluster username: from user@host, else from the ssh config (FUTURAMA_SSH_HOST is often an alias,
+    whose User does not apply to the compute node's own hostname)."""
+    if "@" in host:
+        return host.split("@")[0]
+    _, out = await _sh("ssh", "-G", host, timeout=10)
+    return next((ln.split()[1] for ln in out.splitlines() if ln.startswith("user ")), None)
 
 
 def close_tunnel() -> None:

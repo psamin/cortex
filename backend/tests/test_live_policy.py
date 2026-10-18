@@ -88,3 +88,19 @@ async def test_stop_cancels_the_job(monkeypatch):
     st = await lp.stop(_ctx("http://127.0.0.1:9", "pi34@login.example"))
     assert sent and sent[0][-1] == "scancel 10568"
     assert lp.STATE["job"] is None and not st["available"]
+
+
+async def test_tunnel_user_comes_from_the_ssh_config_for_an_alias(monkeypatch):
+    calls = []
+
+    async def fake_sh(*args, timeout=60):
+        return 0, "hostname planetexpress-login.cc.gatech.edu\nuser pi34\n"
+
+    async def fake_exec(*args, **kw):
+        calls.append(args)
+        return SimpleNamespace(returncode=None, terminate=lambda: None)
+
+    monkeypatch.setattr(lp, "_sh", fake_sh)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
+    await lp.open_tunnel(_ctx("http://127.0.0.1:8765", "futurama"), "angleyne", 30579)
+    assert calls[0][-1] == "pi34@angleyne.cc.gatech.edu" and calls[0][calls[0].index("-J") + 1] == "futurama"
