@@ -8,11 +8,11 @@ status here.
 
 | # | Package | Main files | Depends on | Status |
 |---|---|---|---|---|
-| P0 | Spec and roadmap | `docs/PRODUCT_SPEC.md`, `docs/ROADMAP.md` | – | in review |
-| P1 | Windows: sim workers start, and the full EnvHub snapshot is fetched | `backend/cortex/sim/so101.py` | – | in review |
-| P2 | Intake models (arm, cameras, objects, zones, environment), object catalogue, typed questions | `backend/cortex/intake/*`, tests | P0 | in review |
-| P3 | Intake tools in the registry, REST and MCP (`start_intake`, `update_intake`, `capture_frame`) | `agent_orchestrator.py`, `api/app.py`, `mcp/src/tools.ts` | P2 | planned |
-| P4 | Scene generator; feasibility checks (payload, jaw, stability); reach check | `backend/cortex/sim/scene.py`, `sim/feasibility.py`, tests | P2 | planned |
+| P0 | Spec and roadmap | `docs/PRODUCT_SPEC.md`, `docs/ROADMAP.md` | – | merged (#46) |
+| P1 | Windows: sim workers start, and the full EnvHub snapshot is fetched | `backend/cortex/sim/so101.py` | – | merged (#45) |
+| P2 | Intake models (arm, cameras, objects, zones, environment), object catalogue, typed questions | `backend/cortex/intake/*`, tests | P0 | merged (#47) |
+| P3 | Intake tools in the registry, REST and MCP (`start_intake`, `update_intake`, `capture_frame`) | `agent_orchestrator.py`, `api/app.py`, `mcp/src/tools.ts` | P2 | merged (#51) |
+| P4 | Scene generator; feasibility checks (payload, jaw, stability); reach check | `backend/cortex/sim/scene.py`, `sim/feasibility.py`, tests | P2 | merged (#50) |
 | P5 | Generic objects and zones in the manipulation tools; `go_home` | `backend/cortex/sim/manipulation.py`, `agentic/astra.py`, tests | P4 | planned |
 | P6 | Cycle protocol in sim: demo, reset and recover segments, with segment tags | `workers/agent_worker.py`, `services/agent_collection_service.py`, tests | P5 | planned |
 | P5b | `RobotBackend` interface (twin implements it; hardware later swaps in) | `backend/cortex/robot/backend.py` | P5 | planned |
@@ -23,7 +23,13 @@ status here.
 | P11 | RL distillation: PPO state expert in sim, then demo generation | `backend/cortex/rl/*`, `infra/futurama/train_rl.sbatch` | P5 | planned |
 | P12 | Autopilot v2 stages (sim pretrain, twin rounds, improve) | `services/autopilot.py` | P6a, P10, P11 | planned |
 | P13 | Deliver: `get_policy` and model card | `services/policy_card.py`, tools | P12 | planned |
-| P14 | **Agentic chat studio**: a clean chat-first UI where a person teaches and trains a policy end to end (intake question cards, scene previews, feasibility, collection, training approval, evaluation, live progress). Works with the LLM agent or, without a model key, a guided planner. | `web/src/**`, `backend/cortex/services/agent.py`, `backend/cortex/services/guide.py` | P3 | in progress |
+| P14 | **Agentic chat studio**: a clean chat-first UI where a person teaches and trains a policy end to end (intake question cards, scene previews, feasibility, collection, training approval, evaluation, live progress). Works with the LLM agent or, without a model key, a guided planner. | `web/src/**`, `backend/cortex/services/agent.py`, `backend/cortex/services/guide.py` | P3 | done upstream by @psamin: chat-first studio #22 / #38 / #48 / #59; Kinetic restyle #52 in progress |
+
+## Already built upstream (by @psamin): build on these, don't duplicate them
+
+- **Robot sessions:** the user's own agent drives the arm through validated tools (#14). MCP robot tools return camera images (#21). This covers the session half of P5.
+- **Batch collection** with Claude Code as the planner (#24), and **demo import** from the Hub or an upload (#33, #48).
+- **Real SO-101 track** (#25): the driver (#36), setup and arming (#37), calibration (#39), and the control loop with deadman, watchdog thread and table floor (#58). This covers P7 and P9c.
 
 ## Post-MVP: hardware track (separate modules; the MVP never imports them)
 
@@ -38,13 +44,10 @@ status here.
 
 ## Claims (in flight)
 
-Check this table before you edit. Add your row when you start, and remove it when your PR merges.
+Check this table before you edit. Add your row when you start, and remove it when your PR merges. The issue
+comments (the `Claim:` convention on #20 and the owning issue) remain the source of truth.
 
 | Package | Branch | Driver | Files touched |
 |---|---|---|---|
-| P0 | `docs/product-spec` | Claude Code, driven by @AneeshD04 | `docs/PRODUCT_SPEC.md`, `docs/ROADMAP.md`, `CONTRIBUTING.md` |
-| P1 | `fix/windows-sim-workers` | Claude Code, driven by @AneeshD04 | `backend/cortex/sim/so101.py` |
-| P2 | `feat/intake-models` (on P0) | Claude Code, driven by @AneeshD04 | `[new] backend/cortex/intake/*`, `[new] backend/tests/test_intake.py` |
-| P4 | `feat/scene-generator` (on P2 and P1) | Claude Code, driven by @AneeshD04 | `[new] backend/cortex/sim/{scene,scene_env,grasp,feasibility}.py`, `[mod] backend/cortex/sim/expert.py`, `[mod] backend/cortex/sim/so101.py`, `[mod] backend/cortex/intake/service.py`, `[new] backend/tests/test_scene.py` |
-| P3 | `feat/intake-tools` (on P4) | Claude Code, driven by @AneeshD04 | `[new] backend/cortex/services/intake_service.py`, `[mod] backend/cortex/models.py`, `[mod] backend/cortex/services/agent_orchestrator.py`, `[mod] backend/cortex/api/app.py`, `[mod] mcp/src/{tools,backend}.ts`, `[mod] mcp/README.md`, `[new] backend/tests/test_intake_tools.py` |
-| P5 and P6 (next) | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py`, `backend/cortex/workers/agent_worker.py` and `backend/cortex/services/agent_collection_service.py`. **@psamin: these overlap with the planner work. Please comment on the P5/P6 issue before changing these files.** |
+| #52 redesign (Kinetic) | `52-landing`, then `52-*` | Claude Code, driven by @AneeshD04 | `web/src/landing/**`, `web/src/robotics/**`, small route edits in `web/src/App.tsx` and `layout/AppShell.tsx`, visual-only edits in `web/src/**` |
+| P5/P6: sessions and collection on intake scenes | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py` and `backend/cortex/services/robot_session_service.py`, coordinated on #16 |
