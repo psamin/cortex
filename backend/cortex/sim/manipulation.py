@@ -54,6 +54,7 @@ SIDE_EPISODE_MAX_STEPS = 2400  # 80 s: side grasps move slowly along straight li
 ARM_DEG_PER_STEP, GRIP_PER_STEP = 4.0, 8.0
 CONTACT_DEG_PER_STEP = 2.0  # straight-line moves with an approach axis (side grasps), as in the skill
 LINE_STEP_M = 0.01  # waypoint spacing of straight-line moves
+LINE_AXIS_TOL_DEG = 5.0  # straight lines only when the gripper already points along the axis; else a joint move
 MAX_AXIS_ERR_DEG = 10.0  # an approach-axis IK solution must point within this of the wanted axis
 HOME_TOL_DEG = 2.0
 # Side grasps, in the physical gripper-site frame. Measured on the scripted skill's verified small-bottle runs
@@ -227,6 +228,7 @@ class ManipulationSession:
         self._q_hint: dict[tuple[float, ...], np.ndarray] = {}  # IK solutions of the poses propose_grasp returned
         self._skill: PickPlaceSkill | None = None
         self._last_ik_err = 0.0
+        self._last_axis: tuple[np.ndarray, np.ndarray] | None = None  # (arm joints, approach axis) of the last move
         if env.world is not None:
             self._bind_object()
 
@@ -259,6 +261,7 @@ class ManipulationSession:
         self.holding = False
         self.last_overhead = None
         self._q_hint = {}
+        self._last_axis = None
         self._bind_object()
         return {"seed": seed}
 
@@ -487,9 +490,6 @@ class ManipulationSession:
         raise ToolError("unreachable", f"no IK solution within {tol * 1000:.0f} mm with the gripper along the "
                         f"approach axis {np.round(axis, 3).tolist()}", approach=np.round(axis, 3).tolist())
 
-    def _site_axis(self) -> np.ndarray:
-        return self.env.world.data.site_xmat[self.env.site].reshape(3, 3)[:, 0].copy()
-
     def _line_plan(self, goal: np.ndarray, axis: np.ndarray) -> list[np.ndarray]:
         """Joint waypoints for a straight-line move of the gripper tip, with the approach axis held. Every
         waypoint is solved and every segment swept for collisions before the arm moves."""
@@ -508,7 +508,9 @@ class ManipulationSession:
         """Side-grasp motion: a straight line when the gripper already points along the axis (approach,
         slide, lift, lower, retreat), otherwise a validated joint move (transit, carry). Slow, like the skill."""
         grip = self.cmd[5] if grip is None else grip
-        aligned = float(np.rad2deg(np.arccos(np.clip(self._site_axis() @ axis, -1, 1)))) < 20
+        last = self._last_axis  # the axis of the previous side-grasp move, if the arm has not moved since
+        aligned = (last is not None and np.allclose(last[0], self.cmd[:ARM], atol=0.5)
+                   and float(np.rad2deg(np.arccos(np.clip(last[1] @ axis, -1, 1)))) < LINE_AXIS_TOL_DEG)
         if aligned and np.linalg.norm(goal - self.ee_pos()) < 0.15:
             qs = self._line_plan(goal, axis)
             steps = 0
@@ -520,6 +522,7 @@ class ManipulationSession:
             target = np.r_[q, grip]
             self._check_path_collisions(target)
             steps = self._drive(target, rate=CONTACT_DEG_PER_STEP if self.holding else ARM_DEG_PER_STEP, timeout=240)
+        self._last_axis = (self.cmd[:ARM].copy(), axis.copy())
         return steps
 
     def _resolve_object(self, object_id: str | None) -> dict[str, Any]:
@@ -770,6 +773,7 @@ class ManipulationSession:
         out: dict[str, Any] = {"placed_at_xy": [round(float(r[0]), 4), round(float(r[1]), 4)],
                                "approach": [round(float(v), 4) for v in axis]}
         try:  # released; a failed retreat is a warning, not a failed placement
+            steps += self._move_axis(low - axis * 0.06, axis)  # straight back out of the jaws, then up
             steps += self._move_axis(low - axis * 0.06 + np.array([0, 0, 0.03]), axis)
         except ToolError as e:
             out["retreat_warning"] = e.message
