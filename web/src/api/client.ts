@@ -160,6 +160,7 @@ export const api = {
   setEpisodeStatus: (eid: string, status: Extract<EpisodeStatus, "accepted" | "rejected">) =>
     patch<Episode>(`/episodes/${eid}`, { status }),
   episodeMedia: (eid: string) => get<EpisodeMedia>(`/episodes/${eid}/media`),
+  importHub: (pid: string, repo_id: string, max_episodes: number) => post<Job>(`/projects/${pid}/imports/hub`, { repo_id, max_episodes }),
   acceptPassing: (pid: string) => post<{ accepted: number }>(`/projects/${pid}/episodes/accept-passing`),
 
   // analyze
@@ -272,4 +273,41 @@ function parseFrame(frame: string): { event: string; data: Record<string, unknow
   } catch {
     return { event, data: { delta: rawData } };
   }
+}
+
+/**
+ * Upload a LeRobot dataset archive (multipart field `file`). XHR rather than fetch so we get upload
+ * progress. Resolves to the import Job; rejects with ApiError carrying the backend's `detail` on 4xx.
+ */
+export function uploadDemos(
+  pid: string,
+  file: File,
+  maxEpisodes: number,
+  onProgress: (loaded: number, total: number) => void,
+): { promise: Promise<Job>; abort: () => void } {
+  const xhr = new XMLHttpRequest();
+  const promise = new Promise<Job>((resolve, reject) => {
+    xhr.open("POST", `${API_BASE}/projects/${pid}/imports/upload?max_episodes=${maxEpisodes}`);
+    xhr.setRequestHeader("X-Cortex-Actor", "gui");
+    xhr.upload.onprogress = (e) => onProgress(e.loaded, e.lengthComputable ? e.total : file.size);
+    xhr.onload = () => {
+      let body: unknown = null;
+      try {
+        body = JSON.parse(xhr.responseText);
+      } catch {
+        body = xhr.responseText;
+      }
+      if (xhr.status >= 200 && xhr.status < 300) resolve(body as Job);
+      else {
+        const detail = (body as { detail?: unknown } | null)?.detail ?? body;
+        reject(new ApiError(typeof detail === "string" && detail ? detail : `Upload failed (${xhr.status})`, xhr.status, detail, body));
+      }
+    };
+    xhr.onerror = () => reject(new ApiError(`Cannot reach the Cortex API at ${API_BASE}`, 0));
+    xhr.onabort = () => reject(new ApiError("Upload cancelled", 499));
+    const form = new FormData();
+    form.append("file", file);
+    xhr.send(form);
+  });
+  return { promise, abort: () => xhr.abort() };
 }

@@ -32,7 +32,7 @@ import {
   useRecommendations,
   useTraining,
 } from "../api/hooks";
-import type { AgentAttempt, TrainingJob } from "../api/types";
+import { isImported, type AgentAttempt, type TrainingJob } from "../api/types";
 import { AttemptDrawer, ScenarioChip } from "../components/AgentTrace";
 import { Skeleton } from "../components/ui";
 import { refRoute } from "../components/refs";
@@ -463,8 +463,10 @@ function EpisodesCard({ pid, ids, large }: { pid: string; ids: string[]; large?:
   const episodes = useEpisodes(pid);
   const [open, setOpen] = useState<string | null>(ids.length === 1 ? ids[0] : null);
   const shown = ids.slice(0, large ? 12 : 6);
+  const first = episodes.data?.find((e) => e.id === ids[0]);
+  const imported = first && isImported(first) ? `Human demo · imported${first.provenance?.source ? ` · ${first.provenance.source}` : ""}` : undefined;
   return (
-    <CardShell pid={pid} refId={ids[0]} large={large} icon={<Play className="h-4 w-4" />} title={ids.length === 1 ? "Demo" : `${ids.length} demos`} meta={ids.length > shown.length ? `showing ${shown.length}` : undefined}>
+    <CardShell pid={pid} refId={ids[0]} large={large} icon={<Play className="h-4 w-4" />} title={ids.length === 1 ? "Demo" : `${ids.length} demos`} meta={imported ?? (ids.length > shown.length ? `showing ${shown.length}` : undefined)}>
       {open && <EpisodeVideo id={open} />}
       {ids.length > 1 && (
         <div className={cn("grid gap-1.5", large ? "grid-cols-4" : "grid-cols-3", open && "mt-2")}>

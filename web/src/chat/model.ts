@@ -26,6 +26,8 @@ export type ChatItem =
     }
   | { kind: "meta"; id: number; turns?: number | null; durationMs?: number | null; costUsd?: number | null; isError?: boolean | null }
   | { kind: "error"; id: number; text: string }
+  /** A demo import started from this studio (not in agent history): upload progress, then the live job card. */
+  | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; jobId?: string }
   /** Written by Cortex (not the LLM) when a background job finishes. */
   | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[] };
 
@@ -139,6 +141,7 @@ export function cleanSummary(summary: unknown, refIds: string[] = []): { summary
 // ------------------------------------------------------------------ reducer
 let nextId = 1;
 const id = () => nextId++;
+export const newItemId = id;
 
 export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
   switch (ev.type) {
@@ -272,6 +275,7 @@ export function buildBlocks(items: ChatItem[]): Block[] {
       if (refs.some((r) => prefixOf(r) === "tj")) trainingApproval = true;
       continue;
     }
+    if (it.kind === "import" && it.jobId) seen.add(it.jobId); // its job card renders in the import row
     if (it.kind === "approval") {
       const training = it.approvalKind !== "evaluation";
       if (training && (trainingApproval || seen.has(it.refId))) continue;

@@ -173,7 +173,8 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
               >
                 <span className={cn("h-2 w-2 shrink-0 rounded-full", r.success === null ? "bg-white/30" : r.success ? "bg-[#4ac480]" : "bg-[#ec6060]")} />
                 <span className="whitespace-nowrap">{r.kind === "demo" ? r.label : `Eval · ${r.label}`}</span>
-                {r.condition && (
+                {r.imported && <span className="whitespace-nowrap rounded bg-white/[.08] px-1.5 text-[10.5px] text-white/60">human · imported</span>}
+                {r.condition && !r.imported && (
                   <span className="inline-flex items-center gap-1 whitespace-nowrap capitalize text-white/40">
                     <LightGlyph lighting={r.condition.lighting} />
                     {r.condition.cube_region}
@@ -375,13 +376,19 @@ function Hud({ goal, activity, liveJob, rollout }: { goal: string; activity: { l
               {rollout.kind === "demo" ? "Demonstration" : "Evaluation rollout"}
               {rollout.policy ? ` · ${rollout.policy}` : ""}
             </span>
+            {rollout.imported && <span className="rounded-full bg-white/[.1] px-2 py-0.5 font-medium text-white/80">Human demo · imported</span>}
             {rollout.success !== null && (
               <span className={cn("rounded-full px-2 py-0.5 font-medium", rollout.success ? "bg-[#4ac480]/15 text-[#7ddca5]" : "bg-[#ec6060]/15 text-[#f39a9a]")}>
                 {rollout.success ? "Success · simulator-verified" : `Failed${rollout.failureMode ? ` · ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
               </span>
             )}
           </div>
-          {rollout.condition && (
+          {rollout.imported ? (
+            <span className="max-w-[360px] truncate text-white/50" title={[rollout.source, rollout.task].filter(Boolean).join(" · ")}>
+              {rollout.source ?? "imported dataset"}
+              {rollout.task ? ` · “${rollout.task}”` : ""} · no simulator verdict
+            </span>
+          ) : rollout.condition && (
             <span className="inline-flex items-center gap-1.5 text-white/50">
               <LightGlyph lighting={rollout.condition.lighting} />
               <span className="capitalize">

@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useSearchParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Bot, Check, Cog, Play, ScanSearch, UserCheck, VideoOff, X } from "lucide-react";
+import { Bot, Check, Cog, Play, ScanSearch, UserCheck, UserRound, VideoOff, X } from "lucide-react";
 import { api, resolveMediaUrl } from "../api/client";
 import { isJobActive, useJob, useTrackJob } from "../api/events";
 import { useEpisodeMedia, useEpisodes, useFailureClusters, useLatestAnalysis } from "../api/hooks";
 import type { Analysis, Episode, EpisodeDiagnosis, FailureCluster, QualityFlag, QualityReport } from "../api/types";
+import { isImported } from "../api/types";
 import {
   Badge,
   Button,
@@ -24,7 +25,7 @@ import {
 } from "../components/ui";
 import { ConditionLabel, Footprint } from "../components/Workcell";
 import { describeProvider } from "../components/HealthPills";
-import { AttemptDrawer, EpisodeProvenance } from "../components/AgentTrace";
+import { AttemptDrawer, EpisodeProvenance, ImportedSource } from "../components/AgentTrace";
 import { QualityBadge, SuccessBadge } from "./Collect";
 import { ago, cn, errorMessage, evidenceValue, humanize, pct } from "../lib/format";
 
@@ -209,12 +210,14 @@ function EpisodeTable({
                 <td className={cn("px-3.5 py-2 font-mono text-xs", on ? "text-servo" : "text-ink-3")}>{e.index}</td>
                 <td className="px-2 py-2">
                   <span className="inline-flex items-center gap-1.5">
-                    {e.source === "sim_agent" ? (
+                    {e.source === "imported" ? (
+                      <UserRound className="h-3.5 w-3.5 text-ink-3" aria-label="Human demo, imported" />
+                    ) : e.source === "sim_agent" ? (
                       <Bot className="h-3.5 w-3.5 text-servo" aria-label="GPT-6 Astra" />
                     ) : e.source === "sim_scripted" ? (
                       <Cog className="h-3.5 w-3.5 text-ink-4" aria-label="Scripted IK oracle" />
                     ) : null}
-                    <ConditionLabel c={e.condition} />
+                    {isImported(e) ? <span className="text-xs text-ink-3" title="Imported demos have no known scene condition">condition unknown</span> : <ConditionLabel c={e.condition} />}
                   </span>
                 </td>
                 <td className="px-2 py-2">
@@ -279,7 +282,7 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
             Episode <span className="font-mono text-ink-3">#{e.index}</span>
           </span>
         }
-        meta={`${e.num_frames} frames · ${e.fps} fps · seed ${e.seed}`}
+        meta={`${e.num_frames} frames · ${e.fps} fps${isImported(e) ? "" : ` · seed ${e.seed}`}`}
         bodyClassName="p-0"
       >
         <div className="aspect-[4/3] bg-well">
@@ -301,10 +304,11 @@ function EpisodeDetail({ pid, e, analysis }: { pid: string; e: Episode; analysis
         </div>
         <div className="space-y-3 p-3.5">
           <div className="flex flex-wrap items-center gap-1.5">
-            <ConditionLabel c={e.condition} />
+            {isImported(e) ? <span className="text-xs text-ink-3" title="Imported demos have no known scene condition">condition unknown</span> : <ConditionLabel c={e.condition} />}
             <SuccessBadge s={e.success} />
             <StatusBadge status={e.status} />
             <EpisodeProvenance e={e} />
+            <ImportedSource e={e} className="w-full" />
             {e.provenance?.attempt_id && (
               <Button size="sm" variant="ghost" className="h-5 px-1.5 text-2xs" onClick={() => setTrace(String(e.provenance.attempt_id))}>
                 Action trace
