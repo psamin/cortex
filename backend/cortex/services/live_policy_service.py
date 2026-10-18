@@ -15,6 +15,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import Any
 
 import httpx
@@ -22,7 +23,8 @@ import httpx
 from ..context import Ctx
 
 log = logging.getLogger(__name__)
-STATE: dict[str, Any] = {"job": None, "tunnel": None, "phase": "stopped", "step": None, "detail": None,
+COOLDOWN_S = 600  # after a failed request, wait before submitting again (#221: protect cluster access)
+STATE: dict[str, Any] = {"job": None, "tunnel": None, "phase": "stopped", "step": None, "detail": None, "failed_at": 0.0,
                          "error": None}
 # What the studio shows while a GPU comes up, in order.
 STEPS = {"request": "Requesting a GPU on Georgia Tech's Futurama cluster",
@@ -57,7 +59,7 @@ async def status(ctx: Ctx) -> dict[str, Any]:
         return {"available": True, "phase": "ready", "step": "ready", "steps": STEPS, **info}
     except (httpx.HTTPError, ValueError):
         reason = STATE["error"] or (STATE["detail"] if STATE["phase"] == "starting" else None) or (
-            "No GPU is allocated. Opening this tab requests one on Futurama." if STATE["phase"] == "stopped"
+            "No GPU is allocated. Click Request a GPU to start one on Futurama." if STATE["phase"] == "stopped"
             else "The live GPU server isn't reachable.")
         return {"available": False, "phase": STATE["phase"], "step": STATE["step"], "steps": STEPS,
                 "reason": reason, "error": STATE["error"], "job": STATE["job"]}
@@ -70,6 +72,10 @@ async def start(ctx: Ctx) -> dict[str, Any]:
         raise ValueError("FUTURAMA_SSH_HOST is not set in .env, so Cortex can't start a GPU job.")
     if (await status(ctx))["available"] or STATE["phase"] == "starting":
         return await status(ctx)
+    wait = COOLDOWN_S - (time.time() - STATE["failed_at"])
+    if wait > 0:
+        raise RuntimeError(f"The last GPU request failed, so Cortex waits {int(wait // 60) + 1} more min before "
+                           "asking the cluster again (this protects your Futurama access).")
     STATE.update(phase="starting", error=None)
     _step("request")
     d = s.futurama_policy_dir
@@ -82,6 +88,7 @@ async def start(ctx: Ctx) -> dict[str, Any]:
     job = attach or next((ln.strip() for ln in out.splitlines() if ln.strip().isdigit()), None)
     if rc != 0 or not job:
         STATE.update(phase="stopped", error=f"Couldn't submit the GPU job: {out.strip()[-200:]}. Is the GT VPN on?")
+        STATE["failed_at"] = time.time()
         raise RuntimeError(STATE["error"])
     STATE["job"] = job
     _step("queued", f"Found GPU job {job} already allocated; connecting" if attach
@@ -130,6 +137,7 @@ async def _connect_when_ready(ctx: Ctx, job: str) -> None:
             continue
         if not state:
             STATE.update(phase="stopped", error=f"GPU job {job} ended before the server was ready.")
+            STATE["failed_at"] = time.time()
             return
         _step(*narrate(job, state, progress))
         if STATE["step"] == "connect" and server and str(server.get("job")) == str(job):
@@ -137,6 +145,7 @@ async def _connect_when_ready(ctx: Ctx, job: str) -> None:
             return
         await asyncio.sleep(10)
     STATE.update(phase="stopped", error="The GPU server didn't become ready within 20 minutes.")
+    STATE["failed_at"] = time.time()
 
 
 async def open_tunnel(ctx: Ctx, node: str, port: int) -> None:
