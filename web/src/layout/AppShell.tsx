@@ -1,3 +1,4 @@
+import { BRAND } from "../landing/brand";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Outlet, useMatch } from "react-router-dom";
 import { ChevronDown, Moon, Sun } from "lucide-react";
@@ -19,7 +20,7 @@ function useTheme() {
 }
 
 /** The product name, shown in the wordmark. Change it here only. */
-export const BRAND_NAME = "Kinetic";
+export const BRAND_NAME = BRAND.name; // one source of truth: web/src/landing/brand.ts
 
 /** The Kinetic mark: a small isometric cube with a solid top face. */
 export function Logo() {
