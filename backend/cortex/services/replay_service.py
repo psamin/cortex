@@ -25,6 +25,17 @@ CAMERA = {"id": "presentation", "label": "Recorded camera + joint targets",
                     "human's. Open loop: the arm did not move."}
 
 
+def project_for_task(ctx: Ctx, task: str) -> str | None:
+    """The project that holds this Futurama task's results (infra/futurama/projects.json)."""
+    f = ctx.settings.futurama_projects_file
+    try:
+        mapping = json.loads(f.read_text())
+    except (OSError, ValueError):
+        return None
+    pid = mapping.get(task)
+    return pid if isinstance(pid, str) and pid.startswith("prj_") else None
+
+
 def file_key(pid: str, replay_id: str, name: str) -> str:
     return f"projects/{pid}/replays/{replay_id}/{name}"
 
