@@ -7,6 +7,7 @@ import { augmentedByEpisode } from "../lib/augment";
 import type { Job } from "../api/types";
 import { conditionWords } from "../components/Workcell";
 import { cn } from "../lib/format";
+import { DashedOrbit, IsoGrid, SketchScene } from "../sketch";
 import { useRolloutVideo, useRollouts, type Camera, type CameraInfo, type Rollout, type RolloutOrigin } from "./rollouts";
 
 export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
@@ -108,24 +109,26 @@ export function Viewer({
   }, [rollouts.data]);
 
   return (
-    <section className="flex h-full min-h-0 flex-col bg-[#0b0c0e] text-[#eceDef]" aria-label="Robot simulation viewer">
+    <section className="relative flex h-full min-h-0 flex-col bg-bench text-ink" aria-label="Robot simulation viewer">
+      {/* technical-drawing backdrop */}
+      <IsoGrid cell={32} />
       {/* toolbar */}
-      <div className="flex items-center gap-2 border-b border-white/[.07] px-4 py-2.5">
-        <div className="flex shrink-0 rounded-lg bg-white/[.05] p-0.5">
+      <div className="relative flex items-center gap-3 border-b border-line bg-bench px-4 py-2.5">
+        <div className="flex shrink-0 rounded-full border border-line-strong bg-plate p-0.5">
           <ToolbarTab
             active={showLive}
             onClick={() => setMode("live")}
             disabled={!liveJob && mode !== "live"}
             title={liveJob ? "Watch the simulation live" : "Nothing is running; the live view switches on by itself when a job starts"}
           >
-            <Radio className={cn("h-3.5 w-3.5", liveJob && "text-[#ec6060]")} /> Live
+            <Radio className={cn("h-3.5 w-3.5", liveJob && "text-fault")} /> Live
           </ToolbarTab>
           <ToolbarTab active={!showLive} onClick={() => setMode("replay")}>
             Replays
           </ToolbarTab>
         </div>
         {!showLive && (
-          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-thin">
+          <div className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto px-1 scroll-thin">
             {(
               [
                 ["all", "All", counts.all] as const,
@@ -138,16 +141,16 @@ export function Viewer({
                 type="button"
                 onClick={() => sel.setFilter(k)}
                 className={cn(
-                  "inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs transition-colors",
-                  sel.filter === k ? "bg-white/[.12] text-white" : "text-white/55 hover:bg-white/[.06] hover:text-white/80",
+                  "inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap border-b font-mono text-[10.5px] uppercase tracking-[0.14em] transition-colors",
+                  sel.filter === k ? "border-ink text-ink" : "border-transparent text-ink-3 hover:text-ink",
                 )}
               >
                 {label}
-                <span className="num font-mono text-[10.5px] text-white/40">{n}</span>
+                <span className="num text-ink-4">{String(n).padStart(2, "0")}</span>
               </button>
             ))}
             {sel.evaluationId && (
-              <button type="button" onClick={() => sel.setEvaluationId(null)} className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#f0a43a]/15 px-3 text-xs text-[#f0a43a]">
+              <button type="button" onClick={() => sel.setEvaluationId(null)} className="inline-flex h-6 shrink-0 items-center gap-1 whitespace-nowrap rounded-full border border-servo/60 px-3 font-mono text-[10px] uppercase tracking-[0.12em] text-servo">
                 one evaluation · clear ×
               </button>
             )}
@@ -160,7 +163,7 @@ export function Viewer({
               onChange={(e) => setCamera(e.target.value as Camera)}
               disabled={cams.length < 2}
               title={cam?.detail || cam?.label}
-              className="h-7 max-w-[180px] rounded-md bg-white/[.06] px-2 text-xs text-white/80 outline-none disabled:opacity-70"
+              className="h-7 max-w-[180px] rounded-full border border-line-strong bg-plate px-3 font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink outline-none focus:border-servo disabled:opacity-70"
               aria-label="Camera"
             >
               {cams.map((c) => (
@@ -175,8 +178,8 @@ export function Viewer({
               onClick={() => setCompare((c) => !c)}
               title={counterpart ? "Side by side: success vs failure" : "Needs both a successful and a failed rollout"}
               className={cn(
-                "inline-flex h-7 items-center gap-1.5 rounded-md px-2.5 text-xs transition-colors disabled:opacity-35",
-                compare ? "bg-white/[.14] text-white" : "bg-white/[.06] text-white/75 hover:text-white",
+                "sk-pill inline-flex h-7 items-center gap-1.5 px-3 text-xs font-medium disabled:opacity-35",
+                compare ? "sk-pill-primary" : "sk-pill-secondary",
               )}
             >
               <Columns2 className="h-3.5 w-3.5" /> Compare
@@ -188,18 +191,19 @@ export function Viewer({
       <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
 
       {/* stage */}
-      <div className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <DashedOrbit r={200} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-70" />
         {showLive ? (
           <LiveStage pid={pid} job={liveJob} />
         ) : rollouts.isLoading ? (
-          <div className="flex h-full items-center justify-center">
-            <CircleDashed className="h-6 w-6 animate-spin text-white/30" />
+          <div className="relative flex h-full items-center justify-center">
+            <CircleDashed className="h-6 w-6 animate-spin text-ink-4" />
           </div>
         ) : !current ? (
-          <div className="flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-            <VideoOff className="h-7 w-7 text-white/25" />
-            <p className="text-sm text-white/60">{(rollouts.data ?? []).length ? "Nothing matches this filter." : "No simulation videos yet."}</p>
-            <p className="max-w-sm text-xs text-white/40">Ask the agent to collect demonstrations. The robot appears here live while it works.</p>
+          <div className="relative flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
+            <SketchScene width={300} label="FIG.02 / SCENE" value="NO ROLLOUTS YET" className="mb-2" />
+            <p className="kn-display text-[28px] text-ink">{(rollouts.data ?? []).length ? "Nothing matches this filter." : "No simulation videos yet."}</p>
+            <p className="max-w-sm text-xs leading-5 text-ink-3">Ask the agent to collect demonstrations. The robot appears here live while it works.</p>
           </div>
         ) : compare && counterpart ? (
           <CompareStage a={current} b={counterpart} camera={camera} />
@@ -210,8 +214,8 @@ export function Viewer({
 
       {/* selector */}
       {!showLive && filtered.length > 0 && (
-        <div className="border-t border-white/[.07]">
-          <p className="px-4 pt-2 text-[11px] text-white/40">
+        <div className="relative border-t border-line bg-bench">
+          <p className="px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
             Newest first · ✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict
           </p>
           <div className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 pt-1.5 scroll-thin">
@@ -221,14 +225,14 @@ export function Viewer({
                 type="button"
                 onClick={() => sel.setSelectedId(r.id)}
                 className={cn(
-                  "flex shrink-0 items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-xs transition-colors",
-                  r.id === current?.id ? "bg-white/[.13] text-white" : "bg-white/[.04] text-white/65 hover:bg-white/[.08]",
+                  "flex shrink-0 items-center gap-2 rounded-sm border px-2.5 py-1.5 text-left text-xs transition-colors",
+                  r.id === current?.id ? "border-ink bg-plate text-ink" : "border-line bg-plate text-ink-2 hover:border-line-strong hover:text-ink",
                 )}
               >
-                <span className={cn("h-2 w-2 shrink-0 rounded-full", r.success === null ? "bg-white/30" : r.success ? "bg-[#4ac480]" : "bg-[#ec6060]")} />
+                <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", r.success === null ? "bg-ink-4" : r.success ? "bg-pass" : "bg-fault")} />
                 <span className="whitespace-nowrap">{chipText(r)}</span>
                 {augmented.get(r.id) && (
-                  <span className="whitespace-nowrap rounded bg-white/[.08] px-1.5 text-[10.5px] text-white/60" title={augmented.get(r.id)!.tip}>
+                  <span className="whitespace-nowrap rounded-sm border border-line px-1.5 font-mono text-[10px] uppercase tracking-[0.08em] text-ink-3" title={augmented.get(r.id)!.tip}>
                     +{augmented.get(r.id)!.n} augmented
                   </span>
                 )}
@@ -260,7 +264,7 @@ function ToolbarTab({
       onClick={onClick}
       disabled={disabled}
       title={title}
-      className={cn("inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors disabled:opacity-35", active ? "bg-white/[.12] text-white" : "text-white/55 hover:text-white/85")}
+      className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs font-medium transition-colors disabled:opacity-35", active ? "bg-ink text-bench" : "text-ink-3 hover:text-ink")}
     >
       {children}
     </button>
@@ -272,20 +276,22 @@ function LiveStage({ pid, job }: { pid: string; job?: Job }) {
   const [failed, setFailed] = useState(false);
   const src = api.simLiveUrl(pid);
   return (
-    <div className="flex h-full items-center justify-center p-4">
+    <div className="relative flex h-full items-center justify-center p-6 pb-14">
       {failed || !job ? (
-        <div className="text-center text-sm text-white/50">{job ? "Live stream unavailable" : "Nothing is running right now."}</div>
+        <div className="kn-label text-center">{job ? "Live stream unavailable" : "Nothing is running right now."}</div>
       ) : (
-        <img src={src} alt="Live MuJoCo simulation" onError={() => setFailed(true)} className="max-h-full max-w-full rounded-lg object-contain" />
+        <Frame>
+          <img src={src} alt="Live MuJoCo simulation" onError={() => setFailed(true)} className="block h-full w-auto max-w-full object-contain" />
+        </Frame>
       )}
       {job && (
         <div className="absolute inset-x-6 bottom-5">
-          <div className="mb-1.5 flex justify-between text-xs text-white/70">
+          <div className="mb-1.5 flex justify-between font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-2">
             <span className="truncate">{job.message || job.kind.replace(/_/g, " ")}</span>
-            <span className="num font-mono">{Math.round(job.progress * 100)}%</span>
+            <span className="num text-ink">{Math.round(job.progress * 100)}%</span>
           </div>
-          <div className="h-1 overflow-hidden rounded-full bg-white/15">
-            <div className="h-full rounded-full bg-[#f0a43a] transition-[width] duration-500" style={{ width: `${job.progress * 100}%` }} />
+          <div className="h-px overflow-hidden bg-[var(--line-strong)]">
+            <div className="h-full bg-servo transition-[width] duration-500" style={{ width: `${job.progress * 100}%` }} />
           </div>
         </div>
       )}
@@ -298,7 +304,7 @@ function SingleStage({ r, camera }: { r: Rollout; camera: Camera }) {
   const ref = useRef<HTMLVideoElement>(null);
   return (
     <div className="flex h-full flex-col">
-      <div className="flex min-h-0 flex-1 items-center justify-center p-4 pb-2">
+      <div className="relative flex min-h-0 flex-1 items-center justify-center p-6 pb-3">
         <VideoSurface url={v.data} loading={v.isLoading} videoRef={ref} />
       </div>
       <Controls refs={[ref]} url={v.data} />
@@ -316,18 +322,20 @@ function CompareStage({ a, b, camera }: { a: Rollout; b: Rollout; camera: Camera
   const [vOk, vBad, rOk, rBad] = a.success ? [va, vb, ra, rb] : [vb, va, rb, ra];
   return (
     <div className="flex h-full flex-col">
-      <div className="grid min-h-0 flex-1 grid-cols-2 gap-3 p-4 pb-2">
+      <div className="relative grid min-h-0 flex-1 grid-cols-2 gap-6 p-6 pb-3">
         {(
           [
-            [ok, vOk, rOk, "Succeeded", "#4ac480"],
-            [bad, vBad, rBad, "Failed", "#ec6060"],
+            [ok, vOk, rOk, "Succeeded", "bg-pass", "A"],
+            [bad, vBad, rBad, "Failed", "bg-fault", "B"],
           ] as const
-        ).map(([r, v, ref, label, color]) => (
-          <div key={r.id} className="flex min-h-0 flex-col gap-1.5">
-            <div className="flex items-center gap-2 text-xs">
-              <span className="h-2 w-2 rounded-full" style={{ background: color }} />
-              <span className="font-medium text-white/85">{label}</span>
-              <span className="truncate text-white/45">
+        ).map(([r, v, ref, label, color, letter]) => (
+          <div key={r.id} className="flex min-h-0 flex-col gap-2">
+            <div className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.14em]">
+              <span className="h-px w-6 bg-ink" />
+              <span className="text-ink">FIG.02{letter}</span>
+              <span className={cn("h-1.5 w-1.5 rounded-full", color)} />
+              <span className="text-ink">{label}</span>
+              <span className="truncate normal-case tracking-normal text-ink-3">
                 {r.kind === "demo" ? r.label : r.label}
                 {r.failureMode ? ` · ${r.failureMode.replace(/_/g, " ")}` : ""}
               </span>
@@ -345,15 +353,31 @@ function CompareStage({ a, b, camera }: { a: Rollout; b: Rollout; camera: Camera
 
 function VideoSurface({ url, loading, videoRef }: { url: string | null | undefined; loading: boolean; videoRef: React.RefObject<HTMLVideoElement> }) {
   const [failed, setFailed] = useState<string | null>(null);
-  if (loading) return <CircleDashed className="h-6 w-6 animate-spin text-white/30" />;
+  if (loading) return <CircleDashed className="h-6 w-6 animate-spin text-ink-4" />;
   if (!url || failed === url)
     return (
-      <div className="flex flex-col items-center gap-2 text-white/40">
-        <VideoOff className="h-6 w-6" />
-        <span className="text-xs">{url ? "This camera has no video for this episode" : "No video recorded for this episode"}</span>
+      <div className="flex flex-col items-center gap-2 text-ink-3">
+        <VideoOff className="h-6 w-6" strokeWidth={1.25} />
+        <span className="kn-label">{url ? "This camera has no video for this episode" : "No video recorded for this episode"}</span>
       </div>
     );
-  return <video key={url} ref={videoRef} src={url} autoPlay muted loop playsInline onError={() => setFailed(url)} className="max-h-full max-w-full rounded-lg bg-black object-contain" />;
+  return (
+    <Frame>
+      <video key={url} ref={videoRef} src={url} autoPlay muted loop playsInline onError={() => setFailed(url)} className="block h-full w-auto max-w-full bg-black object-contain" />
+    </Frame>
+  );
+}
+
+/** The drawing frame around a camera image: a hairline border with crop marks at the corners. */
+function Frame({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="relative h-full max-w-full border border-line-strong bg-plate p-1">
+      {(["-left-2 -top-2 border-l border-t", "-right-2 -top-2 border-r border-t", "-bottom-2 -left-2 border-b border-l", "-bottom-2 -right-2 border-b border-r"] as const).map((c) => (
+        <span key={c} aria-hidden className={cn("pointer-events-none absolute h-3 w-3 border-ink", c)} />
+      ))}
+      {children}
+    </div>
+  );
 }
 
 /** Play/pause + scrubbable timeline; drives one or two synced videos. */
@@ -390,8 +414,8 @@ function Controls({ refs, url }: { refs: React.RefObject<HTMLVideoElement>[]; ur
   const seek = (x: number) => all().forEach((v) => (v.currentTime = x));
   const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   return (
-    <div className="flex items-center gap-3 px-5 pb-3">
-      <button type="button" onClick={toggle} disabled={!url} className="flex h-8 w-8 items-center justify-center rounded-full bg-white/[.1] text-white hover:bg-white/[.16] disabled:opacity-30" aria-label={playing ? "Pause" : "Play"}>
+    <div className="relative flex items-center gap-4 px-6 pb-3">
+      <button type="button" onClick={toggle} disabled={!url} className="sk-pill sk-pill-primary flex h-8 w-10 items-center justify-center disabled:opacity-30" aria-label={playing ? "Pause" : "Play"}>
         {playing ? <Pause className="h-3.5 w-3.5" /> : <Play className="ml-0.5 h-3.5 w-3.5" />}
       </button>
       <input
@@ -402,11 +426,11 @@ function Controls({ refs, url }: { refs: React.RefObject<HTMLVideoElement>[]; ur
         value={Math.min(t, dur || 0)}
         disabled={!url || !dur}
         onChange={(e) => seek(Number(e.target.value))}
-        className="h-1 flex-1 cursor-pointer accent-[#f0a43a]"
+        className="h-1 flex-1 cursor-pointer accent-[rgb(var(--servo))]"
         aria-label="Timeline"
       />
-      <span className="num w-20 text-right font-mono text-[11px] text-white/55">
-        {fmt(t)} / {fmt(dur)}
+      <span className="num w-24 text-right font-mono text-[10.5px] uppercase tracking-[0.1em] text-ink-2">
+        T {fmt(t)} <span className="text-ink-4">/ {fmt(dur)}</span>
       </span>
     </div>
   );
@@ -431,62 +455,82 @@ function Hud({
   cam: CameraInfo | null;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 px-5 pt-3">
+    <div className="relative flex items-start justify-between gap-6 px-6 pt-4">
       <div className="min-w-0">
-        <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-white/40">{asked ? "Simulated task" : "Task"}</div>
-        <div className="truncate text-[15px] text-white/90">{goal}</div>
+        <div className="kn-label kn-label-rule">
+          <span className="truncate">
+            <span className="text-ink">FIG.02</span>&nbsp;&nbsp;{asked ? "Simulated task" : "Scene"} · {liveJob ? "Live studio view" : cam ? cam.label : "Task"}
+          </span>
+        </div>
+        <div className="kn-display mt-2 truncate text-[24px] text-ink">{goal}</div>
         {asked && (
-          <div className="truncate text-xs text-white/45" title={`The simulator only has the cube-and-bowl scene. You asked: ${asked}`}>
+          <div className="truncate text-xs text-ink-3" title={`The simulator only has the cube-and-bowl scene. You asked: ${asked}`}>
             You asked: “{asked}”. The simulator only has the cube-and-bowl scene.
           </div>
         )}
-        <div className="mt-0.5 flex items-center gap-1.5 text-xs text-white/60">
+        <div className="mt-1.5 flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.12em] text-ink-2">
           {liveJob ? (
             <>
-              <span className="h-1.5 w-1.5 rounded-full bg-[#ec6060] live-dot" />
+              <span className="h-1.5 w-1.5 rounded-full bg-fault live-dot" />
               <span title="Rendered for people; not what the policy sees">Live · studio view</span>
-              <span className="text-white/40">· {liveJob.message || liveJob.kind.replace(/_/g, " ")}</span>
+              <span className="truncate normal-case tracking-[0.04em] text-ink-3">· {liveJob.message || liveJob.kind.replace(/_/g, " ")}</span>
             </>
           ) : activity?.busy ? (
             <>
-              <CircleDashed className="h-3 w-3 animate-spin text-[#f0a43a]" /> {activity.label}
+              <CircleDashed className="h-3 w-3 animate-spin text-servo" /> <span className="truncate">{activity.label}</span>
             </>
           ) : (
             <>
-              <span className="h-1.5 w-1.5 rounded-full bg-white/30" /> {activity?.label ?? "Idle"}
+              <span className="h-1.5 w-1.5 rounded-full bg-ink-4" /> <span className="truncate">{activity?.label ?? "Idle"}</span>
             </>
           )}
         </div>
       </div>
       {rollout && (
-        <div className="flex min-w-0 shrink-0 flex-col items-end gap-0.5 pt-0.5 text-right text-xs">
-          <span className="text-white/80">
-            Recorded by <span className="font-medium text-white">{rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who}</span>
-          </span>
-          <span className="max-w-[420px] truncate text-white/55" title={[rollout.source, rollout.task].filter(Boolean).join(" · ") || undefined}>
-            {rollout.imported ? `${rollout.source ?? "imported dataset"}${rollout.task ? ` · “${rollout.task}”` : ""}` : rollout.condition ? conditionWords(rollout.condition) : ""}
-          </span>
-          <span className={cn("font-medium", rollout.success === null ? "text-white/60" : rollout.success ? "text-[#7ddca5]" : "text-[#f39a9a]")}>
-            {rollout.success === null ? "Not judged by the simulator" : rollout.success ? "Success, verified by the simulator" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
-          </span>
-          {aug && (
-            <span className="cursor-help text-white/55 underline decoration-dotted underline-offset-2" title={aug.tip}>
-              +{aug.n} augmented {aug.n === 1 ? "copy" : "copies"} (training only)
-            </span>
+        <dl className="flex min-w-0 max-w-[50%] shrink flex-col items-stretch gap-1.5 pt-0.5 font-mono text-[10.5px] uppercase tracking-[0.1em]">
+          <Readout k="By">{rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who}</Readout>
+          {(rollout.imported || rollout.condition) && (
+            <Readout k={rollout.imported ? "Data" : "Cond"} title={[rollout.source, rollout.task].filter(Boolean).join(" · ") || undefined}>
+              {rollout.imported ? `${rollout.source ?? "imported dataset"}${rollout.task ? ` · “${rollout.task}”` : ""}` : rollout.condition ? conditionWords(rollout.condition) : ""}
+            </Readout>
           )}
-          <span className="font-mono text-[11px] text-white/40">
+          <Readout k="Result" tone={rollout.success === null ? "text-ink-2" : rollout.success ? "text-pass" : "text-fault"}>
+            {rollout.success === null ? "Not judged by the simulator" : rollout.success ? "Success, verified by the simulator" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
+          </Readout>
+          {aug && (
+            <Readout k="Aug" title={aug.tip}>
+              <span className="cursor-help border-b border-dotted border-ink-3">
+                +{aug.n} augmented {aug.n === 1 ? "copy" : "copies"} (training only)
+              </span>
+            </Readout>
+          )}
+          <Readout k="Run">
             {[rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null, rollout.frames ? `${rollout.frames} frames` : null, rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null]
               .filter(Boolean)
-              .join(" · ")}
-          </span>
+              .join(" · ") || "—"}
+          </Readout>
           {cam && (
-            <span className="max-w-[360px] truncate text-white/40" title={cam.detail}>
+            <Readout k="Cam" title={cam.detail}>
               {cam.label}
-              {cam.detail ? ` · ${cam.detail}` : ""}
-            </span>
+              {cam.detail ? <span className="normal-case tracking-normal text-ink-3"> · {cam.detail}</span> : ""}
+            </Readout>
           )}
-        </div>
+        </dl>
       )}
+    </div>
+  );
+}
+
+/** One mono readout with a callout leader drawn towards the frame (a node, a diagonal and a run). */
+function Readout({ k, tone, title, children }: { k: string; tone?: string; title?: string; children: React.ReactNode }) {
+  return (
+    <div className="flex min-w-0 items-center justify-end gap-2" title={title}>
+      <svg aria-hidden width="34" height="12" viewBox="0 0 34 12" className="sk-svg hidden shrink-0 md:block">
+        <path d="M3 10 L11 2 L34 2" className="sk-leader" fill="none" />
+        <circle cx="3" cy="10" r="2.2" className="sk-node" />
+      </svg>
+      <dt className="shrink-0 text-ink-3">{k}</dt>
+      <dd className={cn("min-w-0 truncate text-ink", tone)}>{children}</dd>
     </div>
   );
 }
