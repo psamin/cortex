@@ -10,7 +10,9 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
+import json
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from typing import Any
@@ -43,6 +45,30 @@ def shutdown() -> None:
     _gl.submit(_close_all).result(timeout=30)
 
 
+_locks: dict[str, asyncio.Lock] = {}
+
+
+def project_lock(pid: str) -> asyncio.Lock:
+    """Serializes read-modify-save of one project's intake and scene, so concurrent patches and
+    builds never overwrite each other."""
+    return _locks.setdefault(pid, asyncio.Lock())
+
+
+def intake_digest(spec: IntakeSpec) -> str:
+    """Hash of everything that shapes the scene; free-text description and the prompt don't."""
+    d = spec.model_dump(mode="json", exclude={"prompt": True, "environment": {"description"}})
+    return hashlib.sha256(json.dumps(d, sort_keys=True).encode()).hexdigest()[:12]
+
+
+def scene_stale(p: Project) -> bool:
+    return p.scene is not None and (p.intake is None or p.scene.get("intake_digest") != intake_digest(p.intake))
+
+
+async def _reload(ctx: Ctx, p: Project) -> Project:
+    fresh = await ctx.repo.get("projects", p.id, Project)
+    return fresh or p
+
+
 class SceneNotBuilt(FileNotFoundError):
     """capture_frame and later stages need build_simulation first."""
 
@@ -61,17 +87,18 @@ async def start_intake(ctx: Ctx, prompt: str, mode: str, actor: str) -> tuple[Pr
 
 
 async def update_intake(ctx: Ctx, p: Project, patch: dict[str, Any], actor: str) -> dict[str, Any]:
-    before = p.intake or start(p.task_prompt, p.mode.value)
-    spec = apply_patch(before, patch)
-    p.intake = spec
-    stale = p.scene is not None
-    p.scene = None  # any change invalidates the built scene
-    await ctx.repo.save("projects", p, status="active")
+    async with project_lock(p.id):
+        p = await _reload(ctx, p)
+        before = p.intake or start(p.task_prompt, p.mode.value)
+        spec = apply_patch(before, patch)
+        p.intake = spec
+        await ctx.repo.save("projects", p, status="active")
     st = status(spec, before)
     await ctx.audit(actor, "update_intake", p.id, patch, "ok", f"changed {', '.join(st.changed) or 'nothing'}")
     out = st.model_dump(mode="json")
-    if stale:
-        out["notes"].append("The intake changed, so the sim scene must be rebuilt: call build_simulation.")
+    out["scene_built"], out["scene_stale"] = p.scene is not None, scene_stale(p)
+    if out["scene_stale"]:
+        out["notes"].append("The intake changed what the scene is built from: call build_simulation again.")
     return out
 
 
@@ -82,16 +109,19 @@ def _intake(p: Project) -> IntakeSpec:
 
 
 async def build_simulation(ctx: Ctx, p: Project, actor: str) -> dict[str, Any]:
-    spec = _intake(p)
-    st = status(spec)
-    if not st.complete:
-        open_q = [q.path for q in st.questions if q.required]
-        raise ValueError(f"intake is incomplete; answer: {', '.join(open_q)}")
-    out_dir = ctx.local(f"projects/{p.id}/scene")
-    info = await asyncio.to_thread(build_scene, spec, out_dir)
-    report = await _on_gl(_feasibility, spec, info)
-    p.scene = {**info.to_dict(ctx.data_dir), "feasibility": report}
-    await ctx.repo.save("projects", p, status="active")
+    async with project_lock(p.id):
+        p = await _reload(ctx, p)
+        spec = _intake(p)
+        st = status(spec)
+        if not st.complete:
+            open_q = [q.path for q in st.questions if q.required]
+            raise ValueError(f"intake is incomplete; answer: {', '.join(open_q)}")
+        out_dir = ctx.local(f"projects/{p.id}/scene")
+        info = await asyncio.to_thread(build_scene, spec, out_dir)
+        report = await _on_gl(_feasibility, spec, info)
+        # Patches wait on the lock, so the intake saved here is the one the scene was built from.
+        p.scene = {**info.to_dict(ctx.data_dir), "feasibility": report, "intake_digest": intake_digest(spec)}
+        await ctx.repo.save("projects", p, status="active")
     preview = await capture_frame(ctx, p, "top")
     await ctx.audit(actor, "build_simulation", p.id, {}, "ok", f"scene {info.digest}: {report['summary']}")
     return {"scene": p.scene, "feasibility": report, "preview": preview}

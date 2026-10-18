@@ -731,8 +731,11 @@ async def t_intake_status(ctx, a, actor):
     p = await get_project(ctx, a.project_id)
     if p.intake is None:
         raise ValueError("this project has no intake; call start_intake")
+    from .intake_service import scene_stale
+
     st = status(p.intake).model_dump(mode="json")
-    st["scene_built"] = p.scene is not None
+    st["scene_built"], st["scene_stale"] = p.scene is not None, scene_stale(p)
+    st["scene_digest"] = (p.scene or {}).get("digest")
     return {"summary": "complete" if st["complete"] else "incomplete", "ref_ids": [p.id], **st}
 
 
