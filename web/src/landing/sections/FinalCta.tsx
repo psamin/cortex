@@ -21,9 +21,9 @@ export function FinalCta() {
           <span className="text-ink">Start</span>
         </div>
         <h2 id="start-title" className="kn-display mt-6 max-w-[48rem] text-[clamp(2.4rem,4.6vw,4.6rem)] text-ink">
-          Give your agent a robot.
+          Let any agent
           <br />
-          <span className="kn-second">It handles the training.</span>
+          <span className="kn-second">act in the physical world.</span>
         </h2>
         <div className="mt-10 flex flex-wrap items-center gap-3">
           <Link
