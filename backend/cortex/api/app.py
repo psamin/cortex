@@ -226,6 +226,35 @@ async def simulation_frame(pid: str, camera: str = "top", seed: int = 0):
                     headers={"Cache-Control": "no-store"})
 
 
+# ------------------------------------------------------------------ stylized sim view (render-free)
+@app.get("/api/sim/model")
+async def sim_model(pid: str | None = None):
+    """SO-101 scene description for the browser viewer: the upstream tabletop, or a project's scene."""
+    from ..services import sim_view
+
+    p = await orch.get_project(ctx(), pid) if pid else None
+    return await sim_view.describe_model(ctx(), p)
+
+
+@app.get("/api/sim/meshes/{name}.stl")
+async def sim_mesh(name: str):
+    from fastapi.responses import FileResponse
+
+    from ..services import sim_view
+
+    return FileResponse(sim_view.mesh_path(name), media_type="model/stl",
+                        headers={"Cache-Control": "public, max-age=86400, immutable"})
+
+
+@app.get("/api/projects/{pid}/simulation/state")
+async def simulation_state(pid: str, seed: int = 0, cube_region: str = "center", lighting: str = "normal"):
+    """Body world poses and joint angles after reset(seed): the built scene, else the upstream tabletop
+    under the given plan condition. Live recordings run in worker processes; poll this at a low rate."""
+    from ..services import sim_view
+
+    return await sim_view.scene_state(ctx(), await orch.get_project(ctx(), pid), seed, cube_region, lighting)
+
+
 @app.get("/api/projects/{pid}/events")
 async def events(pid: str, request: Request):
     async def gen():
