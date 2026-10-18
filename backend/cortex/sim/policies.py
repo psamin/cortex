@@ -35,7 +35,8 @@ class LeRobotPolicy:
 
     Uses the saved pre/post processors so normalization matches training."""
 
-    def __init__(self, path: str | Path, device: str = "cpu"):
+    def __init__(self, path: str | Path, device: str = "cpu", task: str = TASK_TEXT,
+                 cameras: dict[str, str] | None = None):
         import json
 
         import torch
@@ -49,7 +50,8 @@ class LeRobotPolicy:
         cls = get_policy_class(cfg["type"])
         self.policy = cls.from_pretrained(str(path)).to(device).eval()
         self.pre, self.post = make_pre_post_processors(self.policy.config, pretrained_path=str(path))
-        self.device = device
+        self.device, self.task = device, task
+        self.cameras = cameras or {}  # policy camera name -> env camera (e.g. smolvla_base's camera1 -> front)
         self.image_keys = [k for k in cfg.get("input_features", {}) if k.startswith("observation.images.")]
 
     def reset(self, env, obs, seed):
@@ -60,10 +62,13 @@ class LeRobotPolicy:
         t = self.torch
         batch: dict[str, Any] = {
             "observation.state": t.from_numpy(np.asarray(obs["agent_pos"], np.float32))[None],
-            "task": TASK_TEXT,
+            "task": self.task,
         }
         for key in self.image_keys:
             cam = key.rsplit(".", 1)[-1]
+            cam = self.cameras.get(cam, cam)
+            if cam not in obs["pixels"]:
+                continue  # e.g. smolvla_base's third camera: the policy treats it as absent
             img = t.from_numpy(obs["pixels"][cam]).permute(2, 0, 1).float() / 255.0
             batch[key] = img[None]
         with t.inference_mode():
