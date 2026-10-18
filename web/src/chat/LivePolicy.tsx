@@ -6,8 +6,14 @@ import { cn } from "../lib/format";
 
 /** Trained policies running on a Futurama GPU over held-out episodes they never trained on (#157).
  *  Opening the tab requests a GPU when none is allocated, and narrates each Slurm step until it's live. */
-const SIM_TITLE: Record<string, string> = { jenga: "Jenga", unscrew: "Screwdriver", suture: "Suture" };
-const SIM_MATCH: Record<string, RegExp> = { jenga: /jenga/i, unscrew: /screw|bolt|factory/i, suture: /sutur/i };
+const SIM_TITLE: Record<string, string> = {
+  jenga: "Jenga", screwdriver: "Screwdriver", unscrew: "Unscrew (grip)", palletize: "Palletizing", suture: "Suture",
+};
+// which sim task a project opens on, from its name/goal; earlier entries win ("Screwdriver" before "Unscrew")
+const SIM_MATCH: [string, RegExp][] = [
+  ["jenga", /jenga/i], ["screwdriver", /screwdriver/i], ["palletize", /pallet|forklift|box/i],
+  ["unscrew", /unscrew|bolt/i], ["suture", /sutur/i],
+];
 type Pick = { kind: "sim"; task: string; seed: number } | { kind: "replay"; task: string; ep: number };
 
 /** `hint`: the project's goal, to open on its own task (e.g. "Jenga (sim)" opens the Jenga policy). */
@@ -68,7 +74,7 @@ export function GpuStage({ hint = "" }: { hint?: string }) {
 
   const sims = Object.entries(s.sim ?? {});
   const run = (task: string) => setPick({ kind: "sim", task, seed: 100_000 + Math.floor(Math.random() * 900_000) });
-  const own = sims.find(([t]) => SIM_MATCH[t]?.test(hint))?.[0];
+  const own = SIM_MATCH.find(([t, re]) => s.sim?.[t] && re.test(hint))?.[0];
   const cur: Pick | null =
     pick ?? (own ? { kind: "sim", task: own, seed: 100_000 } : sims[0] ? { kind: "sim", task: sims[0][0], seed: 100_000 }
       : policies[0] ? { kind: "replay", task: policies[0][0], ep: policies[0][1].held_out[0] } : null);
