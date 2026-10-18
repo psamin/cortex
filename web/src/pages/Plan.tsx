@@ -6,7 +6,6 @@ import { Badge, Button, EmptyState, Panel, QueryState, SectionLabel, Skeleton } 
 import { WorkcellGrid } from "../components/Workcell";
 import { useAgent } from "../layout/ProjectLayout";
 import { AutopilotHero } from "./Autopilot";
-import { LineagePreview } from "./Lineage";
 import { cn, humanize } from "../lib/format";
 
 export function PlanPage() {
@@ -30,7 +29,6 @@ export function PlanPage() {
               <p className="mt-1 text-sm text-ink-3">“{s.project.task_prompt}”</p>
             </div>
             <AutopilotHero project={s.project} />
-            <LineagePreview pid={pid} />
             <NextActionsPanel pid={pid} />
             <ProjectSpecView project={s.project} />
           </>
@@ -148,7 +146,6 @@ function NextActionRow({ a, pid, first }: { a: NextAction; pid: string; first: b
   const nav = useNavigate();
   const { ask } = useAgent();
   const to = routeForAction(pid, a.action);
-  const args = Object.keys(a.args).length ? JSON.stringify(a.args) : "";
   return (
     <li className={cn("flex items-start gap-3 px-3.5 py-2.5", !first && "border-t border-line-soft")}>
       <span className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", first ? "bg-servo" : "bg-ink-4")} />
@@ -162,10 +159,9 @@ function NextActionRow({ a, pid, first }: { a: NextAction; pid: string; first: b
           )}
         </div>
         <p className="mt-0.5 text-xs text-ink-3">{a.reason}</p>
-        {args && <p className="mt-0.5 truncate font-mono text-2xs text-ink-4">{args}</p>}
       </div>
       <div className="flex shrink-0 gap-1">
-        <Button size="sm" variant="ghost" onClick={() => ask(`Do the next action "${a.action}"${args ? ` with ${args}` : ""}. Reason given: ${a.reason}`)}>
+        <Button size="sm" variant="ghost" onClick={() => ask(`Please do this next: ${humanize(a.action)}. ${a.reason}`)}>
           <Bot className="h-3.5 w-3.5" /> Ask agent
         </Button>
         {to && (

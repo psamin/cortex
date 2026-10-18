@@ -35,9 +35,6 @@ export const useEpisodeThumbs = (episodes: Episode[] | undefined) =>
     })),
   });
 
-export const useGraph = (pid: string) =>
-  useQuery({ queryKey: ["graph", pid], queryFn: () => api.graph(pid), placeholderData: (prev) => prev });
-
 export const usePlanner = () =>
   useQuery({ queryKey: ["planner"], queryFn: api.planner, staleTime: 60_000, retry: 0 });
 
@@ -98,5 +95,15 @@ export const useNextActions = (pid: string) =>
 export const useAudit = (pid: string) =>
   useQuery({ queryKey: ["audit", pid], queryFn: () => api.audit(pid), refetchInterval: 10_000 });
 
-export const useAgentHistory = (pid: string) =>
-  useQuery({ queryKey: ["agent-history", pid], queryFn: () => api.agentHistory(pid), retry: 0 });
+export const useEngine = () => useQuery({ queryKey: ["agent-engine"], queryFn: api.agentEngine, staleTime: 5 * 60_000, retry: 0 });
+
+export const useEvaluation = (evid: string | null | undefined, poll = false) =>
+  useQuery({
+    queryKey: ["evaluation", evid],
+    queryFn: () => api.evaluation(evid!),
+    enabled: !!evid,
+    refetchInterval: poll ? 4000 : false,
+  });
+
+export const useJobQuery = (id: string | null | undefined, poll = false) =>
+  useQuery({ queryKey: ["job", id], queryFn: () => api.job(id!), enabled: !!id, refetchInterval: poll ? 3000 : false, retry: 0 });

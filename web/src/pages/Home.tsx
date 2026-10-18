@@ -1,85 +1,109 @@
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowUp, CircleDashed } from "lucide-react";
+import { api } from "../api/client";
 import { useProjects } from "../api/hooks";
-import type { Project } from "../api/types";
-import { Button, ErrorState, Skeleton } from "../components/ui";
-import { NewProjectForm } from "./NewProject";
+import { ErrorState } from "../components/ui";
 import { ago } from "../lib/format";
 
+const PLACEHOLDER = "Teach a robot to pick and place a cube.";
+const EXAMPLES = ["Pick up the cube and place it in the bowl", "Push the cube to the left edge of the table", "Stack the cube on top of the box"];
+
+/** Landing: one prompt. Submitting creates the project and hands the prompt to the agent as the first message. */
 export function HomePage() {
-  const q = useProjects();
   const nav = useNavigate();
+  const qc = useQueryClient();
+  const projects = useProjects();
+  const [prompt, setPrompt] = useState("");
+  const ref = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    el.style.height = "0px";
+    el.style.height = `${Math.min(220, Math.max(56, el.scrollHeight))}px`;
+  }, [prompt]);
+
+  const create = useMutation({
+    mutationFn: (text: string) => api.createProject({ task_prompt: text }),
+    onSuccess: (p, text) => {
+      qc.invalidateQueries({ queryKey: ["projects"] });
+      nav(`/p/${p.id}`, { state: { autoSend: text } });
+    },
+  });
+  const submit = (t = prompt) => {
+    const text = t.trim() || PLACEHOLDER;
+    if (!create.isPending) create.mutate(text);
+  };
+  const recent = [...(projects.data ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 6);
 
   return (
     <div className="h-full overflow-y-auto scroll-thin">
-      <div className="mx-auto max-w-[880px] px-6 py-10">
-        {q.isLoading && (
-          <div className="space-y-2">
-            <Skeleton className="h-8 w-48" />
-            <Skeleton className="h-16 w-full" />
-            <Skeleton className="h-16 w-full" />
-          </div>
-        )}
-        {q.error && (
-          <div className="space-y-8">
-            <ErrorState error={q.error} onRetry={() => q.refetch()} />
-            <div className="pointer-events-none opacity-50" aria-hidden>
-              <NewProjectForm onCreated={() => {}} />
-            </div>
-          </div>
-        )}
-        {q.data && q.data.length === 0 && (
-          <div className="mx-auto max-w-[640px]">
-            <NewProjectForm onCreated={(p) => nav(`/p/${p.id}`)} />
-          </div>
-        )}
-        {q.data && q.data.length > 0 && <ProjectList projects={q.data} />}
-      </div>
-    </div>
-  );
-}
-
-function ProjectList({ projects }: { projects: Project[] }) {
-  const sorted = [...projects].sort((a, b) => (a.created_at < b.created_at ? 1 : -1));
-  return (
-    <div className="space-y-4">
-      <div className="flex items-end justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-[-0.015em]">Projects</h1>
-          <p className="mt-1 text-sm text-ink-3">Each project is one skill you are teaching.</p>
+      <div className="mx-auto flex min-h-full max-w-[720px] flex-col px-6 pb-12 pt-[16vh]">
+        <h1 className="text-center text-[40px] font-semibold leading-tight tracking-[-0.03em]">What should your robot learn?</h1>
+        <p className="mt-3 text-center text-[15px] text-ink-3">
+          Describe a skill. Cortex collects demonstrations in simulation, trains a policy, tests it, and keeps improving it.
+        </p>
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+          className="mt-9 flex items-end gap-2 rounded-2xl bg-plate p-2.5 pl-5 shadow-[0_0_0_1px_var(--line-strong),0_24px_48px_-24px_rgba(0,0,0,.5)] focus-within:shadow-[0_0_0_1px_rgb(var(--servo)/.6),0_24px_48px_-24px_rgba(0,0,0,.5)]"
+        >
+          <textarea
+            ref={ref}
+            autoFocus
+            value={prompt}
+            onChange={(e) => setPrompt(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                e.preventDefault();
+                submit();
+              }
+            }}
+            placeholder={PLACEHOLDER}
+            className="flex-1 resize-none bg-transparent py-2.5 text-lg leading-7 text-ink placeholder:text-ink-4 focus:outline-none"
+            aria-label="What should your robot learn?"
+          />
+          <button type="submit" disabled={create.isPending} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-servo text-servo-ink transition-transform active:scale-95 disabled:opacity-60" aria-label="Start">
+            {create.isPending ? <CircleDashed className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}
+          </button>
+        </form>
+        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+          {EXAMPLES.map((x) => (
+            <button key={x} type="button" onClick={() => setPrompt(x)} className="rounded-full px-3 py-1.5 text-xs text-ink-3 shadow-[0_0_0_1px_var(--line)] hover:text-ink">
+              {x}
+            </button>
+          ))}
         </div>
-        <Link to="/new">
-          <Button variant="primary">
-            <Plus className="h-4 w-4" /> New project
-          </Button>
-        </Link>
+        {create.error && (
+          <div className="mt-4">
+            <ErrorState error={create.error} compact />
+          </div>
+        )}
+
+        <div className="mt-auto pt-16">
+          {projects.error ? (
+            <ErrorState error={projects.error} compact onRetry={() => projects.refetch()} />
+          ) : recent.length > 0 ? (
+            <>
+              <div className="mb-2 text-xs text-ink-4">Recent</div>
+              <ul className="divide-y divide-[var(--line-soft)]">
+                {recent.map((p) => (
+                  <li key={p.id}>
+                    <Link to={`/p/${p.id}`} className="flex items-baseline gap-3 rounded-md px-2 py-2.5 hover:bg-rail/60">
+                      <span className="truncate text-sm text-ink-2">{p.name}</span>
+                      <span className="hidden min-w-0 flex-1 truncate text-xs text-ink-4 sm:block">{p.task_prompt}</span>
+                      <span className="ml-auto shrink-0 text-xs text-ink-4">{ago(p.created_at)}</span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
       </div>
-      <ul className="overflow-hidden rounded-md bg-plate shadow-[0_0_0_1px_var(--line)]">
-        {sorted.map((p, i) => {
-          const collected = p.plan.cells.reduce((a, c) => a + c.collected, 0);
-          const frac = p.plan.budget_total ? collected / p.plan.budget_total : 0;
-          return (
-            <li key={p.id} className={i > 0 ? "border-t border-line-soft" : undefined}>
-              <Link to={`/p/${p.id}`} className="grid grid-cols-[1fr_140px_90px_80px] items-center gap-4 px-4 py-3 hover:bg-rail/50">
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{p.name}</div>
-                  <div className="truncate text-xs text-ink-3">{p.task_prompt}</div>
-                </div>
-                <div className="space-y-1">
-                  <div className="num font-mono text-2xs text-ink-3">
-                    {collected}/{p.plan.budget_total} demos
-                  </div>
-                  <div className="h-1 overflow-hidden rounded-full bg-rail">
-                    <div className="h-full bg-servo" style={{ width: `${Math.min(1, frac) * 100}%` }} />
-                  </div>
-                </div>
-                <span className="text-2xs font-medium uppercase tracking-wide text-ink-3">{p.mode === "sim" ? "sim" : "real"}</span>
-                <span className="text-right text-2xs text-ink-4">{ago(p.created_at)}</span>
-              </Link>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 }

@@ -132,8 +132,8 @@ const TABLE_KEYS: Record<string, string[]> = {
   dataset_episode_links: ["datasets"],
   training_jobs: ["training", "state"],
   checkpoints: ["checkpoints", "training"],
-  evaluation_runs: ["evaluations", "state"],
-  simulation_branches: ["evaluations"],
+  evaluation_runs: ["evaluations", "evaluation", "state"],
+  simulation_branches: ["evaluations", "evaluation"],
   tool_audit_logs: ["audit"],
   agent_collections: ["agent-collections", "agent-collection", "collector-comparison", "planner-budget"],
   agent_attempts: ["agent-attempts", "agent-collection", "collector-comparison"],
@@ -143,7 +143,7 @@ function invalidateFor(qc: QueryClient, pid: string, table: string) {
   const keys = TABLE_KEYS[table] ?? ["state"];
   for (const k of keys) {
     if (k === "projects") qc.invalidateQueries({ queryKey: ["projects"] });
-    else if (k === "analysis" || k === "media" || k === "agent-collection") qc.invalidateQueries({ queryKey: [k] });
+    else if (k === "analysis" || k === "media" || k === "agent-collection" || k === "evaluation") qc.invalidateQueries({ queryKey: [k] });
     else qc.invalidateQueries({ queryKey: [k, pid] });
   }
   qc.invalidateQueries({ queryKey: ["next-actions", pid] });

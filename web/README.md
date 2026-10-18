@@ -17,26 +17,27 @@ pnpm preview          # serve dist/
 
 ## Layout
 
+The product is one chat-first screen per project (`/p/:pid`): the agent conversation on the left (35%), the MuJoCo simulation viewer on the right (65%), and a collapsible "Autonomous learning pipeline" panel underneath (stages, metrics, success across iterations, failure analysis). The older pages (Overview, Collect, Analyze, Improve) are secondary, under the header's Details menu.
+
 | Path | What |
 |---|---|
-| `src/api/types.ts` | Hand-written TS mirror of the Pydantic models plus `Job`, SSE payloads, `Health` |
-| `src/api/client.ts` | Typed fetch client, `ApiError` (`unreachable` when the API is down), POST-SSE parser for the agent stream, media URL resolver |
-| `src/api/events.tsx` | One `EventSource` per project (`/projects/{pid}/events`). `job` updates a live job store, `entity` invalidates the matching react-query keys, `log` lines are buffered per `job_id` |
-| `src/api/hooks.ts` | react-query hooks; keys are `[resource, pid]` |
-| `src/layout/` | App shell (header + `/health` provider pills + theme), project layout (left nav, persistent agent panel) |
-| `src/agent/AgentPanel.tsx` | Streaming chat, tool-call/result chips with clickable ref ids, approval cards, Activity tab (`/audit`) |
-| `src/pages/` | Home/onboarding, Autopilot overview (`Plan.tsx` + `Autopilot.tsx`), Lineage graph, Collect, Analyze, Improve (Recommendations, Datasets, Training, Evaluations) |
-| `src/pages/AgentCollect.tsx` | Collect › Agent demonstrations / Scripted oracle: live MJPEG, live action timeline from SSE `agent_step`, dataset progress, attempts, Astra-vs-oracle comparison |
-| `src/components/AgentTrace.tsx` | Trace rows (validator rejections show `error.code`), provenance badges, attempt drawer (video + full trace from `/agent-attempts/{aid}`) |
-| `src/pages/Lineage.tsx` | Force-directed lineage graph (`react-force-graph-2d`) from `GET /projects/{pid}/graph`, provenance drawer, live refresh on SSE `entity` |
-| `src/components/` | UI primitives, workcell grid (cube region × lighting), health pills |
+| `src/chat/ChatProvider.tsx` | Conversation state at project level (survives navigating to Details): loads `/agent/history`, streams `POST /agent` SSE, queues follow-ups, New chat |
+| `src/chat/model.ts` | Pure reducer: SSE + history → items; friendly tool labels; hides Claude Code internals; never shows raw JSON |
+| `src/chat/Conversation.tsx` | Messages, tool status rows, inline result + approval cards, pinned pending approvals, composer |
+| `src/chat/cards.tsx` | Result cards by id prefix (ac_, ev_, ds_, tj_, an_, rec_, job_, ep_), training/evaluation approvals, budget raise |
+| `src/chat/Viewer.tsx` | Simulation viewer: live MJPEG, replays with play/scrub, demo/eval/failure filters, cameras, success-vs-failure compare |
+| `src/chat/rollouts.ts` | `/rollouts` + `/iterations` (404-tolerant; falls back to real episodes + evaluation results) |
+| `src/chat/Pipeline.tsx` | Pipeline stages from the autopilot state machine + live jobs, measured metrics, iteration chart, failure analysis |
+| `src/api/` | Typed client, SSE event store, react-query hooks |
+| `src/pages/` | Landing (`Home.tsx`) and the secondary detail pages |
 
-Routes: `/` (projects or onboarding), `/new`, `/p/:pid` (autopilot overview), `/p/:pid/graph?node=<id>`, `/p/:pid/collect?mode=agent|oracle|manual` (agent is the default only when `/planner` reports available), `/p/:pid/analyze?ep=<id>`, `/p/:pid/improve?tab=recommendations|datasets|training|evaluations`.
+Routes: `/` (landing prompt + recent projects), `/p/:pid` (chat), `/p/:pid/overview|collect|analyze|improve` (details).
 
 ## Honesty conventions
 
 - Nothing is rendered unless it came from the API. Empty, loading and error (backend unreachable) states are explicit.
-- Provenance marks: measured data uses solid edges; VLM output and hypothesis-backed recommendations use a dashed, hatched edge with an "unverified hypothesis" or "hypothesis" badge; local fallbacks (health pills, lineage provenance) use a dashed amber edge labelled "fallback", driven by the backend's explicit `fallback` flags.
+- Provenance marks: measured data uses solid edges; VLM output and hypothesis-backed recommendations are labelled as hypotheses; local fallbacks are listed and labelled in the header's service popover, driven by the backend's explicit `fallback` flags.
+- Pipeline metrics show "—" when a value has not been measured; planned iterations stay "(pending)" until a checkpoint exists.
 - VLM confidence is shown as "model-reported, not a verified probability".
 - The scripted expert is labelled "oracle reference, not a learned policy" everywhere.
 - Training never launches without an explicit approval carrying an approver name.

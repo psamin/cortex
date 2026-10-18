@@ -10,7 +10,6 @@ export default defineConfig({
         manualChunks: {
           react: ["react", "react-dom", "react-router-dom", "@tanstack/react-query"],
           charts: ["recharts"],
-          graph: ["react-force-graph-2d"],
         },
       },
     },

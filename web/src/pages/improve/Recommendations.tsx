@@ -7,7 +7,7 @@ import { useRecommendations } from "../../api/hooks";
 import type { Evidence, Recommendation, RecommendationStatus } from "../../api/types";
 import { Badge, Button, EmptyState, ErrorState, Input, Panel, SkeletonRows } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
-import { RefChip } from "../../agent/AgentPanel";
+import { RefChip } from "../../components/refs";
 import { cn, evidenceValue, humanize } from "../../lib/format";
 
 export function SupportBadge({ support }: { support: Recommendation["support"] }) {
