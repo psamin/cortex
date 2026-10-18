@@ -1,7 +1,7 @@
 """Read models for the studio's viewer, pipeline and metrics panels.
 
 Everything here is derived from stored entities (episodes, attempts, checkpoints,
-training jobs, evaluations, collections); nothing is synthesized. Iterations exist
+training jobs, evaluations, policy replays, collections); nothing is synthesized. Iterations exist
 only once a policy has been trained (or a training job is in flight).
 """
 
@@ -18,6 +18,7 @@ from ..errors import NotFound
 from ..models import (
     AgentAttempt, AgentCollection, Checkpoint, DatasetVersion, Episode, EvaluationRun, SimulationBranch, TrainingJob,
 )
+from . import replay_service
 from .recording_service import npz_key
 
 STUDIO = {"id": "presentation", "label": "Studio view",
@@ -84,6 +85,7 @@ async def rollouts(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                             "seed": ep.seed, "policy": policy, "evaluation_id": run.id,
                             "video_url": await ctx.media_url(ep.video_key), "cameras": cameras_for("eval"),
                             "created_at": run.created_at})
+    out += await replay_service.rollout_rows(ctx, pid, versions)
     out.sort(key=lambda r: str(r["created_at"]), reverse=True)
     return out
 
@@ -98,6 +100,7 @@ async def iterations(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
     tjs = {t.id: t for t in await ctx.repo.list("training_jobs", TrainingJob, project_id=pid)}
     runs = await ctx.repo.list("evaluation_runs", EvaluationRun, project_id=pid)
     cols = await ctx.repo.list("agent_collections", AgentCollection, project_id=pid)
+    replays = await replay_service.list_replays(ctx, pid)
     out: list[dict[str, Any]] = []
     for i, ck in enumerate(cks):
         tj = tjs.get(ck.training_job_id or "")
@@ -118,7 +121,8 @@ async def iterations(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
                     "fine_tuned_from": versions.get(base, base) if base else None,
                     "robot_type": tj.config.get("robot_type") if tj else None,
                     "demos_accepted": ds.num_source_episodes if ds else None, "dataset_id": ds.id if ds else None,
-                    "training": _training(tj), "evaluation": ev, "next": nxt, "created_at": ck.created_at})
+                    "training": _training(tj), "evaluation": ev, "next": nxt, "created_at": ck.created_at,
+                    "replay": replay_service.summary([r for r in replays if r.checkpoint_id == ck.id])})
     # training in flight that has not produced a checkpoint yet
     done = {ck.training_job_id for ck in cks}
     for tj in tjs.values():

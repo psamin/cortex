@@ -1,8 +1,8 @@
 """Empty projects: hidden from Home, and deleted once they have stayed empty for a while.
 
 A project has history once it holds something a person would come back to: a chat message, demos, an
-agent collection, an analysis, a dataset, a training job, a checkpoint, an evaluation, an autopilot run
-or an RL sandbox, or a job has run for it. Home lists only those. A project that is still empty
+agent collection, an analysis, a dataset, a training job, a checkpoint, an evaluation, a policy replay, an
+autopilot run or an RL sandbox, or a job has run for it. Home lists only those. A project that is still empty
 EMPTY_TTL after it was created (e.g. a draft from an abandoned intake) is deleted: its row is marked
 `deleted`, which drops it from every project list. Its id still resolves, so an agent that holds it keeps
 working, and the project comes back as soon as it is saved again or gets history (see `restore`).
@@ -21,7 +21,7 @@ from . import chat_store
 log = logging.getLogger(__name__)
 EMPTY_TTL = timedelta(minutes=10)
 HISTORY_TABLES = ("episodes", "agent_collections", "dataset_versions", "training_jobs", "checkpoints",
-                  "evaluation_runs", "analyses", "autopilot_runs", "rl_sandboxes")
+                  "evaluation_runs", "analyses", "autopilot_runs", "rl_sandboxes", "policy_replays")
 DELETED = "deleted"
 _KNOWN: set[str] = set()  # projects seen with history; history is never removed, so this only grows
 
