@@ -70,6 +70,19 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
     return out
 
 
+def visible_seed(task: str, env, seed: int) -> int:
+    """For the live demo, the bolt in its brightest trained finish (brass) so people can see it. Brass is one of
+    the finishes the policy was trained on, so this stays in distribution: no retraining. Picks the first seed
+    from the requested one whose layout has a brass bolt (deterministic)."""
+    if task != "unscrew":
+        return seed
+    for s in range(seed, seed + 60):
+        env.reset(s)
+        if getattr(env, "finish", "") == "brass":
+            return s
+    return seed
+
+
 def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> bytes:
     im = Image.fromarray(img)
     d = ImageDraw.Draw(im)
@@ -88,6 +101,7 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
     from cortex.sim.tasks.run import SETTLE, Presenter
 
     env, policy = p["env"], p["policy"]
+    seed = visible_seed(p["task"], env, seed)
     obs = env.reset(seed)
     policy.reset(env, obs, seed)
     presenter = Presenter(env)
