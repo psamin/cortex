@@ -751,6 +751,21 @@ const TOOLS: Def[] = [
     annotations: READ,
   },
   {
+    name: "log_decision",
+    title: "Log a plan or decision",
+    description:
+      "Write your plan, a decision and why, or what a result told you into the project's Agent log, where your human " +
+      "watches you work. Call it at every step: before collecting, training, evaluating or improving, and whenever a " +
+      "result changes your plan. It changes nothing else.",
+    inputSchema: z.object({
+      project_id: projectId,
+      kind: z.enum(["plan", "decision", "observation", "question"]).optional()
+        .describe("plan: what you will do next; decision: a choice and why; observation: what a result told you; question: something you need the human to answer"),
+      text: z.string().min(1).max(2000).describe("One or two sentences, in your own words"),
+    }),
+    annotations: WRITE,
+  },
+  {
     name: "get_session_link",
     title: "Get session link",
     description:

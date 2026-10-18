@@ -1045,7 +1045,24 @@ async def t_verify_agent_key(ctx, a, actor):
     return {"summary": "This agent key is active.", "ref_ids": [], "valid": True, "key_id": call["key_id"]}
 
 
+class LogDecisionArgs(BaseModel):
+    project_id: str
+    kind: Literal["plan", "decision", "observation", "question"] = Field(
+        "decision", description="plan: what you will do next; decision: a choice and why; observation: what a result "
+        "told you; question: something you need the human to answer")
+    text: str = Field(min_length=1, max_length=2000, description="One or two sentences, in your own words")
+
+
+async def t_log_decision(ctx, a, actor):
+    await get_project(ctx, a.project_id)  # a real project, so the note lands in its Agent log
+    return {"summary": a.text[:300], "ref_ids": [], "kind": a.kind, "text": a.text}
+
+
 TOOLS.update({t.name: t for t in [
+    Tool("log_decision", "Write your plan, a decision and why, or what a result told you into the project's Agent log, "
+         "where your human watches you work. Call it at every step: before collecting, training, evaluating or "
+         "improving, and whenever a result changes your plan. It changes nothing else.", LogDecisionArgs,
+         t_log_decision),
     Tool("verify_agent_key", "For the hosted MCP server's /mcp gate: is the X-Cortex-Agent-Key on this call active? "
          "Goes through /api/tools so it works over a tunnel or the runner relay.", NoArgs, t_verify_agent_key,
          agent_callable=False),

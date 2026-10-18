@@ -1898,6 +1898,44 @@
       "needsApproval": false
     },
     {
+      "name": "log_decision",
+      "mcpTools": [
+        "cortex.log_decision"
+      ],
+      "description": "Write your plan, a decision and why, or what a result told you into the project's Agent log, where your human watches you work. Call it at every step: before collecting, training, evaluating or improving, and whenever a result changes your plan. It changes nothing else.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "kind": {
+            "default": "decision",
+            "description": "plan: what you will do next; decision: a choice and why; observation: what a result told you; question: something you need the human to answer",
+            "enum": [
+              "plan",
+              "decision",
+              "observation",
+              "question"
+            ],
+            "type": "string"
+          },
+          "text": {
+            "description": "One or two sentences, in your own words",
+            "maxLength": 2000,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "text"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "verify_agent_key",
       "mcpTools": [],
       "description": "For the hosted MCP server's /mcp gate: is the X-Cortex-Agent-Key on this call active? Goes through /api/tools so it works over a tunnel or the runner relay.",
