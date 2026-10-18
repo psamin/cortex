@@ -40,14 +40,16 @@ def stubbed(monkeypatch):
 
 
 def _args(name, pid):
-    return {"launch_training_job": {"training_job_id": "tj_x"},
+    return {"approve_training_from_view": {"project_id": pid, "training_job_id": "tj_x", "nonce": "n"},
+            "launch_training_job": {"training_job_id": "tj_x"},
             "robot_start_episode": {"project_id": pid},
             "robot_act": {"session_id": "rs_x", "tool": "observe_scene"},
             "robot_finish_episode": {"session_id": "rs_x", "believes_success": True}}[name]
 
 
 def test_the_human_only_set_is_what_the_policy_says():
-    assert HUMAN_ONLY == ["launch_training_job", "robot_act", "robot_finish_episode", "robot_start_episode"]
+    assert HUMAN_ONLY == ["approve_training_from_view", "launch_training_job", "robot_act", "robot_finish_episode",
+                          "robot_start_episode"]
     assert not {s["function"]["name"] for s in agent.tool_specs()} & set(HUMAN_ONLY)
 
 

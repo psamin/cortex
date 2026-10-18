@@ -822,6 +822,11 @@ TOOLS.update({t.name: t for t in [
          "real setup you described.", IntakeArgs.Frame, t_capture_frame),
 ]})
 
+# MCP Apps views (#119): snapshots for in-chat views and the human-only approval path.
+from . import mcp_views  # noqa: E402
+
+mcp_views.register(TOOLS, Tool)
+
 # Tools that start work the agent should not start without a human click.
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
 
