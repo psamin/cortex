@@ -561,6 +561,59 @@ async def t_improve(ctx, a, actor):
             "evidence": evidence, "requires_approval_for_training": True}
 
 
+# ------------------------------------------------- robot sessions (the user's agent drives the arm)
+
+RobotToolName = Literal["observe_scene", "get_robot_state", "propose_grasp", "move_end_effector", "set_gripper",
+                        "verify_grasp", "place_object", "check_task_success"]
+
+
+class RobotArgs:
+    class Start(BaseModel):
+        project_id: str
+        cube_region: Literal["left", "center", "right"] | None = None
+        lighting: Literal["dim", "normal", "bright"] | None = None
+        seed: int | None = None
+
+    class Act(BaseModel):
+        session_id: str
+        tool: RobotToolName
+        args: dict[str, Any] = {}
+
+    class Finish(BaseModel):
+        session_id: str
+        believes_success: bool
+        summary: str = Field("", max_length=400)
+
+
+async def t_robot_start(ctx, a, actor):
+    from . import robot_session_service as rs
+
+    out = await rs.start(ctx, await get_project(ctx, a.project_id), a.cube_region, a.lighting, a.seed, actor=actor)
+    return {"summary": f"Episode ready: session {out['session_id']}, cube {out['scenario']['cube_region']}, "
+                       f"{out['scenario']['lighting']} light, seed {out['seed']}. Start with observe_scene.",
+            "ref_ids": [out["session_id"], out["attempt_id"]], **out}
+
+
+async def t_robot_act(ctx, a, actor):
+    from . import robot_session_service as rs
+
+    out = await rs.act(ctx, a.session_id, a.tool, a.args)
+    r = out["result"]
+    summary = (f"{out['phase']}: ok" if r.get("ok") else
+               f"{out['phase']}: rejected ({r.get('error', {}).get('code')}: {r.get('error', {}).get('message')})")
+    return {"summary": summary, "ref_ids": [a.session_id], **out}
+
+
+async def t_robot_finish(ctx, a, actor):
+    from . import robot_session_service as rs
+
+    out = await rs.finish(ctx, a.session_id, a.believes_success, a.summary, actor)
+    verdict = "SUCCESS" if out["success"] else "FAILED"
+    return {"summary": f"{verdict} according to the simulator ({out['frames_recorded']} frames recorded)"
+                       + (f"; saved as demonstration {out['episode_id']}" if out["episode_id"] else ""),
+            "ref_ids": [x for x in (out["attempt_id"], out["episode_id"]) if x], **out}
+
+
 TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("create_project", "Create a robot-learning project from a natural-language task; returns task spec, "
          "success criteria and an initial demonstration plan.", Args.CreateProject, t_create_project),
@@ -603,6 +656,13 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "training (training itself needs approval). Returns job_id.", AgentArgs.TrainFromAgent, t_train_from_agent),
     Tool("evaluate_learned_policy", "Evaluate a trained checkpoint (never the oracle) in the three parallel MuJoCo "
          "conditions.", AgentArgs.EvalLearned, t_eval_learned),
+    Tool("robot_start_episode", "Start a simulated SO-101 episode you will control yourself (fresh seed; optional cube "
+         "region/lighting). Returns session_id.", RobotArgs.Start, t_robot_start, agent_callable=False),
+    Tool("robot_act", "Run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, "
+         "move_end_effector, set_gripper, verify_grasp, place_object, check_task_success).", RobotArgs.Act,
+         t_robot_act, agent_callable=False),
+    Tool("robot_finish_episode", "End your episode; the simulator judges success and successes become demonstrations.",
+         RobotArgs.Finish, t_robot_finish, agent_callable=False),
     Tool("improve_policy", "Find the weakest measured condition, collect targeted agent demos there in fresh seeds, "
          "build a new dataset version and propose retraining. Returns job_id.", AgentArgs.Improve, t_improve),
 ]}
