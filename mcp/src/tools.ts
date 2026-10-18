@@ -421,15 +421,19 @@ const TOOLS: Def[] = [
   // ---- drive the simulated arm yourself (Cortex validates + executes every command; the simulator judges success)
   {
     name: "robot_start_episode",
-    title: "Robot: start episode",
+    title: "Simulated arm: start episode",
     description:
-      "Start a simulated SO-101 pick-and-place episode that YOU control (fresh seed). Then: cortex_robot_observe -> " +
+      "Simulated arm (MuJoCo, no hardware): start a SO-101 pick-and-place episode in the simulator that YOU control (fresh seed). Then: cortex_robot_observe -> " +
       "cortex_robot_propose_grasp (point at the red cube's centre in the overhead image) -> cortex_robot_gripper open -> " +
-      "cortex_robot_move to pregrasp -> robot_move to grasp -> robot_gripper closed -> cortex_robot_verify_grasp -> " +
-      "robot_move up to z=0.075 -> cortex_robot_observe -> cortex_robot_place (point at the green box's centre) -> " +
+      "cortex_robot_move to pregrasp -> cortex_robot_move to grasp -> cortex_robot_gripper closed -> cortex_robot_verify_grasp -> " +
+      "cortex_robot_move up to z=0.075 -> cortex_robot_observe -> cortex_robot_place (point at the green box's centre) -> " +
       "cortex_robot_check_success -> cortex_robot_finish_episode. You never send motor commands: Cortex checks workspace, " +
       "reachability, joint limits and collisions, then executes with IK. Rejected commands return an error code; adjust " +
-      "and retry. Successful episodes become LeRobot demonstrations.",
+      "and retry. Successful episodes become LeRobot demonstrations.
+" +
+      "USE WHEN: you want to drive the simulated arm step by step yourself (slow; one demo per episode).
+" +
+      "USE INSTEAD: cortex_create_policy_project / cortex_start_agent_collection to collect many demos autonomously.",
     inputSchema: z.object({
       project_id: projectId,
       cube_region: z.enum(["left", "center", "right"]).optional(),
@@ -439,9 +443,9 @@ const TOOLS: Def[] = [
   },
   {
     name: "robot_observe",
-    title: "Robot: observe",
+    title: "Simulated arm: observe",
     description:
-      "Look at the scene. 'overhead' (default) first moves the arm out of view, then returns a 480x480 top-down image " +
+      "Simulated arm (MuJoCo, no hardware): look at the scene. 'overhead' (default) first moves the arm out of view, then returns a 480x480 top-down image " +
       "with a pixel grid every 40 px: image up = +x (forward), image left = +y. Use it to point at the cube and the box.",
     inputSchema: z.object({ session_id: sessionId, camera: z.enum(["overhead", "front", "wrist"]).optional() }),
     annotations: ROBOT,
@@ -449,17 +453,17 @@ const TOOLS: Def[] = [
   },
   {
     name: "robot_state",
-    title: "Robot: state",
-    description: "Joint angles, gripper opening (0-100), end-effector xyz, whether an object is held, step budget.",
+    title: "Simulated arm: state",
+    description: "Simulated arm (MuJoCo, no hardware): joint angles, gripper opening (0-100), end-effector xyz, whether an object is held, step budget.",
     inputSchema: z.object({ session_id: sessionId }),
     annotations: READ,
     backend: act("get_robot_state"),
   },
   {
     name: "robot_propose_grasp",
-    title: "Robot: propose grasp",
+    title: "Simulated arm: propose grasp",
     description:
-      "Point at the red cube's centre in the most recent overhead image. Cortex back-projects the pixel through the " +
+      "Simulated arm (MuJoCo, no hardware): point at the red cube's centre in the most recent overhead image. Cortex back-projects the pixel through the " +
       "calibrated camera, refines it in the image, estimates the cube's yaw, and returns validated pregrasp/grasp poses.",
     inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
     annotations: ROBOT,
@@ -467,49 +471,49 @@ const TOOLS: Def[] = [
   },
   {
     name: "robot_move",
-    title: "Robot: move gripper",
-    description: "Move the gripper tip to a pose (use the poses from robot_propose_grasp). Validated before it moves.",
+    title: "Simulated arm: move gripper",
+    description: "Simulated arm (MuJoCo, no hardware): move the gripper tip to a pose (use the poses from cortex_robot_propose_grasp). Validated before it moves.",
     inputSchema: z.object({ session_id: sessionId, target: pose, reason: z.string().max(200).optional() }),
     annotations: ROBOT,
     backend: act("move_end_effector", (i) => ({ target: i.target, reason: i.reason ?? "" })),
   },
   {
     name: "robot_gripper",
-    title: "Robot: gripper",
-    description: "Open or close the gripper. Reports whether it stalled on an object (i.e. is holding something).",
+    title: "Simulated arm: gripper",
+    description: "Simulated arm (MuJoCo, no hardware): open or close the gripper. Reports whether it stalled on an object (i.e. is holding something).",
     inputSchema: z.object({ session_id: sessionId, state: z.enum(["open", "closed"]) }),
     annotations: ROBOT,
     backend: act("set_gripper", (i) => ({ state: i.state })),
   },
   {
     name: "robot_verify_grasp",
-    title: "Robot: verify grasp",
-    description: "Check from proprioception whether the cube is held; also returns the wrist-camera image.",
+    title: "Simulated arm: verify grasp",
+    description: "Simulated arm (MuJoCo, no hardware): check from proprioception whether the cube is held; also returns the wrist-camera image.",
     inputSchema: z.object({ session_id: sessionId }),
     annotations: ROBOT,
     backend: act("verify_grasp"),
   },
   {
     name: "robot_place",
-    title: "Robot: place",
-    description: "Carry the held cube to the point you mark at the green box's centre (overhead image) and release it.",
+    title: "Simulated arm: place",
+    description: "Simulated arm (MuJoCo, no hardware): carry the held cube to the point you mark at the green box's centre (overhead image) and release it.",
     inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
     annotations: ROBOT,
     backend: act("place_object", (i) => ({ image_point: i.image_point })),
   },
   {
     name: "robot_check_success",
-    title: "Robot: check success",
-    description: "Simulator ground truth: is the cube resting inside the box?",
+    title: "Simulated arm: check success",
+    description: "Simulated arm (MuJoCo, no hardware): simulator ground truth on whether the cube is resting inside the box.",
     inputSchema: z.object({ session_id: sessionId }),
     annotations: READ,
     backend: act("check_task_success"),
   },
   {
     name: "robot_finish_episode",
-    title: "Robot: finish episode",
+    title: "Simulated arm: finish episode",
     description:
-      "End the episode. The simulator (not you) decides success; successes are saved as demonstrations, failures as diagnostics.",
+      "Simulated arm (MuJoCo, no hardware): end the episode. The simulator (not you) decides success; successes are saved as demonstrations, failures as diagnostics.",
     inputSchema: z.object({ session_id: sessionId, believes_success: z.boolean(), summary: z.string().max(400).optional() }),
     annotations: ROBOT,
     backend: (i) => ["robot_finish_episode", { session_id: i.session_id, believes_success: i.believes_success, summary: i.summary ?? "" }],
