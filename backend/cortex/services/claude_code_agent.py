@@ -153,7 +153,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     workdir.mkdir(parents=True, exist_ok=True)
     mcp_cfg = workdir / "mcp.json"
     mcp_cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
-    cmd = ["claude", "-p", message, "--output-format", "stream-json", "--verbose",
+    cmd = [shutil.which("claude") or "claude", "-p", message, "--output-format", "stream-json", "--verbose",
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
            "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
            "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal,

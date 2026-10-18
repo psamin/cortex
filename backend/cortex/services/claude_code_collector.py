@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import shutil
 from typing import Any
 
 from ..context import Ctx
@@ -24,14 +25,27 @@ ROBOT_TOOLS = ["robot_observe", "robot_state", "robot_propose_grasp", "robot_mov
 MAX_TURNS = 30
 
 PROMPT = """You are generating one robot demonstration for Cortex. Robot session {sid} is already started
-(cube {region}, {light} light). Use ONLY the cortex robot tools with session_id="{sid}":
-1. robot_observe (overhead) and find the red cube and the green box in the image (pixel grid every 40 px).
-2. robot_propose_grasp with image_point at the red cube's centre.
+({setting}). Use ONLY the cortex robot tools with session_id="{sid}":
+1. robot_observe (overhead) and find {obj} and {target} in the image (pixel grid every 40 px).
+2. robot_propose_grasp with image_point at the centre of {obj}. It returns the approach for this object
+   ({grasp}), with pregrasp and grasp poses.
 3. robot_gripper open -> robot_move to the returned pregrasp -> robot_move to the returned grasp -> robot_gripper closed.
 4. robot_verify_grasp. If not holding: open, observe again, re-propose and retry once.
-5. robot_move up to z=0.075 (same x, y), robot_observe again, robot_place with image_point at the green box's centre.
-6. robot_check_success, then robot_finish_episode with your honest belief.
+5. Lift straight up, robot_observe again, then robot_place {place}.
+6. robot_go_home if available, robot_check_success, then robot_finish_episode with your honest belief.
 If a command is rejected, read the error code and adjust. Be brief; do not explain at length."""
+
+
+def _prompt(sid: str, scenario: Scenario, task: dict[str, Any] | None) -> str:
+    """The demo prompt for this session's actual task (an intake scene), else the built-in cube task."""
+    t = task or {}
+    if t.get("scene") == "intake" and t.get("object"):
+        zone = t.get("target_zone") or ""
+        return PROMPT.format(sid=sid, setting=f"{scenario.lighting} light", obj=t.get("object_text") or f"the {t['object']}",
+                             target=f"the '{zone}' zone" if zone else "the target zone", grasp=t.get("grasp_mode", "top"),
+                             place=f"with zone='{zone}'" if zone else "with image_point at the target zone's centre")
+    return PROMPT.format(sid=sid, setting=f"cube {scenario.cube_region}, {scenario.lighting} light", obj="the red cube",
+                         target="the green box", grasp="top", place="with image_point at the green box's centre")
 
 
 async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario: Scenario, seed: int, index: int,
@@ -44,7 +58,8 @@ async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario
     cfg = workdir / "mcp.json"
     cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
     allowed = ",".join(f"mcp__cortex__cortex_{t}" for t in ROBOT_TOOLS)
-    cmd = ["claude", "-p", PROMPT.format(sid=sid, region=scenario.cube_region, light=scenario.lighting),
+    exe = shutil.which("claude") or "claude"  # full path so Windows finds claude.cmd
+    cmd = [exe, "-p", _prompt(sid, scenario, started.get("task")),
            "--output-format", "stream-json", "--verbose", "--mcp-config", str(cfg), "--strict-mcp-config",
            "--allowedTools", allowed, "--max-turns", str(MAX_TURNS)]
     if model:
