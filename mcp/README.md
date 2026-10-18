@@ -350,7 +350,7 @@ What needs the Manufact dashboard (the user's login; not done here):
 2. **Publish > Checklist > Run checklist** ($0.10 per run; ChatGPT and Claude end-to-end checks need Hobby, $2). Fix any failures and run it again. The free scorecard at manufact.com/mcp-catalog also takes a public URL with no account.
 3. **Testing > Add test suite**, once per entry in `evals/manufact/test-suites.json`. Pick Claude Code (with tool search both on and off), Claude and Codex CLI. Each run costs $1.
 4. **Publish > Submission pack > Generate pack** (Hobby, $5), after the checklist passes. Check that the tool justifications match the annotations above and that the reviewer test cases include the approval gate.
-5. Before listing it anywhere, deploy with `CORTEX_REQUIRE_AGENT_KEY=1` so the hosted `/mcp` needs an agent key (see Hosted endpoint auth above).
+5. Before listing it anywhere, note that the deployed `/mcp` endpoint has no auth of its own yet (see the deploy notes above).
 
 ## Layout
 
