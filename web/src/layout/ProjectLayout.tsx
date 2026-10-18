@@ -1,8 +1,9 @@
-import { createContext, useCallback, useContext } from "react";
+import { createContext, useCallback, useContext, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Camera, FlaskConical, Joystick, LayoutDashboard, Server, MessagesSquare, ScanSearch, type LucideIcon } from "lucide-react";
 import { ProjectEventsProvider } from "../api/events";
 import { ChatProvider, useChat } from "../chat/ChatProvider";
+import { ChatHistoryPanel, ChatHistoryPanelCtx } from "../chat/ChatHistoryPanel";
 import { cn } from "../lib/format";
 
 /** Lets any detail page hand a prompt to the agent (it opens the chat and sends). */
@@ -25,6 +26,21 @@ function Frame({ pid }: { pid: string }) {
   const chat = useChat();
   const nav = useNavigate();
   const isChat = !!useMatch("/p/:pid");
+  const [historyOpen, setHistoryOpenState] = useState(() => {
+    try {
+      return localStorage.getItem("cortex.chatHistoryOpen") === "1";
+    } catch {
+      return false;
+    }
+  });
+  const setHistoryOpen = useCallback((open: boolean) => {
+    setHistoryOpenState(open);
+    try {
+      localStorage.setItem("cortex.chatHistoryOpen", open ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
   const ask = useCallback(
     (msg: string) => {
       chat.send(msg);
@@ -34,21 +50,25 @@ function Frame({ pid }: { pid: string }) {
   );
   return (
     <AgentCtx.Provider value={{ ask }}>
-      <div className="flex h-full min-h-0">
-        <ManualRail pid={pid} />
-        <div className="min-w-0 flex-1">
-          {isChat ? (
-            <Outlet />
-          ) : (
-            <div className="flex h-full min-h-0 flex-col">
-              <DetailsBar pid={pid} />
-              <main className="min-h-0 flex-1 overflow-y-auto scroll-thin">
-                <Outlet />
-              </main>
-            </div>
-          )}
+      <ChatHistoryPanelCtx.Provider value={{ open: historyOpen, setOpen: setHistoryOpen }}>
+        <div className="flex h-full min-h-0">
+          {/* Chat on a manual page opens the chat with its list; on the chat it toggles the list */}
+          <ManualRail pid={pid} historyOpen={isChat && historyOpen} onChat={() => setHistoryOpen(isChat ? !historyOpen : true)} />
+          {isChat && historyOpen && <ChatHistoryPanel pid={pid} onClose={() => setHistoryOpen(false)} />}
+          <div className="min-w-0 flex-1">
+            {isChat ? (
+              <Outlet />
+            ) : (
+              <div className="flex h-full min-h-0 flex-col">
+                <DetailsBar pid={pid} />
+                <main className="min-h-0 flex-1 overflow-y-auto scroll-thin">
+                  <Outlet />
+                </main>
+              </div>
+            )}
+          </div>
         </div>
-      </div>
+      </ChatHistoryPanelCtx.Provider>
     </AgentCtx.Provider>
   );
 }
@@ -66,11 +86,20 @@ const SECTIONS = [
  * Slim, always-visible rail: the chat (the default screen) on top, the manual dashboard below.
  * It never expands on its own; labels appear on hover/focus.
  */
-function ManualRail({ pid }: { pid: string }) {
+function ManualRail({ pid, historyOpen, onChat }: { pid: string; historyOpen: boolean; onChat: () => void }) {
   const chat = useChat();
   return (
     <nav aria-label="Project" className="flex w-12 shrink-0 flex-col items-center gap-1 border-r border-line bg-bench py-3">
-      <RailLink to={`/p/${pid}`} end label="Chat" hint="Work with the agent (default)" icon={MessagesSquare} busy={chat.busy} />
+      <RailLink
+        to={`/p/${pid}`}
+        end
+        label="Chat"
+        hint={historyOpen ? "Hide past chats" : "Work with the agent · show past chats"}
+        icon={MessagesSquare}
+        busy={chat.busy}
+        onClick={onChat}
+        expanded={historyOpen}
+      />
       <div className="my-2 h-px w-6 bg-[var(--line)]" />
       <span className="pb-1 font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-3">Manual</span>
       {SECTIONS.map((s) => (
@@ -80,11 +109,31 @@ function ManualRail({ pid }: { pid: string }) {
   );
 }
 
-function RailLink({ to, end, label, hint, icon: Icon, busy }: { to: string; end?: boolean; label: string; hint: string; icon: LucideIcon; busy?: boolean }) {
+function RailLink({
+  to,
+  end,
+  label,
+  hint,
+  icon: Icon,
+  busy,
+  onClick,
+  expanded,
+}: {
+  to: string;
+  end?: boolean;
+  label: string;
+  hint: string;
+  icon: LucideIcon;
+  busy?: boolean;
+  onClick?: () => void;
+  expanded?: boolean;
+}) {
   return (
     <NavLink
       to={to}
       end={end}
+      onClick={onClick}
+      aria-expanded={expanded}
       aria-label={label}
       className={({ isActive }) =>
         cn(

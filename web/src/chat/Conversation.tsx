@@ -1,14 +1,12 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, History, Paperclip, Plus, Square, X } from "lucide-react";
-import { api } from "../api/client";
 import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
-import { InlineError } from "../components/ui";
-import { ago, cn, evidenceValue } from "../lib/format";
+import { cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
+import { useChatHistoryPanel } from "./ChatHistoryPanel";
 import { useViewerFocus } from "./focus";
 import { ImportRow, ImportSheet, useImporter } from "./Imports";
 import { Markdown } from "./Markdown";
@@ -108,7 +106,7 @@ export function Conversation({ pid }: { pid: string }) {
           <span>Agent</span>
         </span>
         <div className="ml-auto flex items-center gap-3">
-          <ChatHistory pid={pid} />
+          <HistoryToggle />
           <button
             type="button"
             onClick={() => void chat.newChat().catch(() => {})}
@@ -575,62 +573,13 @@ function Composer({
   );
 }
 
-/** Past chats of this project, newest first; picking one opens it and new messages continue it. */
-function ChatHistory({ pid }: { pid: string }) {
-  const chat = useChat();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  const threads = useQuery({ queryKey: ["agent-threads", pid], queryFn: () => api.agentThreads(pid), enabled: open, retry: 0 });
-  useEffect(() => {
-    if (!open) return;
-    const off = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
-    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
-    document.addEventListener("mousedown", off);
-    document.addEventListener("keydown", esc);
-    return () => {
-      document.removeEventListener("mousedown", off);
-      document.removeEventListener("keydown", esc);
-    };
-  }, [open]);
-  const list = threads.data ?? [];
-  const current = chat.threadId ?? list[0]?.id ?? null;
+/** Shows or hides the past-chats panel beside the rail (the same one the rail's Chat button opens). */
+function HistoryToggle() {
+  const panel = useChatHistoryPanel();
   return (
-    <div ref={ref} className="relative">
-      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink">
-        <History className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">History</span>
-      </button>
-      {open && (
-        <div className="enter absolute right-0 top-full z-50 mt-1.5 max-h-[360px] w-72 overflow-y-auto rounded-xl bg-plate p-1.5 shadow-[0_0_0_1px_var(--line-strong),0_16px_32px_-12px_rgba(0,0,0,.5)] scroll-thin">
-          {threads.isLoading ? (
-            <div className="space-y-1.5 p-1.5">
-              <div className="skeleton h-8 w-full rounded-md" />
-              <div className="skeleton h-8 w-full rounded-md" />
-            </div>
-          ) : threads.error ? (
-            <InlineError error={threads.error} fallback="Couldn't load past chats." className="p-2" />
-          ) : list.length === 0 ? (
-            <p className="p-2 text-xs text-ink-3">No past chats yet.</p>
-          ) : (
-            list.map((t) => (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => {
-                  chat.openThread(t.id);
-                  setOpen(false);
-                }}
-                className={cn("flex w-full items-baseline gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-rail", t.id === current && "bg-rail")}
-              >
-                <span className="min-w-0 flex-1 truncate text-sm text-ink" title={t.title}>
-                  {t.title || "Untitled chat"}
-                </span>
-                <span className="shrink-0 text-[11px] text-ink-4">{t.id === current ? "current" : ago(t.updated_at)}</span>
-              </button>
-            ))
-          )}
-        </div>
-      )}
-    </div>
+    <button type="button" onClick={() => panel.setOpen(!panel.open)} aria-expanded={panel.open} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink">
+      <History className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">{panel.open ? "Hide chats" : "All chats"}</span>
+    </button>
   );
 }
 
