@@ -68,6 +68,7 @@ def cem(params: list[SkillParam], evaluate: Evaluate, iterations: int, populatio
         e_ci = wilson(e_wins, e_n)
         st = IterationStats(iteration=it, episodes=n_all, mean_return=round(float(np.mean(scores)), 4),
                             success_rate=round(sum(wins) / n_all, 4), ci95=wilson(int(sum(wins)), n_all),
+                            elite_success_rate=round(e_wins / e_n, 4),
                             best_return=round(best_ret, 4), best_params={k: round(v, 5) for k, v in best.items()},
                             elapsed_s=round(time.time() - t0, 1))
         history.append(st)

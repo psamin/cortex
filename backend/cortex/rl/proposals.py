@@ -67,9 +67,12 @@ def propose(project_id: str, weaknesses: list[Weakness], budget: SandboxBudget |
 
 
 def estimate(sb: RLSandbox, pilot: Pilot, sim_steps_per_s: float, history: list[tuple[float, float]] | None = None,
-             delta: float = 0.05, steps_per_episode: int = STEPS_PER_EPISODE, seed: int = 0) -> Estimate:
+             delta: float = 0.05, steps_per_episode: int = STEPS_PER_EPISODE, seed: int = 0,
+             record_steps_per_s: float | None = None) -> Estimate:
     """Fill a sandbox's estimate from its measured pilot, measured throughput and past rounds.
 
+    ``record_steps_per_s``: measured throughput while recording demos (camera renders on); defaults to
+    ``sim_steps_per_s``. Demo attempts are scaled by the predicted sandbox success (failures are discarded).
     ``history``: this project's past rounds as (skill-level gain in the sandbox, realised ACT uplift on that
     condition) pairs, both measured.
     """
@@ -96,9 +99,12 @@ def estimate(sb: RLSandbox, pilot: Pilot, sim_steps_per_s: float, history: list[
     regress = np.minimum(0.0, rng.normal(-0.02, 0.02, N_MC))
 
     b = sb.budget
-    episodes = (pilot.n + b.pilot_cem_iterations * b.population * b.episodes_per_candidate + b.train_episodes
-                + 2 * b.heldout_episodes + b.demos)
-    cpu_h = episodes * steps_per_episode / max(sim_steps_per_s, 1e-6) / 3600
+    fast = (pilot.n + b.pilot_cem_iterations * b.population * b.episodes_per_candidate + b.train_episodes
+            + 2 * b.heldout_episodes)
+    demo_attempts = int(np.ceil(b.demos / max(float(sand.mean()), 1 / 3)))  # the worker caps attempts at 3x
+    episodes = fast + demo_attempts
+    cpu_h = (fast * steps_per_episode / max(sim_steps_per_s, 1e-6)
+             + demo_attempts * steps_per_episode / max(record_steps_per_s or sim_steps_per_s, 1e-6)) / 3600
     wall_min = cpu_h * 60 / b.max_parallel
     mean_up = float(uplift.mean())
     return Estimate(
@@ -132,6 +138,7 @@ def _assumptions(sand_src: str = "prior", t_src: str = "prior", rounds: int = 0)
                    f"skill-level gain to ACT (replaced after {MIN_ROUNDS} measured rounds)")
     out += ["regression on other conditions is a prior (-2 +/- 2 pp) until rounds measure it; targeted data is "
             "capped at 30-40% of the dataset to limit it",
-            "cost is CPU time at the measured sim throughput; local runs cost $0",
+            "cost is CPU time at the measured sim throughput (render-free for training and evaluation, with camera "
+            "renders for demo recording); local runs cost $0",
             "only the re-evaluated ACT checkpoint counts as a measured improvement of the policy"]
     return out

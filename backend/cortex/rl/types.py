@@ -146,9 +146,11 @@ class IterationStats(BaseModel):
     mean_return: float
     success_rate: float
     ci95: tuple[float, float]
+    elite_success_rate: float | None = None  # the top-return candidates' success (what ADR widens on)
     best_return: float
     best_params: dict[str, float]
     elapsed_s: float
+    env: SandboxEnv | None = None  # the domain ranges this iteration ran in
 
 
 class SandboxResult(BaseModel):
@@ -181,6 +183,11 @@ class RLSandbox(BaseModel):
     reason: str = ""
     progress: list[IterationStats] = []
     result: SandboxResult | None = None
-    job_id: str | None = None
+    job_id: str | None = None  # the running job: the pilot's, then the run's
     accepted_by: str | None = None
+    stop_requested_by: str | None = None
+    phase: str | None = None  # pilot | train | heldout | demos (live)
+    episodes_done: int = 0
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
     created_at: datetime = Field(default_factory=now)

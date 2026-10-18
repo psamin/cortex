@@ -56,7 +56,9 @@ class TunedSkill(ScriptedExpert):
 
 
 class TunedPolicy:
-    """``sim_worker.run_episode``-compatible wrapper (reset/act/ex)."""
+    """``sim_worker.run_episode``-compatible wrapper (reset/act/ex). Reads sim state, never the cameras."""
+
+    needs_pixels = False
 
     def __init__(self, params: dict[str, float] | None = None):
         self.params = params or {}
