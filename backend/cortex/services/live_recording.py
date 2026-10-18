@@ -202,7 +202,7 @@ async def save_session(ctx: Ctx, task: str, episode: int, rec: StreamRecorder, s
     sim = kind == "live_sim"
     pid = await replay_service.project_for(ctx, f"sim_{task}" if sim else task)
     if pid is None:
-        if sim and rec.frames >= MIN_FRAMES and rec.jpegs:
+        if sim and rec.frames >= MIN_FRAMES and rec.jpegs and 1 in rec.success_frames:  # only runs that succeeded
             p = await asyncio.to_thread(keep_skill_replay, ctx.data_dir, task, episode, rec.jpegs)
             log.info("live sim %s seed %s kept as a Physical Skills replay %s (no project)", task, episode, p.name)
         else:
