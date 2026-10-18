@@ -11,7 +11,6 @@ atomically to out_dir/live.jpg so the API can stream it as MJPEG.
 from __future__ import annotations
 
 import json
-import os
 import sys
 import time
 from pathlib import Path
@@ -44,11 +43,9 @@ class Preview:
     def grab(self) -> np.ndarray:
         img = self.r.render(self.env.world.data)
         if self.live:
-            from PIL import Image
+            from .livefile import write_live_jpg
 
-            tmp = self.out_dir / "live.tmp.jpg"
-            Image.fromarray(img).save(tmp, quality=80)
-            os.replace(tmp, self.out_dir / "live.jpg")
+            write_live_jpg(img, self.out_dir)
         return img
 
     def close(self) -> None:
