@@ -17,10 +17,12 @@ def is_remote(src: str) -> bool:
     return ":" in head and not re.fullmatch(r"[A-Za-z]:", head) and not Path(src).exists()
 
 
-def fetch(src: str, dst: Path, include: list[str]) -> Path:
-    """rsync the files matching `include` (rsync patterns, e.g. "*.mp4") from src into dst; returns dst."""
+def fetch(src: str, dst: Path, include: list[str], exclude: tuple[str, ...] = (), recursive: bool = True) -> Path:
+    """rsync the files matching `include` (rsync patterns, e.g. "*.mp4") from src into dst; returns dst.
+    `exclude` patterns win over `include` (e.g. "dataset/videos/"); recursive=False stays in the top folder."""
     dst.mkdir(parents=True, exist_ok=True)
-    pats = ["--include=*/", *(f"--include={p}" for p in include), "--exclude=*"]
+    pats = [*(f"--exclude={p}" for p in exclude), *(["--include=*/"] if recursive else []),
+            *(f"--include={p}" for p in include), "--exclude=*"]
     r = subprocess.run(["rsync", "-a", "-m", *pats, src.rstrip("/") + "/", str(dst) + "/"],
                        capture_output=True, text=True, timeout=1800)
     if r.returncode != 0:
