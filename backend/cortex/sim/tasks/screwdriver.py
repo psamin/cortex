@@ -50,9 +50,13 @@ from .workcell import (
 # Screw and plate
 PITCH = 0.003  # rise per turn (m): 2 turns lift the head 6 mm, which keeps the final lift within reach
 TURNS = 2.0  # thread engagement
-# The cross tip has a short lever (~4 mm), so the thread turns easily: 0.01 N m of frictionloss holds it.
-# A 0.001 kg m^2 armature with the near-hard solimp keeps the coupling tight (see unscrew.py).
-TURN_ARMATURE, TURN_DAMPING, TURN_FRICTION = 0.001, 0.002, 0.01
+# Thread friction with a breakaway: the seated screw is tight for its first quarter turn, then runs loose,
+# so a flick spins it. Env.step switches the turn's frictionloss and damping by angle. A 0.001 kg m^2
+# armature with the near-hard solimp keeps the coupling tight (see unscrew.py).
+TURN_ARMATURE = 0.001
+BREAKAWAY = np.pi / 2  # rad of turn before the screw runs loose
+TIGHT = (0.02, 0.04)  # frictionloss (N m), damping (N m s / rad) while seated
+LOOSE = (0.003, 0.004)  # after breakaway; it still stops within ~0.25 s when let go
 PLATE_TOP = 0.012  # 4 mm steel plate + 8 mm aluminium block
 SEAT_GAP = 0.0005
 LOOSE_FRICTION = 2.0  # N, an unthreaded screw on its last crest (see Env.step)
@@ -129,7 +133,7 @@ class Env(WorkcellEnv):
         s = ET.SubElement(f, "body", name="screw", pos=f"0 0 {PLATE_TOP + SEAT_GAP}")
         # The scene compiles angles in degrees: the turn's range is 0-10 turns.
         ET.SubElement(s, "joint", name="screw_turn", type="hinge", axis="0 0 1", range="0 3600",
-                      damping=f"{TURN_DAMPING}", frictionloss=f"{TURN_FRICTION}", armature=f"{TURN_ARMATURE}")
+                      damping=f"{TIGHT[1]}", frictionloss=f"{TIGHT[0]}", armature=f"{TURN_ARMATURE}")
         # MuJoCo regularises a dof's friction and limit by its compile-time inverse weight; on the 10 g screw
         # alone 2 N of frictionloss is a weak damper (0.5 N lifts it 4 cm/s). 1 kg of armature makes it hold.
         ET.SubElement(s, "joint", name="screw_rise", type="slide", axis="0 0 1", range="0 0.1", damping="0.2",
@@ -176,6 +180,7 @@ class Env(WorkcellEnv):
         self.fixture, self.screw = self.body("fixture"), self.body("screw")
         self.holder, self.driver = self.body("holder"), self.body("driver")
         self.turn_q = m.joint("screw_turn").qposadr[0]
+        self.turn_dof = m.joint("screw_turn").dofadr[0]
         self.rise_j = m.joint("screw_rise").id
         self.rise_q = m.jnt_qposadr[self.rise_j]
         self.rise_range0 = m.jnt_range[self.rise_j].copy()
@@ -199,6 +204,7 @@ class Env(WorkcellEnv):
         # The upstream reset restores body poses and re-arms the thread (eq_active); the slide range is ours.
         m.jnt_range[self.rise_j] = self.rise_range0
         m.dof_frictionloss[self.rise_dof] = 0.0
+        m.dof_frictionloss[self.turn_dof], m.dof_damping[self.turn_dof] = TIGHT
         m.body_pos[self.fixture, :2] = FIX_XY + rng.uniform(-FIX_JITTER, FIX_JITTER, 2)
         m.body_quat[self.fixture] = yaw_quat(FIX_YAW + rng.uniform(-FIX_YAW_JITTER, FIX_YAW_JITTER))
         m.body_quat[self.screw] = yaw_quat(rng.uniform(0, np.pi / 2))  # recess orientation (4-fold)
@@ -223,6 +229,8 @@ class Env(WorkcellEnv):
         # The thread lets go after TURNS turns. The screw then sits loose on its last crest: it does not
         # drop, and it rubs there (LOOSE_FRICTION), so the driver's tip lifting off does not carry it along.
         d, m = self.world.data, self.world.model
+        # Tight on its seat for the first quarter turn, loose after (the breakaway).
+        m.dof_frictionloss[self.turn_dof], m.dof_damping[self.turn_dof] = TIGHT if self.turned() < BREAKAWAY else LOOSE
         if d.eq_active[self.thread] and self.turned() >= 2 * np.pi * TURNS:
             d.eq_active[self.thread] = 0
             m.jnt_range[self.rise_j, 0] = max(0.0, self.rise() - 0.0002)
@@ -271,7 +279,7 @@ class Env(WorkcellEnv):
         return {"turns": round(self.turned() / (2 * np.pi), 3), "rise_mm": round(1000 * self.rise(), 1),
                 "disengaged": self.disengaged(), "driver_held": self.driver_held(),
                 "tip_above_head_mm": round(float(1000 * (self.tip()[2] - self.head_top())), 1),
-                "finish": self.finish, "handle": self.handle_color}
+                "broke_loose": bool(self.turned() >= BREAKAWAY), "finish": self.finish, "handle": self.handle_color}
 
 
 # ---------------------------------------------------------------------------------------------- oracle
@@ -286,12 +294,17 @@ ROLL_MARGIN = np.deg2rad(10.0)
 OVERTURN = np.deg2rad(15.0)
 UNWIND = np.deg2rad(4.0)  # back the turn off by the blades' play (+-4 deg) before lifting the driver clear
 ALIGN_TOL, ALIGN_YAW_TOL = 0.00025, np.deg2rad(1.0)  # the blades have 0.4 mm of play
-MAX_ENGAGE = 6
+BREAK_TURN, BREAK_STEPS = np.deg2rad(120.0), 135  # the slow, firm first turn through the breakaway
+FLICK, FLICK_STEPS = np.pi, 28  # then quick 180 deg flicks: the cross lines up again after turning back
+FINAL_SETTLE = 15  # hold still at the end, so the verifier sees the driver at rest
+MAX_ENGAGE = 8
 
 
 class Oracle(TopDownOracle):
-    """Screwdriver oracle (privileged state: driver, tip, screw and recess poses, turn). It keeps the
-    driver at the end."""
+    """Screwdriver oracle (privileged state: driver, tip, screw and recess poses, turn). Picks the driver,
+    carries it over the screw and lines the tip up with the recess. Breaks the screw loose with one slow,
+    firm turn, then spins it out with quick 180 deg flicks (lift out, turn back, re-engage, flick), lifts
+    the driver clear and holds it. ``done`` turns True only after that final hold."""
 
     name = "screwdriver oracle (privileged state)"
 
@@ -302,11 +315,14 @@ class Oracle(TopDownOracle):
         self.engagements = 0
         yield from self._pick()
         yield from self._carry()
+        yield from self._engage(quick=False)
+        self.phase = "break loose"
+        yield from self._turn(self._stroke(BREAK_TURN), BREAK_STEPS)
         while not env.disengaged() and self.engagements < MAX_ENGAGE:
-            yield from self._engage()
-            yield from self._turn()
-            if not env.disengaged():
-                yield from self._back_off()
+            yield from self._back_off()
+            yield from self._engage(quick=True)
+            self.phase = f"flick {self.engagements - 1}"
+            yield from self._turn(self._stroke(FLICK), FLICK_STEPS)
         self.phase = "lift clear"
         p0, yaw0 = self._fk(self.cmd)
         axis = env.screw_xy()
@@ -317,9 +333,16 @@ class Oracle(TopDownOracle):
         up = env.head_top() + CLEAR + 0.006 - env.tip()[2]
         yield self._line(np.r_[p0[:2], p0[2] + up], yaw0, GRIP_SHUT, 24, settle=4)
         self.phase = "hold"
+        yield [self.cmd.copy()] * FINAL_SETTLE
 
     def _roll_offset(self, q: np.ndarray) -> float:
         return self._fk(q)[1] - np.deg2rad(q[4])
+
+    def _stroke(self, want: float) -> float:
+        """A turn of ``want`` rad, cut to what the wrist roll has left and to the end of the thread."""
+        room = self._roll_offset(self.cmd) + self.roll_hi - self._fk(self.cmd)[1]
+        left = 2 * np.pi * TURNS + OVERTURN - self.env.turned()
+        return float(np.clip(min(want, room, left), np.deg2rad(20.0), None))
 
     def _pick(self):
         env = self.env
@@ -361,7 +384,7 @@ class Oracle(TopDownOracle):
         self.phase = "carry"
         yield self._joint(self._ik(np.r_[axis - rot(yaw) @ off, CARRY_TIP + dz], yaw, q), GRIP_SHUT, settle=6)
 
-    def _engage(self):
+    def _engage(self, quick: bool):
         """Centre the tip over the recess and turn its blades into line (closed loop), then lower it in."""
         env = self.env
         self.engagements += 1
@@ -372,30 +395,27 @@ class Oracle(TopDownOracle):
             if np.linalg.norm(err) < ALIGN_TOL and abs(turn) < ALIGN_YAW_TOL:
                 break
             p0, psi0 = self._fk(self.cmd)
-            yield self._line(np.r_[p0[:2] + err, p0[2]], psi0 + turn, GRIP_SHUT, 8, settle=4)
+            yield self._line(np.r_[p0[:2] + err, p0[2]], psi0 + turn, GRIP_SHUT, 6 if quick else 8, settle=3)
         self.phase = f"insert {self.engagements}"
         p0, psi0 = self._fk(self.cmd)
         dz = p0[2] - env.tip()[2]  # commanded site above the measured tip
-        yield self._line(np.r_[p0[:2], env.head_top() - INSERT + dz], psi0, GRIP_SHUT, 20, settle=4)
+        yield self._line(np.r_[p0[:2], env.head_top() - INSERT + dz], psi0, GRIP_SHUT, 10 if quick else 20,
+                         settle=2 if quick else 4)
 
-    def _turn(self):
-        """Orbit the commanded site about the screw axis while the jaws turn. The height is re-planned every
-        step from the measured head, so the tip stays at its depth in the recess whether the screw keeps up
-        with the turn or not (an open-loop rise would lift the tip out when the screw lags)."""
+    def _turn(self, dyaw: float, steps: int):
+        """Orbit the commanded site about the screw axis while the jaws turn ``dyaw``. The height is
+        re-planned every step from the measured head, so the tip stays at its depth in the recess whether
+        the screw keeps up with the turn or not (an open-loop rise would lift the tip out when it lags)."""
         env = self.env
-        self.phase = f"turn {self.engagements}"
         p0, yaw0 = self._fk(self.cmd)
         axis = env.screw_xy()
         off = rot(-yaw0) @ (p0[:2] - axis)
         depth = p0[2] - env.head_top()  # commanded site above the head top, kept through the turn
-        room = self._roll_offset(self.cmd) + self.roll_hi - yaw0
-        left = 2 * np.pi * TURNS + OVERTURN - env.turned()
-        dyaw = float(np.clip(min(room, left), np.deg2rad(20.0), None))
-        for s in min_jerk(int(np.clip(np.rad2deg(dyaw) / 2.5, 20, 120))):
+        for s in min_jerk(steps):
             yaw = yaw0 + dyaw * s
             q = self._ik(np.r_[axis + rot(yaw) @ off, env.head_top() + depth], yaw, self.cmd)
             yield [np.r_[q, GRIP_SHUT]]
-        yield [self.cmd.copy()] * 4
+        yield [self.cmd.copy()] * 3
 
     def _back_off(self):
         """Lift the tip out of the recess and turn back to the next start, orbiting the screw axis."""
@@ -403,11 +423,11 @@ class Oracle(TopDownOracle):
         self.phase = f"back {self.engagements}"
         p0, yaw0 = self._fk(self.cmd)
         up = env.head_top() + TIP_CLEAR - env.tip()[2]  # measured: the tip clears the head before turning back
-        yield self._line(np.r_[p0[:2], p0[2] + up], yaw0, GRIP_SHUT, 14, settle=3)
+        yield self._line(np.r_[p0[:2], p0[2] + up], yaw0, GRIP_SHUT, 10, settle=2)
         p0, yaw0 = self._fk(self.cmd)
         axis = env.screw_xy()
         off = rot(-yaw0) @ (p0[:2] - axis)
         yaw1 = self._start_yaw(self.cmd, self._held()[2])
         k = max(2, int(np.ceil(np.rad2deg(abs(yaw1 - yaw0)) / 6.0)))
         pts = [(np.r_[axis + rot(y) @ off, p0[2]], y) for y in np.linspace(yaw0, yaw1, k + 1)[1:]]
-        yield self._path(pts, GRIP_SHUT, int(np.clip(np.rad2deg(abs(yaw1 - yaw0)) / 5.0, 20, 60)), settle=2)
+        yield self._path(pts, GRIP_SHUT, int(np.clip(np.rad2deg(abs(yaw1 - yaw0)) / 8.0, 14, 40)), settle=2)

@@ -1,11 +1,12 @@
-"""Screwdriver task (issue #161): tool pick-up, the thread physics, strict success and the oracle."""
+"""Screwdriver task (issue #161): tool pick-up, the thread physics (with breakaway), strict success and
+the oracle (a firm break-loose turn, then flicks)."""
 
 import numpy as np
 import pytest
 
 from cortex.sim.so101 import configure_gl
 from cortex.sim.tasks import make
-from cortex.sim.tasks.screwdriver import PITCH, TURNS
+from cortex.sim.tasks.screwdriver import BREAKAWAY, PITCH, TURNS
 from cortex.sim.tasks.workcell import GRIP_OPEN
 
 configure_gl()
@@ -26,21 +27,30 @@ def _step(env, action, n, torque=0.0):
     d.xfrc_applied[env.screw] = 0
 
 
-def test_oracle_unscrews_with_the_screwdriver(task):
+def test_oracle_breaks_it_loose_then_flicks_it_out(task):
     env, oracle = task
     for seed in (0, 1, 2):
         obs = env.reset(seed)
         oracle.reset(env, obs, seed)
+        turned = {"break": [0.0, 0], "flick": [0.0, 0]}
         for _ in range(env.max_steps):
-            env.step(oracle.act(obs), render=False)
+            action = oracle.act(obs)
+            before = env.turned()
+            env.step(action, render=False)
+            key = "break" if oracle.phase == "break loose" else "flick" if oracle.phase.startswith("flick") else None
+            if key:
+                turned[key][0] += env.turned() - before
+                turned[key][1] += 1
             if oracle.done:
                 break
-        assert oracle.done and 2 <= oracle.engagements <= 4, (seed, oracle.engagements)
-        action = oracle.act(obs)
+        # The recorder runs until done: the whole motion is over and success already holds.
+        assert oracle.done and env.success(), (seed, env.metrics())
         _step(env, action, 30)
         m = env.metrics()
         assert env.success() and m["turns"] >= TURNS and m["tip_above_head_mm"] >= 10, (seed, m)
         assert m["rise_mm"] < 1000 * PITCH * TURNS + 2  # the loose screw stayed in its hole
+        slow, fast = (turned[k][0] / turned[k][1] for k in ("break", "flick"))
+        assert fast > 3 * slow > 0, (seed, slow, fast)  # a firm turn, then quick flicks
     # Dropping the screwdriver is not a success.
     action[5] = GRIP_OPEN
     _step(env, action, 40)
@@ -72,25 +82,41 @@ def test_turning_raises_it_by_the_pitch_then_it_sits_loose(task):
     env, _ = task
     obs = env.reset(4)
     z0 = env.world.data.xpos[env.screw][2]
-    _step(env, obs["agent_pos"], 60, torque=0.015)
+    _step(env, obs["agent_pos"], 60, torque=0.03)
     turned, risen = env.turned(), env.world.data.xpos[env.screw][2] - z0
-    assert turned > np.pi / 2 and not env.disengaged()
+    assert 0.1 < turned < BREAKAWAY and not env.disengaged()
     assert abs(risen - PITCH * turned / (2 * np.pi)) < 1e-4, (turned, risen)
-    for _ in range(600):
-        _step(env, obs["agent_pos"], 1, torque=0.015)
+    for _ in range(1200):
+        _step(env, obs["agent_pos"], 1, torque=0.03)
         if env.disengaged():
             break
     _step(env, obs["agent_pos"], 60)
     assert env.disengaged() and abs(env.rise() - PITCH * TURNS) < 5e-4  # off the thread, it stays up
 
 
+def test_it_turns_much_faster_once_broken_loose(task):
+    env, _ = task
+    obs = env.reset(6)
+    _step(env, obs["agent_pos"], 40, torque=0.03)
+    tight = env.turned() / 40  # rad per step on the seat
+    for _ in range(1200):
+        _step(env, obs["agent_pos"], 1, torque=0.03)
+        if env.turned() > BREAKAWAY + 0.3:
+            break
+    t0 = env.turned()
+    _step(env, obs["agent_pos"], 5, torque=0.03)
+    loose = (env.turned() - t0) / 5
+    assert env.metrics()["broke_loose"] and loose > 5 * tight > 0, (tight, loose)
+
+
 def test_half_unscrewed_is_not_a_success(task):
     env, _ = task
     obs = env.reset(5)
-    for _ in range(600):
-        _step(env, obs["agent_pos"], 1, torque=0.015)
+    for _ in range(1200):
+        _step(env, obs["agent_pos"], 1, torque=0.03)
         if env.turned() >= np.pi * TURNS:
             break
-    _step(env, obs["agent_pos"], 20)
-    assert not env.disengaged() and abs(env.rise() - PITCH * TURNS / 2) < 5e-4
+    _step(env, obs["agent_pos"], 30)
+    assert not env.disengaged() and env.turned() < 2 * np.pi * TURNS
+    assert abs(env.rise() - PITCH * env.turned() / (2 * np.pi)) < 2e-4
     assert not env.success()
