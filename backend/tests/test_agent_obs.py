@@ -270,3 +270,16 @@ def test_agent_names_itself_and_is_labelled_everywhere(client):
     assert s["purpose"] == "train the mug task"
     calls = client.get(f"/api/agents/projects/{pid}/calls").json()
     assert calls and calls[-1]["agent_name"] == "Atlas"
+
+
+def test_studio_chat_agent_works_in_its_chats_project(client):
+    """X-Cortex-Project (set by the studio chat's MCP config): calls that leave out project_id stay in that project."""
+    pid = client.post("/api/tools/start_intake", json={"prompt": "pick up the cube"}, headers=agent()).json()["project_id"]
+    bound = {**agent(session="studio-chat"), "X-Cortex-Project": pid}
+    r = client.post("/api/tools/start_intake", json={"prompt": "teach a robot to play jenga"}, headers=bound)
+    assert r.status_code == 200 and r.json()["project_id"] == pid, r.text  # reused, not a new project
+    assert client.post("/api/tools/get_intake_status", json={}, headers=bound).status_code == 200
+    calls = client.get(f"/api/agents/projects/{pid}/calls").json()
+    assert [c["tool"] for c in calls][-2:] == ["start_intake", "get_intake_status"]
+    other = client.post("/api/tools/start_intake", json={"prompt": "x", "project_id": pid}, headers=bound)
+    assert other.json()["project_id"] == pid  # an explicit project_id still wins

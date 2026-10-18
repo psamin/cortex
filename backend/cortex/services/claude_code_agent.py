@@ -155,7 +155,10 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     workdir = ctx.data_dir / "agent_sessions" / pid
     workdir.mkdir(parents=True, exist_ok=True)
     mcp_cfg = workdir / "mcp.json"
-    mcp_cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
+    # The chat's project rides on the MCP connection (X-Cortex-Project): calls that leave out project_id land in this
+    # project, so the studio agent's work shows in this chat's Agent log instead of a project it made by accident.
+    mcp_cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL,
+                                                             "headers": {"X-Cortex-Project": pid}}}}))
     cmd = [shutil.which("claude") or "claude", "-p", message, "--output-format", "stream-json", "--verbose",
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
            "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
