@@ -2,7 +2,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import { ArrowRight, Bot, ShieldAlert } from "lucide-react";
 import { useNextActions, useProjectState } from "../api/hooks";
 import { conditionKey, type NextAction, type Project } from "../api/types";
-import { Badge, Button, EmptyState, Panel, QueryState, SectionLabel, Skeleton } from "../components/ui";
+import { Badge, Button, EmptyState, InfoTip, Panel, QueryState, SectionLabel, Skeleton } from "../components/ui";
 import { WorkcellGrid } from "../components/Workcell";
 import { useAgent } from "../layout/ProjectLayout";
 import { AutopilotHero } from "./Autopilot";
@@ -64,9 +64,8 @@ export function ProjectSpecView({ project }: { project: Project }) {
               {spec.success_criteria.map((c, i) => (
                 <li key={c.id} className="grid grid-cols-[20px_1fr] gap-1">
                   <span className="num font-mono text-xs text-ink-4">{i + 1}.</span>
-                  <div>
-                    <div className="text-ink">{c.description}</div>
-                    <div className="mt-0.5 font-mono text-2xs text-ink-3">check: {c.measurable}</div>
+                  <div className="cursor-help text-ink" title={c.measurable}>
+                    {c.description}
                   </div>
                 </li>
               ))}
@@ -86,11 +85,11 @@ export function ProjectSpecView({ project }: { project: Project }) {
         </dl>
       </Panel>
 
-      <Panel title="Collection plan" meta={`${targetTotal} targeted · budget ${plan.budget_total}`}>
+      <Panel title="Collection plan" meta={`${targetTotal} target · budget ${plan.budget_total}`}>
         <WorkcellGrid
           renderCell={(c) => {
             const cell = byKey.get(conditionKey(c));
-            if (!cell) return <div className="px-2.5 py-3 text-2xs text-ink-4">not planned</div>;
+            if (!cell) return <div className="px-2.5 py-3 text-2xs text-ink-4" title="not planned">—</div>;
             const done = cell.collected >= cell.target && cell.target > 0;
             return (
               <div className="px-2.5 py-2" title={cell.reason || undefined}>
@@ -98,12 +97,14 @@ export function ProjectSpecView({ project }: { project: Project }) {
                   <span className={cn("num kn-display text-[26px]", done ? "text-pass" : "text-ink")}>{cell.collected}</span>
                   <span className="num text-xs text-ink-3">/ {cell.target}</span>
                 </div>
-                {cell.reason && <div className="mt-0.5 line-clamp-2 text-2xs leading-snug text-ink-3">{cell.reason}</div>}
               </div>
             );
           }}
         />
-        <p className="mt-3 text-2xs text-ink-3">Collected / target demos per condition. Columns are where the cube starts, rows are the lighting.</p>
+        <p className="mt-3 flex items-center gap-1.5 text-2xs text-ink-3">
+          Collected / target
+          <InfoTip>Collected / target demos per condition. Columns are where the cube starts, rows are the lighting. Hover a cell for why it is planned.</InfoTip>
+        </p>
       </Panel>
     </div>
   );
@@ -124,11 +125,11 @@ function routeForAction(pid: string, action: string): string | null {
 export function NextActionsPanel({ pid }: { pid: string }) {
   const q = useNextActions(pid);
   return (
-    <Panel title="Next actions" meta="from the orchestrator" bodyClassName="p-0">
+    <Panel title="Next actions" bodyClassName="p-0">
       <QueryState q={q} skeleton={<div className="p-3.5"><Skeleton className="h-10 w-full" /></div>}>
         {(actions) =>
           actions.length === 0 ? (
-            <EmptyState title="No next actions right now" />
+            <EmptyState title="Nothing next" />
           ) : (
             <ul>
               {actions.map((a, i) => (
@@ -162,7 +163,7 @@ function NextActionRow({ a, pid, first }: { a: NextAction; pid: string; first: b
       </div>
       <div className="flex shrink-0 gap-1">
         <Button size="sm" variant="ghost" onClick={() => ask(`Please do this next: ${humanize(a.action)}. ${a.reason}`)}>
-          <Bot className="h-3.5 w-3.5" /> Ask agent
+          <Bot className="h-3.5 w-3.5" /> Ask
         </Button>
         {to && (
           <Button size="sm" onClick={() => nav(to)}>

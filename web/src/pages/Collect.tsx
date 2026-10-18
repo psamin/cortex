@@ -47,8 +47,8 @@ export function CollectPage() {
     <div className="space-y-4 px-5 py-5">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="kn-display text-[36px] leading-tight">Collect demonstrations</h1>
-          <p className="mt-0.5 text-sm text-ink-3">Only simulator-verified successes become LeRobot demonstrations.</p>
+          <h1 className="kn-display text-[36px] leading-tight">Collect</h1>
+          <p className="mt-0.5 text-sm text-ink-3">Only sim-verified successes become demos.</p>
         </div>
         {mode && (
           <Segmented
@@ -56,8 +56,8 @@ export function CollectPage() {
             onChange={setMode}
             ariaLabel="Collection mode"
             options={[
-              { value: "agent", label: <span className="inline-flex items-center gap-1.5 normal-case"><Bot className="h-3.5 w-3.5" /> Agent demonstrations</span> },
-              { value: "oracle", label: <span className="inline-flex items-center gap-1.5 normal-case"><Cog className="h-3.5 w-3.5" /> Scripted oracle</span> },
+              { value: "agent", label: <span className="inline-flex items-center gap-1.5 normal-case"><Bot className="h-3.5 w-3.5" /> Agent</span> },
+              { value: "oracle", label: <span className="inline-flex items-center gap-1.5 normal-case"><Cog className="h-3.5 w-3.5" /> Oracle</span> },
               { value: "manual", label: "Manual" },
             ]}
           />
@@ -70,7 +70,7 @@ export function CollectPage() {
       ) : mode === "manual" || !project ? (
         <ManualCollect pid={pid} />
       ) : project.mode !== "sim" ? (
-        <ErrorState error={new Error("Autonomous collection runs in simulation only. Use Manual for the real robot.")} compact />
+        <ErrorState error={new Error("Autonomous collection is sim-only. Use Manual for the real robot.")} compact />
       ) : (
         <AgentCollect key={mode} project={project} collector={mode === "agent" ? "agent" : "oracle"} onUseOracle={() => setMode("oracle")} />
       )}
@@ -133,9 +133,7 @@ function ManualCollect({ pid }: { pid: string }) {
       <div className="flex items-end justify-between gap-4">
         <div>
           <p className="text-sm text-ink-3">
-            {isReal
-              ? "Real robot: every motion needs your approval through the local LeRobot bridge."
-              : "Record single demos by hand with the scripted expert, one condition at a time."}
+            {isReal ? "Real robot: every motion needs your approval." : "Single demos with the scripted expert (oracle)."}
           </p>
         </div>
         <Button onClick={() => setBatchOpen(true)} disabled={!state.data}>
@@ -252,7 +250,7 @@ function Viewport({ pid, condition, seed, job }: { pid: string; condition: Condi
       {failed === src ? (
         <div className="flex h-full flex-col items-center justify-center gap-2 text-ink-4">
           <VideoOff className="h-6 w-6" />
-          <p className="text-xs">{live ? "Live stream unavailable" : "Sim render unavailable — is the backend running?"}</p>
+          <p className="text-xs">{live ? "Live stream unavailable" : "Sim render unavailable. Is the backend running?"}</p>
         </div>
       ) : (
         <img
@@ -405,7 +403,7 @@ function Coverage({
         <span className="flex items-center gap-1">
           <span className="h-1 w-3 rounded-full bg-servo" /> quality-weighted
         </span>
-        <span className="ml-auto">Click a cell to set the recording condition</span>
+        <span className="ml-auto">Click a cell to pick it</span>
       </div>
     </>
   );
@@ -420,13 +418,11 @@ function SuggestedDemos({ pid, onRecorded }: { pid: string; onRecorded: (j: Job)
     onSuccess: onRecorded,
   });
   return (
-    <Panel title="Suggested next demos" meta="from recommendations">
+    <Panel title="Suggested demos">
       {state.isLoading ? (
         <SkeletonRows rows={2} />
       ) : recs.length === 0 ? (
-        <p className="text-xs text-ink-3">
-          No collection suggestions yet. Record a few demos and run analysis, or refresh recommendations in Improve.
-        </p>
+        <p className="text-xs text-ink-3">None yet. Record demos and run analysis.</p>
       ) : (
         <ul className="space-y-2.5">
           {recs.slice(0, 3).map((r) => (
@@ -507,7 +503,7 @@ function EpisodeStrip({
   return (
     <Panel
       title="Episodes"
-      meta={episodes.data ? `${sorted.length} recorded · ${counts.accepted} accepted · ${counts.rejected} rejected` : undefined}
+      meta={episodes.data ? `${sorted.length} · ${counts.accepted} accepted · ${counts.rejected} rejected` : undefined}
       actions={
         <>
           {acceptPassing.data && <span className="text-2xs text-ink-3">accepted {acceptPassing.data.accepted}</span>}
@@ -526,7 +522,7 @@ function EpisodeStrip({
       <QueryState q={episodes} skeleton={<SkeletonRows rows={2} />}>
         {() =>
           sorted.length === 0 ? (
-            <EmptyState title="No episodes yet">Pick a condition and press Record, or record a batch for the plan.</EmptyState>
+            <EmptyState title="No episodes yet">Pick a condition and press Record.</EmptyState>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2.5">
               {sorted.map((e, i) => (
@@ -676,7 +672,7 @@ function BatchDialog({
       }
     >
       <p className="mb-3 text-xs text-ink-3">
-        Pick conditions. Cells still short of their plan target are pre-selected.
+        Cells short of target are pre-selected.
       </p>
       <WorkcellGrid
         onSelect={(c) =>
@@ -707,7 +703,7 @@ function BatchDialog({
         <Field label="Demos per condition">
           <Input type="number" min={1} max={50} value={per} onChange={(e) => setPer(Math.max(1, Number(e.target.value) || 1))} className="num font-mono" />
         </Field>
-        <Field label="Base seed" hint="Optional. Blank = backend default.">
+        <Field label="Base seed" hint="Blank = default">
           <Input type="number" value={baseSeed} onChange={(e) => setBaseSeed(e.target.value)} className="num font-mono" placeholder="auto" />
         </Field>
       </div>

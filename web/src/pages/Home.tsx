@@ -44,7 +44,7 @@ export function HomePage() {
       <div className="relative mx-auto flex min-h-full max-w-[760px] flex-col px-6 pb-12 pt-[12vh]">
         <div className="kn-label kn-label-rule">
           <span>
-            <span className="text-ink">FIG.00</span>&nbsp;&nbsp;New skill · Simulation first
+            <span className="text-ink">FIG.00</span>&nbsp;&nbsp;New skill
           </span>
         </div>
         <h1 className="kn-display mt-6 text-[clamp(2.4rem,5vw,3.6rem)]">
@@ -52,9 +52,7 @@ export function HomePage() {
           <br />
           <span className="kn-second">robot learn?</span>
         </h1>
-        <p className="mt-5 max-w-[34rem] text-[15px] leading-[1.65] text-ink-2">
-          Describe a skill. Cortex collects demonstrations in simulation, trains a policy, tests it, and keeps improving it.
-        </p>
+        <p className="mt-5 max-w-[34rem] text-[15px] leading-[1.65] text-ink-2">Describe a skill. Cortex simulates, trains and tests it.</p>
         <form
           onSubmit={(e) => {
             e.preventDefault();
@@ -101,7 +99,7 @@ export function HomePage() {
           ) : recent.length > 0 ? (
             <>
               <div className="kn-label kn-label-rule mb-3">
-                <span>Recent projects</span>
+                <span>Recent</span>
               </div>
               <ul className="divide-y divide-[var(--line)] border-y border-line">
                 {recent.map((p) => (

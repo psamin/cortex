@@ -6,7 +6,7 @@ import { api } from "../../api/client";
 import { isJobActive, useJob, useTrackJob } from "../../api/events";
 import { useDatasets, useEpisodes } from "../../api/hooks";
 import type { Augmentation, AugmentationType, DatasetVersion, Episode, Job } from "../../api/types";
-import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Meter, Panel, QueryState, Select, SkeletonRows, Toggle, InlineError } from "../../components/ui";
+import { Badge, Button, Dialog, EmptyState, ErrorState, Field, InfoTip, Input, Meter, Panel, QueryState, Select, SkeletonRows, Toggle, InlineError } from "../../components/ui";
 import { ago, cn } from "../../lib/format";
 import { AUG_NOTE, augWords, datasetBreakdown } from "../../lib/augment";
 
@@ -50,9 +50,9 @@ export function DatasetsTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-3">
-          Immutable dataset versions in LeRobot format. Augmented copies always point back to their source episode, and the
-          train/eval split is made over source episodes so copies never leak into eval.
+        <p className="flex items-center gap-1.5 text-xs text-ink-3">
+          Immutable LeRobot versions
+          <InfoTip>Augmented copies always point back to their source episode, and the train/eval split is made over source episodes so copies never leak into eval.</InfoTip>
         </p>
         <Button variant="primary" size="sm" onClick={() => setOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> New version
@@ -60,7 +60,7 @@ export function DatasetsTab() {
       </div>
       {job && (isJobActive(job) || job.status === "failed") && (
         <div className="flex items-center gap-3 rounded bg-plate px-3 py-2 text-xs border border-line">
-          <span className="text-ink-2">Building dataset…</span>
+          <span className="text-ink-2">Building…</span>
           <Meter value={job.progress} className="max-w-[200px]" />
           <span className="truncate text-ink-3">{job.status === "failed" ? <InlineError error={job.error ?? job.message} detail={job.error_detail} /> : job.message}</span>
         </div>
@@ -69,8 +69,8 @@ export function DatasetsTab() {
         {(ds) =>
           ds.length === 0 ? (
             <Panel>
-              <EmptyState icon={<Database className="h-5 w-5" />} title="No dataset versions yet" action={<Button size="sm" onClick={() => setOpen(true)}>Create the first version</Button>}>
-                A version snapshots your accepted episodes (optionally with augmentations) for training.
+              <EmptyState icon={<Database className="h-5 w-5" />} title="No datasets yet" action={<Button size="sm" onClick={() => setOpen(true)}>Create version</Button>}>
+                Snapshots accepted episodes for training.
               </EmptyState>
             </Panel>
           ) : (
@@ -122,7 +122,7 @@ function VersionRow({ d, depth, parentName, eps }: { d: DatasetVersion; depth: n
             </div>
           </div>
           <div className="text-2xs text-ink-3">
-            held out {Math.round(d.eval_fraction * 100)}% of source demos · seed <span className="font-mono">{d.split_seed}</span>
+            eval {Math.round(d.eval_fraction * 100)}% · seed <span className="font-mono">{d.split_seed}</span>
           </div>
           <div className="text-2xs text-ink-3">
             <span className="num font-mono text-ink">{d.num_frames.toLocaleString()}</span> frames
@@ -228,11 +228,11 @@ function CreateVersionDialog({
           </Field>
         </div>
         <p className="text-2xs text-ink-3">
-          Episodes: all accepted episodes{accepted !== undefined ? ` (${accepted} right now)` : ""}.
+          All accepted episodes{accepted !== undefined ? ` (${accepted})` : ""}
         </p>
         <div>
           <div className="mb-1 text-xs font-medium text-ink-2">Augmentations</div>
-          <p className="mb-2 text-2xs text-ink-3">Each enabled transform adds one augmented copy of every training episode.</p>
+          <p className="mb-2 text-2xs text-ink-3">+1 copy per training episode, each</p>
           <div className="divide-y divide-[var(--line-soft)] rounded bg-well px-3 border border-line">
             {AUG_OPTIONS.map((o) => (
               <div key={o.key} className="flex items-center gap-3 py-1.5">
@@ -255,7 +255,7 @@ function CreateVersionDialog({
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
-          <Field label="Eval fraction" hint="Held out by source episode">
+          <Field label="Eval fraction" hint="by source episode">
             <Input type="number" min={0} max={0.9} step={0.05} value={evalFrac} onChange={(e) => setEvalFrac(Number(e.target.value))} className="num font-mono" />
           </Field>
           <Field label="Split seed">
