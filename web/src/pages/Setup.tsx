@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../api/client";
 import type { Infra, InfraChoice, InfraOption } from "../api/types";
-import { Button, ErrorState, Field, InlineError, Input, Panel, Select, Skeleton } from "../components/ui";
+import { Button, ErrorState, Field, InfoTip, InlineError, Input, Panel, Select, Skeleton } from "../components/ui";
 import { cn } from "../lib/format";
 
 /** Per-project infrastructure: who plans, where training runs, which GPU and how long. */
@@ -88,6 +88,12 @@ export function SetupPage() {
   );
 }
 
+/** "Automatic (your Claude Code when …)" → ["Automatic", "your Claude Code when …"]: the aside goes behind an info tip. */
+function splitLabel(label: string): [string, string | null] {
+  const m = /^(.+?)\s*\((.+)\)\s*$/.exec(label);
+  return m ? [m[1], m[2]] : [label, null];
+}
+
 /** Radio list; unavailable options are disabled and show the backend's reason as text. */
 function Choices({ options, value, onChange, name, readOnly }: { options: InfraOption[]; value?: string; onChange?: (v: string) => void; name?: string; readOnly?: boolean }) {
   return (
@@ -101,7 +107,10 @@ function Choices({ options, value, onChange, name, readOnly }: { options: InfraO
               <input type="radio" name={name} checked={value === o.id} disabled={!o.available} onChange={() => onChange?.(o.id)} className="mt-1 accent-[rgb(var(--servo))]" />
             )}
             <span className="min-w-0">
-              <span className={cn("block text-sm", o.available ? "text-ink" : "text-ink-3")}>{o.label}</span>
+              <span className={cn("flex items-center gap-1.5 text-sm", o.available ? "text-ink" : "text-ink-3")}>
+                {splitLabel(o.label)[0]}
+                {splitLabel(o.label)[1] && <InfoTip>{splitLabel(o.label)[1]!}</InfoTip>}
+              </span>
               {!o.available && o.reason && <span className="block text-xs text-ink-3">{o.reason}</span>}
             </span>
           </label>
