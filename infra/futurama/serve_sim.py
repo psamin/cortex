@@ -68,7 +68,8 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
         env, _ = make(task, 240, 320)
         policy = LeRobotPolicy(info["checkpoint"], device="cuda", task=env.instruction,
                                cameras=CAMERAS.get(info["variant"]))
-        out[task] = {**info, "env": env, "policy": policy, "instruction": env.instruction}
+        out[task] = {**info, "task": task, "policy": policy, "instruction": env.instruction, "max_steps": env.max_steps}
+        env.close()  # the worker thread builds its own (EGL contexts belong to their thread)
         where = f"{info['layouts']} practice layouts" if info.get("layouts") else "unseen layouts"
         score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} runs over {where}"
                  if info["success_rate"] is not None else "score pending")
@@ -112,16 +113,12 @@ def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> 
     return buf.getvalue()
 
 
-def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
-    """(jpeg, step, inference ms, success) per control step, at real time, until done or out of steps."""
-    import mujoco
+def _episode(p: dict[str, Any], env, seed: int, cancel, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
+    """(jpeg, step, inference ms, success) per shown frame, at real time, until done, out of steps or cancelled.
+    Runs on the worker thread with the env that thread built."""
     import torch
-    from cortex.sim.tasks import make
     from cortex.sim.tasks.run import SETTLE
 
-    # MuJoCo's GL context belongs to the thread that created it, and each request runs in its own server
-    # thread, so every run builds its own sim here (about a second) instead of reusing the startup one.
-    env, _ = make(p["task"], 240, 320)
     policy = p["policy"]
     if p.get("layout_seeds"):
         seed = p["layout_seeds"][seed % len(p["layout_seeds"])]  # a practice layout it was trained on
@@ -137,6 +134,8 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
     held = 0
     try:
         for step in range(env.max_steps):
+            if cancel.is_set():
+                return
             t0 = time.perf_counter()
             action = policy.act(obs)
             if torch.cuda.is_available():
@@ -166,4 +165,59 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                 break
             time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
     finally:
-        env.close()
+        pass
+
+# ---------------------------------------------------------------- one thread owns MuJoCo / OpenGL
+#
+# MuJoCo's EGL contexts are bound to the thread that made them, and building or freeing one on a request thread
+# while another run is ending aborted the server. So one long-lived worker thread builds every sim once, runs
+# every episode, and hands JPEG frames to the request thread through a queue. A new run cancels the current one.
+
+import queue
+import threading
+
+_JOBS: queue.Queue[tuple] = queue.Queue()
+_CURRENT: dict[str, Any] = {"cancel": None}
+_ENVS: dict[str, Any] = {}
+
+
+def _worker(policies: dict[str, dict[str, Any]]) -> None:
+    from cortex.sim.tasks import make
+
+    for task in policies:  # built here, on the thread that will render them
+        _ENVS[task], _ = make(task, 240, 320)
+    while True:
+        task, seed, out, cancel = _JOBS.get()
+        p = policies[task]
+        try:
+            for item in _episode(p, _ENVS[task], seed, cancel):
+                while not cancel.is_set():  # never block forever on a viewer that left
+                    try:
+                        out.put(item, timeout=1)
+                        break
+                    except queue.Full:
+                        continue
+                if cancel.is_set():
+                    break
+        except Exception as e:  # noqa: BLE001 - report it to the viewer, keep the worker alive
+            print(f"[serve] sim {task} run failed: {type(e).__name__}: {e}", flush=True)
+        try:
+            out.put(None, timeout=1)
+        except queue.Full:
+            pass
+
+
+def start_worker(policies: dict[str, dict[str, Any]]) -> None:
+    threading.Thread(target=_worker, args=(policies,), daemon=True, name="sim-worker").start()
+
+
+def submit(task: str, seed: int) -> tuple[queue.Queue, threading.Event]:
+    """Queue a run; the run before it (if any) is cancelled. Returns (frames, cancel)."""
+    if _CURRENT["cancel"] is not None:
+        _CURRENT["cancel"].set()
+    out: queue.Queue = queue.Queue(maxsize=60)
+    cancel = threading.Event()
+    _CURRENT["cancel"] = cancel
+    _JOBS.put((task, seed, out, cancel))
+    return out, cancel
+

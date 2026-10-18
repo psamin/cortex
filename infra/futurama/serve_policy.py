@@ -73,6 +73,7 @@ if len(sys.argv) > 4 and Path(sys.argv[4]).is_dir():
     import serve_sim
 
     SIM = serve_sim.load(Path(sys.argv[4]))
+    serve_sim.start_worker(SIM)
 
 
 def act(p: dict, obs: dict, task_text: str) -> tuple[np.ndarray, float]:
@@ -178,22 +179,25 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "multipart/x-mixed-replace; boundary=frame")
         self.end_headers()
-        GEN["n"] += 1
-        mine = GEN["n"]
-        with LOCK:
-            if _newer(mine):
+        frames, cancel = serve_sim.submit(p["task"], seed)  # runs on the sim worker thread; cancels any older run
+        while True:
+            try:
+                item = frames.get(timeout=120)
+            except Exception:  # noqa: BLE001 - nothing for 2 minutes: give up on this run
+                cancel.set()
                 return
-            for jpg, step, ms, ok in serve_sim.stream(p, seed):
-                if _newer(mine):
-                    return
-                head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
-                        f"X-Frame: {step}/{p['env'].max_steps}\r\nX-Inference-Ms: {ms:.2f}\r\n"
-                        f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
-                        f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
-                try:
-                    self.wfile.write(head + jpg + b"\r\n")
-                except (BrokenPipeError, ConnectionResetError):
-                    return
+            if item is None:
+                return
+            jpg, step, ms, ok = item
+            head = (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\n"
+                    f"X-Frame: {step}/{p['max_steps']}\r\nX-Inference-Ms: {ms:.2f}\r\n"
+                    f"X-Success: {int(ok)}\r\nX-Seed: {seed}\r\nX-Policy: {p['variant']}@{p['step']}\r\n"
+                    f"X-Instruction: {quote(p['instruction'])}\r\n\r\n").encode()
+            try:
+                self.wfile.write(head + jpg + b"\r\n")
+            except (BrokenPipeError, ConnectionResetError):
+                cancel.set()
+                return
 
     def do_POST(self):
         if self.path != "/act":
