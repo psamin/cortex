@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     Collector,
     StartAgentCollectionRequest,
@@ -52,7 +53,7 @@ from .augment import PRESETS
 async def get_project(ctx: Ctx, project_id: str) -> Project:
     p = await ctx.repo.get("projects", project_id, Project)
     if p is None:
-        raise KeyError(f"project {project_id} not found")
+        raise NotFound(f"project {project_id} not found")
     return p
 
 
@@ -207,6 +208,8 @@ class Args:
         dataset_version_id: str
         policy_type: Literal["act", "smolvla"] = "act"
         steps: int | None = None
+        base_checkpoint_id: str | None = Field(None, description="continue fine-tuning this checkpoint (any project) "
+                                                                 "instead of training from scratch")
 
     class LaunchTraining(BaseModel):
         training_job_id: str
@@ -325,7 +328,7 @@ async def t_dataset(ctx, a, actor):
 
 async def t_propose(ctx, a, actor):
     tj = await training_service.propose(ctx, await get_project(ctx, a.project_id), a.dataset_version_id,
-                                        a.policy_type, a.steps, actor)
+                                        a.policy_type, a.steps, actor, a.base_checkpoint_id)
     return {"summary": f"Proposed {tj.policy_type} training {tj.id} on {tj.backend}: "
                        f"~{tj.estimate.gpu_hours} GPU-h, ${tj.estimate.est_cost_usd}. Needs human approval.",
             "ref_ids": [tj.id], "training_job": tj.model_dump(mode="json"), "requires_approval": True}
@@ -375,7 +378,7 @@ async def t_next(ctx, a, actor):
 async def t_job(ctx, a, actor):
     j = ctx.jobs.get(a.job_id)
     if j is None:
-        raise KeyError(a.job_id)
+        raise NotFound(a.job_id)
     return {"summary": f"{j.kind} {j.status} {j.progress:.0%} {j.message}", "ref_ids": [j.id], "job": j.model_dump()}
 
 
@@ -692,7 +695,8 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("create_dataset_version", "Snapshot accepted episodes as a versioned LeRobotDataset v3 with lineage, "
          "train/eval split and optional image-only augmentation.", Args.DatasetVersion, t_dataset),
     Tool("propose_training_job", "Propose an ACT/SmolVLA training job with config and resource estimate "
-         "(does not start it).", Args.ProposeTraining, t_propose),
+         "(does not start it). Pass base_checkpoint_id to continue fine-tuning an existing policy (e.g. for "
+         "this robot or new data) instead of starting from scratch.", Args.ProposeTraining, t_propose),
     Tool("launch_training_job", "Launch an approved training job. Refused unless a human approved it in the "
          "studio or a valid operator approval_token is given.", Args.LaunchTraining, t_launch_training,
          agent_callable=False),
@@ -980,7 +984,7 @@ async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str, c
 
     tool = TOOLS.get(name)
     if tool is None:
-        raise KeyError(f"unknown tool {name}")
+        raise NotFound(f"unknown tool {name}")
     if actor == "agent" and not tool.agent_callable:
         await ctx.audit(actor, name, raw_args.get("project_id"), raw_args, "refused", "not callable by the studio agent")
         raise NotAgentCallable(f"{name} is not available to the studio agent; a human runs it from the studio")

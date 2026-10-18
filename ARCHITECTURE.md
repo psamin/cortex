@@ -1,5 +1,7 @@
 # Cortex architecture
 
+The primary client is an agent. Claude Code or any MCP client drives the whole training loop through the MCP server. The studio is where humans watch those sessions and give the approvals only they can give.
+
 ```mermaid
 flowchart LR
   subgraph Clients

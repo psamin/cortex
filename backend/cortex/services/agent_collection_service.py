@@ -20,6 +20,7 @@ import random
 from typing import Any
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     AgentAttempt, AgentCollection, Condition, Episode, EpisodeSource, EpisodeStatus, Project, Scenario,
     StartAgentCollectionRequest,
@@ -493,7 +494,7 @@ async def list_collections(ctx: Ctx, project_id: str) -> list[AgentCollection]:
 async def get_collection(ctx: Ctx, collection_id: str) -> AgentCollection:
     c = await ctx.repo.get("agent_collections", collection_id, AgentCollection)
     if c is None:
-        raise KeyError(collection_id)
+        raise NotFound(collection_id)
     return c
 
 
@@ -505,7 +506,7 @@ async def list_attempts(ctx: Ctx, project_id: str, collection_id: str | None = N
 async def attempt_trace(ctx: Ctx, attempt_id: str) -> dict[str, Any]:
     a = await ctx.repo.get("agent_attempts", attempt_id, AgentAttempt)
     if a is None:
-        raise KeyError(attempt_id)
+        raise NotFound(attempt_id)
     trace = {}
     if "trace" in a.artifacts:
         trace = json.loads((await ctx.ensure_local(a.artifacts["trace"])).read_text())

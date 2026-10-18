@@ -17,7 +17,7 @@ import tarfile
 import zipfile
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from ..context import Ctx
 from ..models import (
@@ -27,6 +27,10 @@ from .jobs import Job
 from .recording_service import list_episodes, quality_for
 
 log = logging.getLogger(__name__)
+
+
+MAX_UPLOAD_BYTES = 2 * 1024 ** 3
+MAX_EXTRACTED_BYTES = 8 * 1024 ** 3  # LeRobot data is mostly mp4/parquet, already compressed
 
 
 def import_key(project_id: str, imp_id: str, name: str = "") -> str:
@@ -39,6 +43,12 @@ def find_dataset_root(base: Path) -> Path:
     raise ValueError("no LeRobot dataset found (expected a folder containing meta/info.json)")
 
 
+def _check_unpacked_size(total: int) -> None:
+    if total > MAX_EXTRACTED_BYTES:  # refuse archive bombs before writing anything
+        raise ValueError(f"archive unpacks to {total / 1024 ** 3:.1f} GB (limit "
+                         f"{MAX_EXTRACTED_BYTES / 1024 ** 3:.0f} GB); use a Hugging Face repo id instead")
+
+
 def extract_archive(archive: Path, dest: Path) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     if zipfile.is_zipfile(archive):
@@ -46,9 +56,11 @@ def extract_archive(archive: Path, dest: Path) -> Path:
             for m in z.namelist():  # refuse path traversal
                 if Path(m).is_absolute() or ".." in Path(m).parts:
                     raise ValueError(f"unsafe path in archive: {m}")
+            _check_unpacked_size(sum(i.file_size for i in z.infolist()))
             z.extractall(dest)
     elif tarfile.is_tarfile(archive):
         with tarfile.open(archive) as t:
+            _check_unpacked_size(sum(m.size for m in t.getmembers()))
             t.extractall(dest, filter="data")
     else:
         raise ValueError("upload a .zip or .tar.gz of a LeRobot dataset folder")
@@ -131,15 +143,23 @@ def dedup_key(project_id: str, source: dict[str, Any], max_episodes: int) -> str
     return f"import:{project_id}:{what}:{max_episodes}"
 
 
-def save_upload(ctx: Ctx, project_id: str, filename: str, data: bytes) -> dict[str, str]:
-    """Store and unpack an uploaded archive; returns the import source (dataset path + archive hash)."""
+def save_upload(ctx: Ctx, project_id: str, filename: str, src: BinaryIO) -> dict[str, str]:
+    """Store and unpack an uploaded archive, streamed to disk in chunks; returns the import source
+    (dataset path + archive hash)."""
     imp = new_id("upl")
     base = ctx.local(import_key(project_id, imp))
     base.mkdir(parents=True, exist_ok=True)
     archive = base / Path(filename).name
-    archive.write_bytes(data)
+    digest, size = hashlib.sha256(), 0
     try:
-        return {"path": str(extract_archive(archive, base / "raw")), "sha256": hashlib.sha256(data).hexdigest()}
+        with archive.open("wb") as out:
+            while chunk := src.read(1024 * 1024):
+                size += len(chunk)
+                if size > MAX_UPLOAD_BYTES:
+                    raise ValueError("archive larger than 2 GB; use a Hugging Face repo id instead")
+                digest.update(chunk)
+                out.write(chunk)
+        return {"path": str(extract_archive(archive, base / "raw")), "sha256": digest.hexdigest()}
     except Exception:
         shutil.rmtree(base, ignore_errors=True)
         raise

@@ -3,12 +3,13 @@ import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, History, Paperclip, Plus, Square, X } from "lucide-react";
 import { api } from "../api/client";
-import { useTraining } from "../api/hooks";
+import { useProjectState, useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
 import { InlineError } from "../components/ui";
 import { ago, cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
+import { useViewerFocus } from "./focus";
 import { ImportRow, ImportSheet, useImporter } from "./Imports";
 import { Markdown } from "./Markdown";
 import { IsoIcon } from "../sketch";
@@ -70,6 +71,7 @@ export function Conversation({ pid }: { pid: string }) {
     (b) => (b.type === "tools" && b.cards.some((r) => prefixOf(r) === "tj")) || (b.type === "item" && b.item.kind === "approval" && b.item.approvalKind !== "evaluation"),
   );
   const empty = !chat.loading && chat.items.length === 0;
+  const hasNext = (useProjectState(pid).data?.next_actions.length ?? 0) > 0;
   const lastRunning = [...chat.items].reverse().find((i) => i.kind === "tool" && i.status === "running");
 
   return (
@@ -163,6 +165,7 @@ export function Conversation({ pid }: { pid: string }) {
               </Fragment>
             ))}
             {chat.busy && !lastRunning && <Thinking startedAt={chat.turnStartedAt} />}
+            {!chat.busy && !chat.loading && chat.items.length > 0 && <NextSteps pid={pid} onPick={chat.send} />}
           </div>
         </div>
         {showJump && (
@@ -185,7 +188,12 @@ export function Conversation({ pid }: { pid: string }) {
       <div className="shrink-0 px-4 pb-4 pt-2">
         <div className="mx-auto max-w-[680px]">
           {!trainingApprovalInChat && <PendingApproval pid={pid} />}
-          {empty && (
+          {empty && hasNext && (
+            <div className="mb-2.5">
+              <NextSteps pid={pid} onPick={chat.send} />
+            </div>
+          )}
+          {empty && !hasNext && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">
               {SUGGESTIONS.map(([label, s]) => (
                 <button key={s} type="button" onClick={() => chat.send(s)} title={s} className="group inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-plate px-3.5 py-1.5 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink">
@@ -250,6 +258,10 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
       return <ApprovalItem pid={pid} kind={it.approvalKind} refId={it.refId} summary={it.summary} args={it.args} />;
     case "job_done":
       return <JobDoneRow it={it} pid={pid} />;
+    case "todos":
+      return <TodosCard it={it} />;
+    case "changes":
+      return <ChangesRow it={it} pid={pid} />;
     case "import":
       return <ImportRow it={it} pid={pid} />;
     case "meta":
@@ -614,6 +626,112 @@ function ChatHistory({ pid }: { pid: string }) {
           )}
         </div>
       )}
+    </div>
+  );
+}
+
+/** The agent's live checklist for a turn: "Plan" when it starts with 3+ steps; collapses when the turn ends. */
+function TodosCard({ it }: { it: Extract<ChatItem, { kind: "todos" }> }) {
+  const [open, setOpen] = useState(false);
+  const doneN = it.items.filter((t) => t.status === "completed").length;
+  const title = it.firstCount >= 3 ? `Plan · ${it.items.length} steps` : `${it.items.length} step${it.items.length === 1 ? "" : "s"}`;
+  if (it.done && !open)
+    return (
+      <button type="button" onClick={() => setOpen(true)} className="enter flex items-center gap-2 py-1 text-xs text-ink-3 hover:text-ink">
+        <StatusIcon status="ok" />
+        {doneN === it.items.length ? `✓ ${it.items.length} steps` : `${doneN} of ${it.items.length} steps done`}
+        <ChevronRight className="h-3.5 w-3.5" />
+      </button>
+    );
+  return (
+    <div className="enter rounded-xl bg-plate px-3.5 py-2.5 shadow-[0_0_0_1px_var(--line)]">
+      <button type="button" onClick={() => it.done && setOpen(false)} className="mb-1.5 flex w-full items-center justify-between text-xs font-medium text-ink-2">
+        {title}
+        <span className="num font-mono text-ink-4">
+          {doneN}/{it.items.length}
+        </span>
+      </button>
+      <ol className="space-y-1">
+        {it.items.map((t, i) => (
+          <li key={i} className="flex items-start gap-2 text-sm">
+            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+              {t.status === "completed" ? (
+                <StatusIcon status="ok" />
+              ) : t.status === "in_progress" && !it.done ? (
+                <CircleDashed className="h-4 w-4 animate-spin text-servo" />
+              ) : (
+                <span className="h-3 w-3 rounded-full shadow-[inset_0_0_0_1.5px_rgb(var(--ink-4))]" />
+              )}
+            </span>
+            <span className={cn(t.status === "completed" ? "text-ink-3 line-through decoration-[var(--line-strong)]" : t.status === "in_progress" ? "text-ink" : "text-ink-4")}>
+              {t.status === "in_progress" && !it.done && t.active ? t.active : t.text}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+/** Where each kind of change lives in the studio. */
+const CHANGE_TARGET: Record<string, string> = {
+  checkpoints: "improve?tab=training",
+  training_jobs: "improve?tab=training",
+  dataset_versions: "improve?tab=datasets",
+  evaluation_runs: "improve?tab=evaluations",
+  simulation_branches: "improve?tab=evaluations",
+  agent_collections: "collect?mode=agent",
+  recommendations: "improve?tab=recommendations",
+};
+
+/** "What changed" at the end of a turn, measured by Cortex: one pill per change. */
+function ChangesRow({ it, pid }: { it: Extract<ChatItem, { kind: "changes" }>; pid: string }) {
+  const viewer = useViewerFocus();
+  const pill = "inline-flex h-6 items-center rounded-full bg-rail px-2.5 text-xs text-ink shadow-[0_0_0_1px_var(--line)]";
+  return (
+    <div className="enter flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 text-xs text-ink-3">What changed</span>
+      {it.items.map((c, i) =>
+        c.what === "episodes" && viewer ? (
+          <button key={i} type="button" onClick={() => viewer.filter("demo")} className={cn(pill, "hover:text-servo")} title="Show demos in the viewer">
+            {c.text}
+          </button>
+        ) : CHANGE_TARGET[c.what] ? (
+          <Link key={i} to={`/p/${pid}/${CHANGE_TARGET[c.what]}`} className={cn(pill, "hover:text-servo")}>
+            {c.text}
+          </Link>
+        ) : (
+          <span key={i} className={pill}>
+            {c.text}
+          </span>
+        ),
+      )}
+    </div>
+  );
+}
+
+/** 2–3 one-click next steps from the project's next actions. */
+function NextSteps({ pid, onPick }: { pid: string; onPick: (text: string) => void }) {
+  const state = useProjectState(pid);
+  const actions = (state.data?.next_actions ?? []).slice(0, 3);
+  if (!actions.length) return null;
+  return (
+    <div className="enter flex flex-wrap gap-1.5">
+      {actions.map((a) => {
+        const label = a.action.replace(/_/g, " ").replace(/^\w/, (c) => c.toUpperCase());
+        return (
+          <button
+            key={a.action}
+            type="button"
+            onClick={() => onPick(`${label}. ${a.reason}`)}
+            title={a.reason}
+            className="inline-flex items-center gap-1.5 rounded-full bg-plate px-3 py-1.5 text-xs text-ink-2 shadow-[0_0_0_1px_var(--line)] hover:text-ink hover:shadow-[0_0_0_1px_var(--line-strong)]"
+          >
+            {label}
+            {a.requires_approval && <span className="text-[10px] text-caution">needs approval</span>}
+          </button>
+        );
+      })}
     </div>
   );
 }
