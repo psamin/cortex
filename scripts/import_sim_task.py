@@ -5,7 +5,7 @@
     uv run python scripts/import_sim_task.py /path/to/local/job_dir suture --project prj_x
 
 The project is "Jenga (sim)", "Screwdriver (sim)" (unscrew) or "Suture (sim)", reused by name or created;
---project picks one explicitly. Copies only light files: metrics.json, configs, the example and evaluation
+--name sets another name, --project picks an existing project. Copies only light files: metrics.json, configs, the example and evaluation
 videos, the Slurm logs, the dataset if it is under --dataset-max-gb, and checkpoint weights only when under
 --weights-max-mb (otherwise the checkpoint is registered at its Futurama path). Then records the dataset
 version, the oracle's demo run, a training job per variant, a checkpoint per saved step and an evaluation
@@ -61,7 +61,8 @@ async def main(a: argparse.Namespace) -> None:
         mirror, logs_dir = Path(src_task).resolve(), Path(a.job_dir).resolve()
         dataset_root = mirror / "dataset" if (mirror / "dataset" / "meta" / "info.json").exists() else None
     logs = sorted(logs_dir.glob("slurm-*.out"))
-    out = await sim_import_service.import_task(ctx, a.task, mirror, src_task, logs, dataset_root, a.project)
+    out = await sim_import_service.import_task(ctx, a.task, mirror, src_task, logs, dataset_root, a.project,
+                                               name=a.name)
     if out.get("project_id"):
         f = ctx.settings.futurama_projects_file
         mapping = json.loads(f.read_text()) if f.exists() else {}
@@ -76,6 +77,7 @@ if __name__ == "__main__":
     p.add_argument("job_dir", help="sim_task.sbatch's <job_dir>: local path or host:path (futurama:~/cortex-sim)")
     p.add_argument("task", help="jenga, unscrew, suture, ...")
     p.add_argument("--project", help="import into this project instead of the one named for the task")
+    p.add_argument("--name", help="project name to reuse or create (default: Jenga (sim), Screwdriver (sim), ...)")
     p.add_argument("--dataset-max-gb", type=float, default=1.0, help="copy the dataset when at most this size")
     p.add_argument("--weights-max-mb", type=int, default=50, help="copy checkpoint weights under this size")
     asyncio.run(main(p.parse_args()))

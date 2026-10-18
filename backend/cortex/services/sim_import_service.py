@@ -30,7 +30,8 @@ from ..models import (
 from . import project_cleanup, project_service, replay_service, training_service
 from .simulation_runner import summarize
 
-NAMES = {"jenga": "Jenga (sim)", "unscrew": "Screwdriver (sim)", "suture": "Suture (sim)"}
+NAMES = {"jenga": "Jenga (sim)", "unscrew": "Screwdriver (sim)", "suture": "Suture (sim)",
+         "screwdriver": "Screwdriver tool (sim)"}  # two tasks must never share a project name
 PROMPTS = {"jenga": "Push a block out of a Jenga tower without toppling it (MuJoCo sim)",
            "unscrew": "Unscrew a hex bolt from a fixture with the SO-101 (MuJoCo sim)",
            "suture": "Pass a suture needle through a tissue pad (MuJoCo sim, rigid proxy)"}
@@ -39,12 +40,12 @@ ORACLE_RUN = "oracle demos"
 
 
 def project_name(task: str) -> str:
-    return NAMES.get(task, f"{task.replace('_', ' ').title()} (sim)")
+    return NAMES.get(task, f"{task.replace('_', ' ').capitalize()} task (sim)")
 
 
-async def find_or_create_project(ctx: Ctx, task: str, instruction: str | None) -> Project:
-    """The project named for the task (a deleted empty one is brought back), else a new one."""
-    name = project_name(task)
+async def find_or_create_project(ctx: Ctx, task: str, instruction: str | None, name: str | None = None) -> Project:
+    """The project with this name (default: named for the task; a deleted one is brought back), else a new one."""
+    name = name or project_name(task)
     rows = [r for r in await ctx.store.list("projects") if r["data"].get("name") == name]
     rows.sort(key=lambda r: (r.get("status") == project_cleanup.DELETED, str(r.get("created_at"))))
     if rows:
@@ -212,11 +213,11 @@ async def _variant(ctx: Ctx, pid: str, task: str, src: str, run_dir: Path, logs:
 
 async def import_task(ctx: Ctx, task: str, mirror: Path, src: str, logs: list[Path],
                       dataset_root: Path | None = None, project_id: str | None = None,
-                      actor: str = "import_sim_task") -> dict[str, Any]:
+                      actor: str = "import_sim_task", name: str | None = None) -> dict[str, Any]:
     """Record a sim task's Futurama results from `mirror` (a local copy of <job_dir>/<task>'s light files).
 
     `src` is where they live (e.g. futurama:~/cortex-sim/jenga): it is recorded as each item's source and as
-    the location of checkpoints whose weights were not copied."""
+    the location of checkpoints whose weights were not copied. `name` overrides the project name."""
     meta_f, info_f = mirror / "dataset" / "meta" / "cortex_sim.json", mirror / "dataset" / "meta" / "info.json"
     meta = json.loads(meta_f.read_text()) if meta_f.exists() else None
     if project_id:
@@ -226,7 +227,7 @@ async def import_task(ctx: Ctx, task: str, mirror: Path, src: str, logs: list[Pa
     elif meta is None:
         return {"task": task, "skipped": "the demos are not finished (no dataset/meta/cortex_sim.json yet)"}
     else:
-        p = await find_or_create_project(ctx, task, meta.get("instruction"))
+        p = await find_or_create_project(ctx, task, meta.get("instruction"), name)
     out: dict[str, Any] = {"task": task, "project_id": p.id, "project": p.name}
     if meta is None:
         return {**out, "skipped": "the demos are not finished (no dataset/meta/cortex_sim.json yet)"}

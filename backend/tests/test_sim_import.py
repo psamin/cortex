@@ -134,4 +134,11 @@ async def test_a_deleted_project_of_that_name_comes_back(ctx, job):
 async def test_unfinished_demos_create_nothing(ctx, tmp_path):
     out = await sim_import_service.import_task(ctx, "unscrew", tmp_path / "empty", "futurama:~/cortex-sim/unscrew", [])
     assert "not finished" in out["skipped"] and await ctx.store.list("projects") == []
-    assert sim_import_service.project_name("unscrew") == "Screwdriver (sim)"
+    names = {t: sim_import_service.project_name(t) for t in ("jenga", "unscrew", "suture", "screwdriver", "assembly")}
+    assert names["unscrew"] == "Screwdriver (sim)" and len(set(names.values())) == len(names)  # never shared
+
+
+async def test_a_name_can_be_chosen(ctx, job):
+    mirror, logs = job
+    out = await sim_import_service.import_task(ctx, "jenga", mirror, SRC, logs, name="Jenga demo (sim)")
+    assert out["project"] == "Jenga demo (sim)"
