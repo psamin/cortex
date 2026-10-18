@@ -12,11 +12,12 @@ import { IsoIcon } from "../sketch";
 import { toolIcon } from "./toolIcon";
 import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
 
-const SUGGESTIONS = [
-  "Where does this project stand?",
-  "Collect 6 demonstrations and check their quality",
-  "Train a policy on the demonstrations",
-  "Test the policy in 3 conditions and tell me what failed",
+/** [chip label, message sent] */
+const SUGGESTIONS: [string, string][] = [
+  ["Status", "Where does this project stand?"],
+  ["Collect 6 demos", "Collect 6 demonstrations and check their quality"],
+  ["Train a policy", "Train a policy on the demonstrations"],
+  ["Test in 3 conditions", "Test the policy in 3 conditions and tell me what failed"],
 ];
 
 /** Within this many px of the end counts as "at the bottom". */
@@ -94,8 +95,8 @@ export function Conversation({ pid }: { pid: string }) {
       {dragging && (
         <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-3 rounded border border-dashed border-servo bg-bench/95 text-center">
           <IsoIcon name="dataset" size={40} accent />
-          <p className="kn-display text-[26px] text-ink">Drop a LeRobot dataset to import demos</p>
-          <p className="text-xs text-ink-3">.zip or .tar.gz of the dataset folder, up to 2 GB</p>
+          <p className="kn-display text-[26px] text-ink">Drop a LeRobot dataset</p>
+          <p className="text-xs text-ink-3">.zip or .tar.gz · up to 2 GB</p>
         </div>
       )}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5">
@@ -140,20 +141,15 @@ export function Conversation({ pid }: { pid: string }) {
                 <div className="skeleton h-16 w-full rounded-sm" />
               </div>
             )}
-            {!!chat.loadError && <p className="text-sm text-fault">Couldn't load the conversation. Is the backend running?</p>}
+            {!!chat.loadError && <p className="text-sm text-fault">Couldn't load the chat. Is the backend running?</p>}
             {empty && (
               <div className="pt-6">
-                <div className="kn-label kn-label-rule">
-                  <span>
-                    <span className="text-ink">FIG.01</span>&nbsp;&nbsp;Agent · Ready
-                  </span>
-                </div>
-                <p className="kn-display mt-5 text-[36px]">
+                <p className="kn-display text-[36px]">
                   What should we
                   <br />
                   <span className="kn-second">do next?</span>
                 </p>
-                <p className="mt-4 max-w-[30rem] text-sm leading-6 text-ink-2">The agent collects demonstrations, trains, tests, and improves the policy. It asks before anything costs money or needs a GPU.</p>
+                <p className="mt-3 text-sm text-ink-3">Asks before anything paid or GPU.</p>
               </div>
             )}
             {blocks.map((b, i) => (
@@ -161,7 +157,7 @@ export function Conversation({ pid }: { pid: string }) {
                 {isAgentBlock(b) && !(i > 0 && isAgentBlock(blocks[i - 1])) && (
                   <div className="kn-label kn-label-rule -mb-2">
                     <span>
-                      <span className="text-ink">Agent</span>&nbsp;&nbsp;Response
+                      <span className="text-ink">Agent</span>
                     </span>
                   </div>
                 )}
@@ -193,9 +189,9 @@ export function Conversation({ pid }: { pid: string }) {
           {!trainingApprovalInChat && <PendingApproval pid={pid} />}
           {empty && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">
-              {SUGGESTIONS.map((s) => (
-                <button key={s} type="button" onClick={() => chat.send(s)} className="group inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-plate px-3.5 py-1.5 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink">
-                  {s}
+              {SUGGESTIONS.map(([label, s]) => (
+                <button key={s} type="button" onClick={() => chat.send(s)} title={s} className="group inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-plate px-3.5 py-1.5 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink">
+                  {label}
                   <span aria-hidden className="text-ink-4 transition-transform group-hover:translate-x-0.5 group-hover:text-ink">→</span>
                 </button>
               ))}
@@ -262,7 +258,7 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
       return (
         <div className="flex items-center gap-3 font-mono text-[10px] uppercase tracking-[0.16em] text-ink-3" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
           <span className="h-px flex-1 bg-[var(--line)]" />
-          {it.isError ? "Turn ended with an error" : `Done${it.durationMs ? ` in ${Math.round(it.durationMs / 1000)}s` : ""}`}
+          {it.isError ? "Ended with an error" : `Done${it.durationMs ? ` in ${Math.round(it.durationMs / 1000)}s` : ""}`}
           <span className="h-px flex-1 bg-[var(--line)]" />
         </div>
       );
@@ -472,7 +468,7 @@ function PendingApproval({ pid }: { pid: string }) {
           <IsoIcon name="approve" size={20} accent />
           <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-servo live-dot" />
           <span className="min-w-0 flex-1 truncate text-ink">
-            Waiting for you: start {tj.policy_type.toUpperCase()} training ({tj.estimate.paid ? "paid" : "no charge"})
+            Approve {tj.policy_type.toUpperCase()} training · {tj.estimate.paid ? "paid" : "no charge"}
             {proposed.length > 1 ? ` · ${proposed.length} jobs` : ""}
           </span>
           <span className="shrink-0 border-b border-servo font-mono text-[10.5px] font-medium uppercase tracking-[0.14em] text-servo">Review →</span>
@@ -545,7 +541,7 @@ function Composer({
             submit();
           }
         }}
-        placeholder={busy ? "The agent is working. You can queue a follow-up…" : "Ask the agent…"}
+        placeholder={busy ? "Working… queue a follow-up" : "Ask the agent…"}
         className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] leading-6 text-ink placeholder:text-ink-4 focus:outline-none"
         aria-label="Message the agent"
       />

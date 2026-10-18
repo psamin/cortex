@@ -23,7 +23,7 @@ Importing the kit also loads `sketch.css`.
 | `<Dimension value orientation="h"\|"v">` | `|—— 240 MM ——|`: a dimension line with end ticks that fills its container. |
 | `<IsoGrid cell? fade?>` | A faint 30°/150° grid that fills its positioned parent. |
 | `<DashedOrbit r flat? ticks? axes?>` | A dashed reach circle with yaw ticks; isometric (an ellipse) unless `flat`. Centred by default. |
-| `<SketchScene label value width>` | The empty-state drawing: an arm and a cube on a plate, a dashed orbit and one callout. |
+| `<SketchScene label value width>` | The empty-state drawing: an SO-101-style arm (turntable, upper arm, forearm, wrist, two-finger gripper, joint rings) over a cube on a plate, a dashed reach orbit and one callout. |
 
 Lower-level helpers: `iso(p, scale, origin)`, `poly`, `line`, `boxFaces`, `circle`, `Box` and `Cyl` (for use inside your own `<svg className="sk-svg">`).
 

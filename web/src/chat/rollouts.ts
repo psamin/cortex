@@ -40,7 +40,7 @@ export type RolloutOrigin = "agent" | "oracle" | "imported" | "teleop" | "eval" 
 
 /** Classify a rollout by kind + planner (+ the episode when known). */
 function classify(kind: string, planner: string | null | undefined, ep?: Episode, policy?: string | null): { origin: RolloutOrigin; who: string } {
-  if (kind === "eval") return { origin: "eval", who: `Eval · ${policy && !/oracle/i.test(policy) ? `policy ${policy}` : "oracle reference"}` };
+  if (kind === "eval") return { origin: "eval", who: `Eval · ${policy && !/oracle/i.test(policy) ? `policy ${policy}` : "oracle"}` };
   if (kind === "attempt") return { origin: "attempt", who: planner === "scripted_ik_oracle" ? "Scripted oracle" : agentLabel(planner) };
   if ((ep && isImported(ep)) || /imported/i.test(planner ?? "")) return { origin: "imported", who: "Human (imported)" };
   if (ep?.source === "real_teleop" || /teleop/i.test(planner ?? "")) return { origin: "teleop", who: "Human (real teleop)" };

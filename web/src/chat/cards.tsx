@@ -25,7 +25,7 @@ import {
   useTraining,
 } from "../api/hooks";
 import { agentLabel, isAgent, isImported, type TrainingJob } from "../api/types";
-import { Skeleton, InlineError } from "../components/ui";
+import { Skeleton, InlineError, InfoTip } from "../components/ui";
 import { refRoute } from "../components/refs";
 import { cn, num, pct, usd } from "../lib/format";
 import { IsoIcon } from "../sketch";
@@ -170,7 +170,7 @@ function CollectionCard({ pid, id }: { pid: string; id: string; large?: boolean 
       pid={pid}
       refId={id}
       live={running}
-      text={`${t.successes ?? 0} demo${t.successes === 1 ? "" : "s"} recorded · ${who} · ${t.successes ?? 0}/${done} succeeded${running ? ` · ${done} of ${c.request.num_demos} attempts` : ""}`}
+      text={`${t.successes ?? 0} demo${t.successes === 1 ? "" : "s"} · ${who} · ${t.successes ?? 0}/${done} ok${running ? ` · ${done}/${c.request.num_demos} tries` : ""}`}
       ids={demos}
     />
   );
@@ -188,7 +188,7 @@ function DemoRow({ pid, refId, text, ids, live }: { pid: string; refId: string; 
       </span>
       {viewer && ids.length > 0 && (
         <button type="button" onClick={() => viewer.focus(ids)} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-servo hover:bg-rail">
-          Watch in viewer
+          Watch
         </button>
       )}
       {to && (
@@ -208,7 +208,7 @@ function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: b
   if (q.isLoading) return <Loading large={large} />;
   if (!q.data) return <Missing what="this evaluation" />;
   const { run, branches } = q.data;
-  const label = run.policy_label || (run.policy.kind === "scripted_expert" ? "Scripted expert (oracle reference)" : run.policy.checkpoint_id ?? "policy");
+  const label = run.policy_label || (run.policy.kind === "scripted_expert" ? "Scripted expert (oracle)" : run.policy.checkpoint_id ?? "policy");
   return (
     <CardShell
       pid={pid}
@@ -251,7 +251,9 @@ function EvaluationCard({ pid, id, large }: { pid: string; id: string; large?: b
           );
         })}
       </div>
-      <div className="mt-2.5 text-xs text-ink-3">Grey band = 95% confidence interval. Small samples give wide bands.</div>
+      <div className="mt-2.5 flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.12em] text-ink-3">
+        grey = 95% CI <InfoTip>Grey band = 95% confidence interval. Small samples give wide bands.</InfoTip>
+      </div>
     </CardShell>
   );
 }
@@ -265,7 +267,7 @@ function DatasetCard({ pid, id, large }: { pid: string; id: string; large?: bool
   if (!d) return <Missing what="this dataset" />;
   const b = datasetBreakdown(d, new Map((episodes.data ?? []).map((e) => [e.id, e])));
   return (
-    <CardShell pid={pid} refId={id} large={large} icon={<IsoIcon name="dataset" size={22} />} title={`Dataset ${d.name}`} meta={`LeRobot format · ${d.num_frames.toLocaleString()} frames`} status={<Pill tone="ok">built</Pill>}>
+    <CardShell pid={pid} refId={id} large={large} icon={<IsoIcon name="dataset" size={22} />} title={`Dataset ${d.name}`} meta={`LeRobot · ${d.num_frames.toLocaleString()} frames`} status={<Pill tone="ok">built</Pill>}>
       <p className="text-sm text-ink-2">{b.text}</p>
       {b.hasAug && <p className="mt-1 text-xs text-ink-3">{AUG_NOTE}</p>}
     </CardShell>
@@ -300,9 +302,9 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
       }
     >
       <div className="text-sm text-ink-2">{estimateLine(t)}</div>
-      {t.checkpoint_ids.length > 0 && <div className="mt-1 text-xs text-ink-3">{t.checkpoint_ids.length} checkpoint{t.checkpoint_ids.length === 1 ? "" : "s"} saved</div>}
+      {t.checkpoint_ids.length > 0 && <div className="mt-1 text-xs text-ink-3">{t.checkpoint_ids.length} checkpoint{t.checkpoint_ids.length === 1 ? "" : "s"}</div>}
       {t.backend === "manual" && t.status !== "succeeded" && (
-        <div className="mt-1 text-xs text-ink-3">No GPU backend is connected; the training command is in Details › Improve › Training.</div>
+        <div className="mt-1 text-xs text-ink-3">No GPU connected · command in Improve › Training</div>
       )}
       {t.error && <InlineError error={t.error} fallback="Training stopped with an error." className="mt-1" />}
     </CardShell>
@@ -320,7 +322,7 @@ const trainingWhat = (t: TrainingJob) => {
   return [`dataset ${t.dataset_version_id}`, steps].filter(Boolean).join(" · ");
 };
 const estimateLine = (t: TrainingJob) =>
-  `${t.estimate.gpu} · about ${num(t.estimate.gpu_hours, 1)} GPU-hours · ${t.estimate.paid ? `${usd(t.estimate.est_cost_usd)} estimated` : "no charge"}`;
+  `${t.estimate.gpu} · ~${num(t.estimate.gpu_hours, 1)} GPU-h · ${t.estimate.paid ? `${usd(t.estimate.est_cost_usd)} estimate` : "no charge"}`;
 
 // ------------------------------------------------------------------ analysis (an_)
 function AnalysisCard({ pid, id, large }: { pid: string; id: string; large?: boolean }) {
@@ -339,7 +341,7 @@ function AnalysisCard({ pid, id, large }: { pid: string; id: string; large?: boo
   if (!q.data) return <Missing what="this analysis" />;
   const a = q.data;
   return (
-    <CardShell pid={pid} refId={id} large={large} icon={<IsoIcon name="check" size={22} />} title="Demo quality check" meta={`${a.episode_count} demos checked`} status={a.status === "running" ? <Pill tone="live">checking</Pill> : <Pill tone="ok">done</Pill>}>
+    <CardShell pid={pid} refId={id} large={large} icon={<IsoIcon name="check" size={22} />} title="Quality check" meta={`${a.episode_count} demos`} status={a.status === "running" ? <Pill tone="live">checking</Pill> : <Pill tone="ok">done</Pill>}>
       {a.summary && <p className="text-sm leading-relaxed text-ink-2">{a.summary}</p>}
       {flags.length > 0 ? (
         <ul className="mt-2 space-y-1">
@@ -352,7 +354,7 @@ function AnalysisCard({ pid, id, large }: { pid: string; id: string; large?: boo
           ))}
         </ul>
       ) : (
-        <p className="mt-1 text-xs text-ink-3">No quality flags raised.</p>
+        <p className="mt-1 text-xs text-ink-3">No flags.</p>
       )}
     </CardShell>
   );
@@ -367,7 +369,7 @@ function RecommendationsCard({ pid, ids, large }: { pid: string; ids: string[]; 
   const list = (picked.length ? picked : all).sort((a, b) => b.score - a.score).slice(0, 3);
   if (!list.length) return <Missing what="recommendations" />;
   return (
-    <CardShell pid={pid} refId={list[0].id} large={large} icon={<IsoIcon name="improve" size={22} />} title="What to do next" meta="ranked by expected gain">
+    <CardShell pid={pid} refId={list[0].id} large={large} icon={<IsoIcon name="improve" size={22} />} title="Next steps" meta="by expected gain">
       <ol className="space-y-2">
         {list.map((r, i) => (
           <li key={r.id} className="flex items-start gap-2.5">
@@ -377,11 +379,11 @@ function RecommendationsCard({ pid, ids, large }: { pid: string; ids: string[]; 
               <div className="mt-0.5 flex items-center gap-2 text-xs">
                 {r.support === "evidence_backed" ? (
                   <span className="inline-flex items-center gap-1 text-pass">
-                    <ShieldCheck className="h-3 w-3" /> backed by measured data
+                    <ShieldCheck className="h-3 w-3" /> measured
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1 text-ink-3">
-                    <Sparkles className="h-3 w-3" /> hypothesis, worth testing
+                    <Sparkles className="h-3 w-3" /> unverified hypothesis
                   </span>
                 )}
               </div>
@@ -400,7 +402,7 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
   const j = live ?? q.data;
   if (!j) {
     if (q.isLoading) return <Loading large={large} />;
-    if (q.isError) return <p className="py-1 text-xs text-ink-3">This job's record is no longer available (it ran before Cortex kept job history across restarts).</p>;
+    if (q.isError) return <p className="py-1 text-xs text-ink-3">Job record gone (ran before job history was kept).</p>;
     return null;
   }
   if (j.status === "succeeded" && j.result_ref && prefixOf(j.result_ref) !== "job") return <ResultCard pid={pid} refId={j.result_ref} large={large} />;
@@ -479,26 +481,26 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
   if (skipped)
     return (
       <div className="flex items-center gap-2 rounded border border-line px-4 py-2.5 text-sm text-ink-3">
-        Training not started.
+        Not started.
         <button type="button" className="border-b border-line-strong text-ink-2 hover:border-ink hover:text-ink" onClick={() => setSkipped(false)}>
-          Review again
+          Review
         </button>
       </div>
     );
   return (
-    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta="Needs your OK before anything runs">
+    <CardShell pid={pid} refId={tj.id} large={large} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Start training?" meta="Needs approval">
       <p className="text-sm leading-relaxed text-ink-2">
-        Train an <span className="font-medium text-ink">{tj.policy_type.toUpperCase()}</span> policy on dataset{" "}
+        <span className="font-medium text-ink">{tj.policy_type.toUpperCase()}</span> on{" "}
         <span className="font-mono text-[13px] text-ink">{tj.dataset_version_id}</span>
-        {typeof tj.config.steps === "number" ? ` for ${(tj.config.steps as number).toLocaleString()} steps` : ""}.
+        {typeof tj.config.steps === "number" ? ` · ${(tj.config.steps as number).toLocaleString()} steps` : ""}
       </p>
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
         <span className="text-ink-2">{tj.estimate.gpu}</span>
         <span className="text-ink-2">~{num(tj.estimate.gpu_hours, 1)} GPU-hours</span>
-        <span className={cn("font-medium", tj.estimate.paid ? "text-caution" : "text-pass")}>{tj.estimate.paid ? `${usd(tj.estimate.est_cost_usd)} estimated` : "No charge"}</span>
+        <span className={cn("font-medium", tj.estimate.paid ? "text-caution" : "text-pass")}>{tj.estimate.paid ? `${usd(tj.estimate.est_cost_usd)} estimate` : "No charge"}</span>
       </div>
       {slurmLine(tj) && <p className="mt-1.5 text-xs text-ink-3">{slurmLine(tj)}</p>}
-      {tj.backend === "manual" && <p className="mt-1.5 text-xs text-ink-3">No GPU backend is connected, so starting gives you a command bundle to run on a GPU machine.</p>}
+      {tj.backend === "manual" && <p className="mt-1.5 text-xs text-ink-3">No GPU connected · you get a command to run</p>}
       <div className="mt-3.5 flex items-center gap-2">
         <button
           type="button"
@@ -540,9 +542,9 @@ export function ApprovalItem({ pid, kind, refId, summary, args }: { pid: string;
   if (kind === "evaluation") {
     if (skipped) return null;
     return (
-      <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Run the 3-condition test?" meta="Needs your OK before anything runs">
-        <p className="text-sm leading-relaxed text-ink-2">{summary || "Evaluate the policy in simulation: baseline, shifted object and changed lighting."}</p>
-        <p className="mt-1 text-xs text-ink-3">Runs locally in simulation · no charge</p>
+      <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title="Run 3-condition test?" meta="Needs approval">
+        <p className="text-sm leading-relaxed text-ink-2">{summary || "Baseline, shifted object, changed lighting."}</p>
+        <p className="mt-1 text-xs text-ink-3">Local sim · no charge</p>
         <div className="mt-3.5 flex items-center gap-2">
           <button type="button" disabled={evalM.isPending || evalM.isSuccess} onClick={() => evalM.mutate()} className="sk-pill sk-pill-primary inline-flex h-9 items-center gap-2 px-5 text-[13px] font-medium disabled:opacity-60">
             {evalM.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />} {evalM.isSuccess ? "Started" : "Approve & start"}
@@ -563,7 +565,7 @@ export function ApprovalItem({ pid, kind, refId, summary, args }: { pid: string;
   const tj =
     training.data?.find((t) => t.id === refId) ??
     [...(training.data ?? [])].filter((t) => t.status === "proposed").sort((a, b) => (a.created_at < b.created_at ? 1 : -1))[0];
-  if (!tj) return <div className="rounded border border-line px-4 py-2.5 text-sm text-ink-3">{summary || "An approval was requested"}. Nothing is waiting now.</div>;
+  if (!tj) return <div className="rounded border border-line px-4 py-2.5 text-sm text-ink-3">{summary || "Approval requested"}. Nothing pending.</div>;
   if (tj.status !== "proposed")
     return (
       <div className="flex items-center gap-2 rounded border border-line px-4 py-2.5 text-sm text-ink-2">
@@ -588,7 +590,7 @@ export function BudgetCard({ pid, message }: { pid: string; message: string }) {
     },
   });
   return (
-    <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title={`Raise planner budget to $${target}?`} meta="The agent's model budget for this project is used up">
+    <CardShell pid={pid} tone="approval" icon={<IsoIcon name="approve" size={22} accent />} title={`Raise planner budget to $${target}?`} meta="Model budget used up">
       <p className="text-sm text-ink-2">{message}</p>
       {b.data && (
         <p className="mt-1 text-xs text-ink-3">

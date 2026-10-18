@@ -6,6 +6,7 @@ import { useAutopilot, useEpisodes, useEvaluations, useHealth, usePlannerBudget,
 import { isImported, type AutopilotRun, type EvaluationWithBranches, type Iteration } from "../api/types";
 import { cn, pct } from "../lib/format";
 import { IsoPlate } from "../sketch";
+import { InfoTip } from "../components/ui";
 import { iterationSuccess, useIterations, wilson } from "./rollouts";
 import type { ViewerSelection } from "./Viewer";
 
@@ -88,12 +89,12 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
       {
         name: "Train",
         state: trainRunning || has(/dataset/) ? "running" : trained ? "succeeded" : proposed ? "attention" : "waiting",
-        note: proposed && !trained ? `${proposed} awaiting approval` : undefined,
+        note: proposed && !trained ? `${proposed} to approve` : undefined,
       },
       {
         name: "Evaluate",
         state: evalRunning ? "running" : learnedEval ? "succeeded" : "waiting",
-        note: !learnedEval && evs.length ? "oracle reference only" : undefined,
+        note: !learnedEval && evs.length ? "oracle only" : undefined,
       },
       { name: "Improve", state: iterations.some((i) => i.next) ? "succeeded" : "waiting" },
       (() => {
@@ -102,7 +103,7 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
         return {
           name: "Repeat",
           state: evaluated > 1 ? "succeeded" : "waiting",
-          note: evaluated ? `${evaluated} evaluated${pending ? ` · ${pending} pending` : ""}` : iterations.length ? `${iterations.length} planned, none trained` : undefined,
+          note: evaluated ? `${evaluated} evaluated${pending ? ` · ${pending} pending` : ""}` : iterations.length ? `${iterations.length} planned` : undefined,
         } as Stage;
       })(),
     ];
@@ -138,7 +139,7 @@ export function Pipeline({ pid, open, onToggle, sel }: { pid: string; open: bool
       <div className="flex items-center gap-5 px-4 py-2 sm:px-5">
         <button type="button" onClick={onToggle} className="flex shrink-0 items-center gap-2 font-mono text-[10.5px] font-medium uppercase tracking-[0.16em] text-ink hover:text-ink-2" aria-expanded={open}>
           <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", !open && "-rotate-90")} />
-          <span className="hidden sm:inline">Learning pipeline</span>
+          <span className="hidden sm:inline">Pipeline</span>
         </button>
         <ol className="relative flex min-w-0 flex-1 items-end gap-5 overflow-x-auto pb-1.5 scroll-thin">
           <span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-[var(--line)]" />
@@ -210,10 +211,10 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
         value={policy ? pct(policy.rate) : "—"}
         sub={policy && ci ? `${policy.k}/${policy.n} · 95% CI ${pct(ci[0])}–${pct(ci[1])}` : oracle.n ? `oracle: ${pct(oracle.k / oracle.n)}` : "no learned policy yet"}
       />
-      <Tile label="Demonstrations" value={episodes.data ? accepted.length : "—"} sub="accepted" />
-      <Tile label="Iteration" value={iteration ?? "—"} sub={pendingIt ? pendingIt.policy_version : version ? `policy ${version}` : "no iterations yet"} />
+      <Tile label="Demos accepted" value={episodes.data ? accepted.length : "—"} />
+      <Tile label="Iteration" value={iteration ?? "—"} sub={pendingIt ? pendingIt.policy_version : version ? `policy ${version}` : "none yet"} />
       <Tile label="Eval episodes" value={evals.data ? evalN : "—"} sub={`${(evals.data ?? []).length} evaluations`} />
-      <Tile label="Training loss" value={loss ? loss[loss.length - 1][1].toFixed(3) : "—"} sub={loss ? `step ${loss[loss.length - 1][0].toLocaleString()}` : "no training run yet"}>
+      <Tile label="Training loss" value={loss ? loss[loss.length - 1][1].toFixed(3) : "—"} sub={loss ? `step ${loss[loss.length - 1][0].toLocaleString()}` : "not trained"}>
         {loss && loss.length > 1 && (
           <div className="mt-1 h-6">
             <ResponsiveContainer width="100%" height="100%">
@@ -225,11 +226,11 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
         )}
       </Tile>
       <Tile
-        label="Avg demo length"
+        label="Demo length"
         value={simLen !== null ? `${simLen.toFixed(1)}s` : recLen !== null ? `${recLen.toFixed(1)}s` : "—"}
         sub={simLen !== null ? (recLen !== null ? `simulated · imported ${recLen.toFixed(1)}s recorded` : "simulated time") : recLen !== null ? "recorded time (imported)" : "no demos yet"}
       />
-      <Tile label="Policy version" value={version ?? "—"} sub={trainedIt?.checkpoint_id ?? "none trained yet"} />
+      <Tile label="Policy version" value={version ?? "—"} sub={trainedIt?.checkpoint_id ?? "not trained"} />
       <Tile label="Model spend" value={budget.data ? `$${budget.data.spent_usd.toFixed(2)}` : "—"} sub={budget.data ? `of $${budget.data.budget_usd.toFixed(0)} approved` : undefined} />
     </div>
   );
@@ -257,11 +258,11 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
       <div className="min-w-0">
         <div className="kn-label kn-label-rule"><span>Success across iterations</span></div>
         <p className="mt-2.5 text-sm text-ink-2">
-          {iterations.length ? `${iterations.length} iteration${iterations.length === 1 ? "" : "s"} planned, no policy trained yet` : "No policy trained yet"}
-          {/futurama/i.test(trainingProvider) ? ". Training needs the Futurama GPU (GT VPN)." : health.data?.training?.fallback ? ". No GPU training backend is connected." : "."}
+          {iterations.length ? `${iterations.length} planned · no policy trained` : "No policy trained"}
+          {/futurama/i.test(trainingProvider) ? " · needs Futurama GPU (GT VPN)" : health.data?.training?.fallback ? " · no GPU connected" : ""}
         </p>
-        {proposed > 0 && <p className="mt-1 text-xs text-caution">{proposed} training job{proposed === 1 ? "" : "s"} awaiting your approval in the chat.</p>}
-        <FailureBars failures={failures} maxF={maxF} empty="No failed rollouts recorded." />
+        {proposed > 0 && <p className="mt-1 text-xs text-caution">{proposed} training job{proposed === 1 ? "" : "s"} to approve in chat</p>}
+        {failures.length > 0 && <FailureBars failures={failures} maxF={maxF} empty="No failures." />}
       </div>
     );
   }
@@ -306,7 +307,7 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <FailureBars failures={failures} maxF={maxF} empty="No failures in evaluated iterations." />
+      <FailureBars failures={failures} maxF={maxF} empty="No failures." />
     </div>
   );
 }
@@ -370,7 +371,7 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
         </p>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" onClick={() => watch(it.evaluation!.id)} className="sk-pill sk-pill-secondary inline-flex h-7 items-center gap-1.5 px-3 text-xs font-medium">
-            <Play className="h-3 w-3" /> Watch the failed rollouts
+            <Play className="h-3 w-3" /> Watch failures
           </button>
           {nextIt && (
             <span className="text-xs text-ink-3">
@@ -391,7 +392,7 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
           {fallbackEval.run.policy_label || "The learned policy"} failed {worst.result!.n - worst.result!.successes}/{worst.result!.n} trials in {worst.spec.name.replace(/_/g, " ")}.
         </p>
         <button type="button" onClick={() => watch(fallbackEval.run.id)} className="sk-pill sk-pill-secondary mt-2 inline-flex h-7 items-center gap-1.5 px-3 text-xs font-medium">
-          <Play className="h-3 w-3" /> Watch the failed rollouts
+          <Play className="h-3 w-3" /> Watch failures
         </button>
       </div>
     );
@@ -399,9 +400,9 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
   return (
     <div className="min-w-0">
       <div className="kn-label kn-label-rule"><span>Failure analysis</span></div>
-      <p className="mt-2.5 text-sm text-ink-2">No learned-policy failures to analyze yet.</p>
-      <p className="mt-1 text-xs text-ink-3">
-        When a trained policy fails a test condition, Cortex explains it here, generates targeted demonstrations for that condition, and trains the next version.
+      <p className="mt-2.5 flex items-center gap-1.5 text-sm text-ink-2">
+        No learned-policy failures yet
+        <InfoTip>When a trained policy fails a test condition, Cortex explains it here, generates targeted demonstrations for that condition, and trains the next version.</InfoTip>
       </p>
     </div>
   );
