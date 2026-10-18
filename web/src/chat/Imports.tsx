@@ -4,6 +4,7 @@ import { api, uploadDemos } from "../api/client";
 import { useTrackJob } from "../api/events";
 import type { Job } from "../api/types";
 import { InlineError, splitError } from "../components/ui";
+import { IsoIcon } from "../sketch";
 import { ResultCard } from "./cards";
 import { useChat } from "./ChatProvider";
 import type { ChatItem } from "./model";
@@ -73,15 +74,15 @@ export function ImportRow({ it, pid }: { it: Extract<ChatItem, { kind: "import" 
   const pctDone = it.total ? Math.min(1, it.loaded / it.total) : 0;
   return (
     <div className="enter space-y-2.5">
-      <div className="flex items-start gap-2.5 py-1">
-        <FileArchive className="mt-0.5 h-4 w-4 shrink-0 text-ink-3" />
+      <div className="sk-depth relative flex items-start gap-2.5 rounded border border-line-strong bg-plate px-3 py-2.5">
+        <IsoIcon name="dataset" size={20} accent={it.status === "uploading"} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm text-ink">{it.title}</p>
           <p className="text-xs text-ink-3">{it.detail}</p>
           {it.status === "uploading" && it.total > 0 && (
             <div className="mt-1.5 flex items-center gap-2">
-              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-rail">
-                <div className="h-full rounded-full bg-servo transition-[width] duration-200" style={{ width: `${pctDone * 100}%` }} />
+              <div className="h-1 flex-1 overflow-hidden bg-[var(--line)]">
+                <div className="h-full bg-servo transition-[width] duration-200" style={{ width: `${pctDone * 100}%` }} />
               </div>
               <span className="num w-28 text-right font-mono text-[11px] text-ink-3">
                 {fmtSize(it.loaded)} · {Math.round(pctDone * 100)}%
@@ -89,7 +90,7 @@ export function ImportRow({ it, pid }: { it: Extract<ChatItem, { kind: "import" 
             </div>
           )}
           {it.status === "uploading" && it.total === 0 && <p className="mt-1 text-xs text-ink-3">Starting…</p>}
-          {it.status === "error" && <InlineError error={it.error} detail={it.errorDetail} className="mt-1.5 rounded-lg bg-fault/5 px-2.5 py-1.5 shadow-[0_0_0_1px_rgb(var(--fault)/.25)]" />}
+          {it.status === "error" && <InlineError error={it.error} detail={it.errorDetail} className="mt-1.5 rounded-sm border border-fault/30 px-2.5 py-1.5" />}
         </div>
       </div>
       {it.status === "started" && it.jobId && <ResultCard pid={pid} refId={it.jobId} />}
@@ -124,11 +125,11 @@ export function ImportSheet({
         e.preventDefault();
         submit();
       }}
-      className="enter mb-2.5 rounded-xl bg-plate p-3 shadow-[0_0_0_1px_var(--line-strong)]"
+      className="enter sk-depth relative mb-3 rounded border border-line-strong bg-plate p-3.5"
     >
       <div className="mb-2 flex items-center justify-between">
-        <span className="text-sm font-medium text-ink">{mode === "file" ? "Import demonstrations" : "Import from Hugging Face"}</span>
-        <button type="button" onClick={onClose} className="rounded p-1 text-ink-3 hover:bg-rail hover:text-ink" aria-label="Cancel import">
+        <span className="flex items-center gap-2 font-mono text-[11px] font-medium uppercase tracking-[0.16em] text-ink"><IsoIcon name="dataset" size={18} />{mode === "file" ? "Import demonstrations" : "Import from Hugging Face"}</span>
+        <button type="button" onClick={onClose} className="rounded-full p-1 text-ink-3 hover:bg-rail hover:text-ink" aria-label="Cancel import">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>
@@ -141,33 +142,33 @@ export function ImportSheet({
       )}
       {mode === "hub" && (
         <label className="mb-2.5 block">
-          <span className="mb-1 block text-xs text-ink-3">Dataset repo id</span>
+          <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">Dataset repo id</span>
           <input
             autoFocus
             value={repo}
             onChange={(e) => setRepo(e.target.value)}
             placeholder="lerobot/svla_so101_pickplace"
-            className="h-8 w-full rounded-md bg-well px-2.5 font-mono text-sm text-ink placeholder:text-ink-4 shadow-[inset_0_0_0_1px_var(--line)] focus:outline-none focus:shadow-[inset_0_0_0_1px_rgb(var(--servo)/.7)]"
+            className="h-8 w-full rounded-sm border border-line-strong bg-plate px-2.5 font-mono text-sm text-ink placeholder:text-ink-4 focus:border-servo focus:outline-none"
           />
         </label>
       )}
       <div className="flex items-end gap-2">
         <label className="block">
-          <span className="mb-1 block text-xs text-ink-3">Max episodes (1–50)</span>
+          <span className="mb-1 block font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">Max episodes (1–50)</span>
           <input
             type="number"
             min={1}
             max={50}
             value={episodes}
             onChange={(e) => setEpisodes(clampEpisodes(Number(e.target.value)))}
-            className="num h-8 w-24 rounded-md bg-well px-2.5 font-mono text-sm text-ink shadow-[inset_0_0_0_1px_var(--line)] focus:outline-none"
+            className="num h-8 w-24 rounded-sm border border-line-strong bg-plate px-2.5 font-mono text-sm text-ink focus:border-servo focus:outline-none"
             aria-label="Max episodes"
           />
         </label>
         <p className="min-w-0 flex-1 pb-1.5 text-[11px] leading-snug text-ink-4">
           {mode === "file" ? "A LeRobot dataset folder as .zip or .tar.gz, up to 2 GB." : "Any public LeRobot dataset on the Hub."} Imported demos are human demonstrations, not simulator-verified.
         </p>
-        <button type="submit" className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-lg bg-servo px-3 text-sm font-medium text-servo-ink active:scale-[0.97]">
+        <button type="submit" className="sk-pill sk-pill-primary inline-flex h-8 shrink-0 items-center gap-1.5 px-4 text-[13px] font-medium">
           <Upload className="h-3.5 w-3.5" /> Import
         </button>
       </div>
