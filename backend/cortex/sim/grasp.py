@@ -14,6 +14,7 @@ import numpy as np
 from .expert import side_approach
 
 SIDE_GRASP_MIN_H = 0.07  # objects taller than this are grasped from the side
+TOP_MARGIN = 0.025  # side grasps hold this far below the object's top
 FINGER_DEPTH = 0.04  # how far down an object the fingertips reach from above
 SIDE_MIN_RADIUS = 0.30  # purely horizontal side grasps reach from here outward
 # Side-grasp approach tilts tried in order: tilting down brings the grasp in to r ~0.20 m.
@@ -26,9 +27,11 @@ def grasp_mode(height: float) -> str:
 
 def grasp_height(height: float) -> float:
     """Gripper-site height for the grasp. A top grasp holds near the object's top. A side grasp holds
-    above mid height, which is easier to reach, capped at 0.10 m."""
+    TOP_MARGIN below the top, capped at 0.12 m."""
     if grasp_mode(height) == "side":
-        return float(np.clip(height * 0.6, 0.03, 0.10))
+        # Near the top: the wrist camera mount sits above the jaws, so little of the object may stick
+        # out above them; the centre of mass then hangs below the grasp, which carries steadily.
+        return float(np.clip(height - TOP_MARGIN, 0.03, 0.12))
     return max(height / 2, height - FINGER_DEPTH)
 
 

@@ -97,17 +97,26 @@ def solve_ik(env: PickPlaceEnv, target: np.ndarray, q_init_deg: np.ndarray, yaw:
     return q, err_p
 
 
+def _site(m: mujoco.MjModel) -> int:
+    return mujoco.mj_name2id(m, mujoco.mjtObj.mjOBJ_SITE, "gripperframe")
+
+
 def _horizontal_jaw_roll(m: mujoco.MjModel, d: mujoco.MjData, qadr: np.ndarray, lo: float, hi: float,  # rad
                          current_deg: float) -> float:
     """Side grasps: the wrist roll (degrees) that makes the jaws close horizontally around a standing
-    object, nearest the current roll. Roll does not move the gripper site, so reach is unchanged."""
-    best, best_key = current_deg, (np.inf, np.inf)
+    object. Two rolls do that (the fixed jaw on either side); always pick the one whose jaws close
+    toward the arm's left of the approach, so every IK solution puts the fixed jaw on the same side
+    and grasp offsets computed from one solution hold for the others. Roll does not move the site."""
+    best, best_key = current_deg, (np.inf, np.inf, np.inf)
+    approach = d.site_xmat[_site(m)].reshape(3, 3)[:, 0].copy()
+    left = np.cross(np.array([0.0, 0.0, 1.0]), approach)
     for r in np.arange(-180.0, 181.0, 15.0):
         if not lo <= np.deg2rad(r) <= hi:  # lo, hi: joint limits in radians
             continue
         d.qpos[qadr[4]] = np.deg2rad(r)
         mujoco.mj_kinematics(m, d)
-        key = (round(abs(closing_direction(m, d)[2]), 2), abs(r - current_deg))
+        c = closing_direction(m, d)
+        key = (round(abs(c[2]), 1), 0 if c @ left > 0 else 1, abs(r - current_deg))
         if key < best_key:
             best, best_key = r, key
     d.qpos[qadr[4]] = np.deg2rad(best)
