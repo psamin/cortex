@@ -22,6 +22,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..hardware import calibrate
 from ..hardware import setup as hw
 from ..models import Checkpoint, DatasetVersion, Episode, Project, TrainingJob, new_id
@@ -113,7 +114,7 @@ async def start_policy(ctx: Ctx, project: Project, req: PolicyRunRequest) -> dic
     _check_ready(ctx, req.operator_confirmed, teleop=False)
     ck = await ctx.repo.get("checkpoints", req.checkpoint_id, Checkpoint)
     if ck is None or ck.project_id != project.id:
-        raise KeyError(f"checkpoint {req.checkpoint_id}")
+        raise NotFound(f"checkpoint {req.checkpoint_id}")
     path = Path(ck.path) if Path(ck.path).is_absolute() else ctx.local(ck.path)
     if not (path / "config.json").exists():
         raise FileNotFoundError(f"checkpoint files for {ck.id} are not on this machine ({path})")

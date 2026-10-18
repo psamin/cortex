@@ -7,6 +7,7 @@ from typing import Any
 import numpy as np
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import Condition, Episode, EpisodeSource, EpisodeStatus, Project
 from .jobs import Job
 from .quality_analysis import analyze_episode
@@ -129,7 +130,7 @@ async def dataset_blur_reference(ctx: Ctx, project_id: str) -> float | None:
 async def set_status(ctx: Ctx, episode_id: str, status: EpisodeStatus, actor: str = "gui") -> Episode:
     ep = await ctx.repo.get("episodes", episode_id, Episode)
     if ep is None:
-        raise KeyError(episode_id)
+        raise NotFound(episode_id)
     ep.status = status
     await ctx.repo.save("episodes", ep)
     ctx.changed(ep.project_id, "episodes", ep.id)

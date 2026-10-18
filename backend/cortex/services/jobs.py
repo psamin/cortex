@@ -58,6 +58,7 @@ class EventBus:
 
 
 TERMINAL = ("succeeded", "failed", "cancelled")
+MAX_KEPT = 500  # finished jobs remembered (in memory and on disk); unfinished ones are always kept
 
 
 class JobManager:
@@ -71,6 +72,7 @@ class JobManager:
         self.procs: dict[str, list[asyncio.subprocess.Process]] = defaultdict(list)
         self.persist = persist
         self.on_finished: list[Callable[[Job], None]] = []
+        self.closing = False
         if persist and persist.exists():
             for row in json.loads(persist.read_text() or "[]"):
                 j = Job.model_validate(row)
@@ -81,10 +83,12 @@ class JobManager:
             self._save()
 
     def _save(self) -> None:
+        keep = {j.id for j in sorted(self.jobs.values(), key=lambda j: j.created_at)[-MAX_KEPT:]}
+        self.jobs = {i: j for i, j in self.jobs.items() if i in keep or j.status not in TERMINAL}
+        self.tasks = {i: t for i, t in self.tasks.items() if i in self.jobs}
         if self.persist:
-            recent = sorted(self.jobs.values(), key=lambda j: j.created_at)[-500:]
             tmp = self.persist.with_suffix(".tmp")
-            tmp.write_text(json.dumps([j.model_dump() for j in recent]))
+            tmp.write_text(json.dumps([j.model_dump() for j in self.jobs.values()]))
             os.replace(tmp, self.persist)
 
     def get(self, job_id: str) -> Job | None:
@@ -127,29 +131,49 @@ class JobManager:
                 ref = await fn(job)
                 self.update(job, status="succeeded", progress=1.0, result_ref=ref)
             except asyncio.CancelledError:
+                if self.closing:
+                    raise  # stays "running" on disk; the next start reports it as interrupted by the restart
                 self.update(job, status="cancelled", message="stopped by user")
             except Exception as e:  # surfaced to the UI and the agent, in words people can act on
                 log.exception("job %s failed", job.id)
                 msg, detail = describe(e)
                 self.update(job, status="failed", error=msg, error_detail=detail)
+            finally:
+                self.procs.pop(job.id, None)
 
         self.tasks[job.id] = asyncio.create_task(run())
         return job
 
-    async def cancel(self, job_id: str) -> Job | None:
-        job = self.jobs.get(job_id)
-        for p in self.procs.get(job_id, []):
+    @staticmethod
+    async def _terminate(procs: list[asyncio.subprocess.Process]) -> None:
+        for p in procs:
             if p.returncode is None:
                 p.terminate()
+        for p in procs:  # all signalled first, so the grace periods overlap
+            if p.returncode is None:
                 try:
                     await asyncio.wait_for(p.wait(), 5)
                 except TimeoutError:
                     p.kill()
                     await p.wait()
+
+    async def cancel(self, job_id: str) -> Job | None:
+        job = self.jobs.get(job_id)
+        await self._terminate(list(self.procs.get(job_id, [])))
         t = self.tasks.get(job_id)
         if t and not t.done():
             t.cancel()
         return job
+
+    async def shutdown(self) -> None:
+        """Backend stopping: end worker processes (they would outlive us) and in-process tasks."""
+        self.closing = True
+        procs = [p for ps in self.procs.values() for p in ps]  # taken now: cancelled tasks drop their entries
+        tasks = [t for t in self.tasks.values() if not t.done()]
+        for t in tasks:  # first, so a killed worker isn't recorded as a failed job
+            t.cancel()
+        await self._terminate(procs)
+        await asyncio.gather(*tasks, return_exceptions=True)
 
     async def run_worker(self, job: Job, module: str, config: dict[str, Any], cfg_path: Path,
                          on_event: Callable[[dict[str, Any]], Any] | None = None,

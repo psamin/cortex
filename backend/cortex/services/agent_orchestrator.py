@@ -17,6 +17,7 @@ from typing import Any, Literal
 from pydantic import BaseModel, Field
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     Collector,
     StartAgentCollectionRequest,
@@ -52,7 +53,7 @@ from .augment import PRESETS
 async def get_project(ctx: Ctx, project_id: str) -> Project:
     p = await ctx.repo.get("projects", project_id, Project)
     if p is None:
-        raise KeyError(f"project {project_id} not found")
+        raise NotFound(f"project {project_id} not found")
     return p
 
 
@@ -375,7 +376,7 @@ async def t_next(ctx, a, actor):
 async def t_job(ctx, a, actor):
     j = ctx.jobs.get(a.job_id)
     if j is None:
-        raise KeyError(a.job_id)
+        raise NotFound(a.job_id)
     return {"summary": f"{j.kind} {j.status} {j.progress:.0%} {j.message}", "ref_ids": [j.id], "job": j.model_dump()}
 
 
@@ -841,7 +842,7 @@ class NotAgentCallable(PermissionError):
 async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str) -> dict[str, Any]:
     tool = TOOLS.get(name)
     if tool is None:
-        raise KeyError(f"unknown tool {name}")
+        raise NotFound(f"unknown tool {name}")
     pid = raw_args.get("project_id")
     if actor == "agent" and not tool.agent_callable:
         await ctx.audit(actor, name, pid, raw_args, "refused", "not callable by the studio agent")

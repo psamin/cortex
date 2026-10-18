@@ -18,6 +18,7 @@ from collections.abc import Awaitable
 from pathlib import Path
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     GPU_CHOICES,
     Checkpoint,
@@ -58,7 +59,7 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
                   steps: int | None = None, actor: str = "gui") -> TrainingJob:
     ds = await ctx.repo.get("dataset_versions", dataset_version_id, DatasetVersion)
     if ds is None:
-        raise KeyError(dataset_version_id)
+        raise NotFound(dataset_version_id)
     infra = project.infra
     backend = infra.training_backend if infra.training_backend != "auto" else (
         "futurama_slurm" if ctx.settings.futurama_ssh_host else "manual")
@@ -309,7 +310,7 @@ async def resume_pollers(ctx: Ctx) -> None:
 async def _get(ctx: Ctx, tj_id: str) -> TrainingJob:
     tj = await ctx.repo.get("training_jobs", tj_id, TrainingJob)
     if tj is None:
-        raise KeyError(tj_id)
+        raise NotFound(tj_id)
     return tj
 
 

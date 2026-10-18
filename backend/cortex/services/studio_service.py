@@ -14,6 +14,7 @@ from typing import Any
 import numpy as np
 
 from ..context import Ctx
+from ..errors import NotFound
 from ..models import (
     AgentAttempt, AgentCollection, Checkpoint, DatasetVersion, Episode, EvaluationRun, SimulationBranch, TrainingJob,
 )
@@ -160,7 +161,7 @@ async def camera_video(ctx: Ctx, episode_id: str, camera: str) -> Path:
         raise ValueError("camera must be front or wrist")
     ep = await ctx.repo.get("episodes", episode_id, Episode)
     if ep is None:
-        raise KeyError(episode_id)
+        raise NotFound(episode_id)
     src = await ctx.ensure_local(npz_key(ep))
     out = src.parent / f"cam_{camera}.mp4"
     if not out.exists():

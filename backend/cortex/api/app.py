@@ -16,10 +16,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
+from starlette.datastructures import UploadFile
 
 from ..config import settings
 from ..context import Ctx, build_ctx
-from ..errors import describe
+from ..errors import NotFound, describe
 from ..models import (
     Analysis,
     Checkpoint,
@@ -59,18 +60,18 @@ async def lifespan(app: FastAPI):
         log.warning(n)
     await training_service.resume_pollers(CTX)
     agent.install_job_listener(CTX)
-    # collections whose worker died with the previous process are not running any more
+    # no job survives a restart (JobManager marks them all interrupted), so neither does any collection
     from ..models import AgentCollection
     for status in ("running", "queued"):
         for col in await CTX.repo.list("agent_collections", AgentCollection, status=status):
-            if not (col.job_id and CTX.jobs.get(col.job_id) and CTX.jobs.get(col.job_id).status == "running"):
-                col.status, col.error = "failed", "interrupted by a backend restart; recorded attempts are kept"
-                await CTX.repo.save("agent_collections", col)
+            col.status, col.error = "failed", "interrupted by a backend restart; recorded attempts are kept"
+            await CTX.repo.save("agent_collections", col)
     resumed = await autopilot.resume_all(CTX)
     if resumed:
         log.info("resumed %d autopilot run(s)", resumed)
     app.mount("/files", StaticFiles(directory=CTX.data_dir, check_dir=False), name="files")
     yield
+    await CTX.jobs.shutdown()
     from ..services import intake_service
 
     intake_service.shutdown()  # GL contexts must be released on the thread that made them
@@ -105,8 +106,8 @@ async def guard(request: Request, call_next):
     return await call_next(request)
 
 
-@app.exception_handler(KeyError)
-async def _404(_, e: KeyError):
+@app.exception_handler(NotFound)  # a plain KeyError is a bug and falls through to _500
+async def _404(_, e: NotFound):
     return JSONResponse({"detail": f"not found: {e.args[0] if e.args else e}"}, 404)
 
 
@@ -279,7 +280,7 @@ async def jobs(pid: str):
 async def job(job_id: str):
     j = ctx().jobs.get(job_id)
     if not j:
-        raise KeyError(job_id)
+        raise NotFound(job_id)
     return j.model_dump()
 
 
@@ -380,7 +381,7 @@ async def record_batch(pid: str, req: RecordBatchReq, request: Request):
 async def stop_recording(job_id: str):
     j = await ctx().jobs.cancel(job_id)
     if not j:
-        raise KeyError(job_id)
+        raise NotFound(job_id)
     return j.model_dump()
 
 
@@ -413,7 +414,7 @@ async def accept_passing(pid: str, request: Request):
 async def episode_media(eid: str):
     e = await ctx().repo.get("episodes", eid, Episode)
     if not e:
-        raise KeyError(eid)
+        raise NotFound(eid)
     return {"video_url": await ctx().media_url(e.artifacts["front"]) if "front" in e.artifacts else None,
             "thumb_url": await ctx().media_url(e.artifacts["thumb"]) if "thumb" in e.artifacts else None,
             "frames": e.num_frames}
@@ -446,7 +447,7 @@ async def latest_analysis(pid: str) -> Analysis | None:
 async def get_analysis(aid: str) -> Analysis:
     a = await ctx().repo.get("analyses", aid, Analysis)
     if not a:
-        raise KeyError(aid)
+        raise NotFound(aid)
     return a
 
 
@@ -562,7 +563,7 @@ async def evaluate(pid: str, req: LaunchEvaluationRequest, request: Request):
 async def get_eval(evid: str):
     ev = await simulation_runner.get_evaluation(ctx(), evid)
     if not ev:
-        raise KeyError(evid)
+        raise NotFound(evid)
     return ev
 
 
@@ -608,12 +609,12 @@ async def import_upload(pid: str, request: Request, max_episodes: int = 10):
     from ..services import import_service
     form = await request.form()
     up = form.get("file")
-    if up is None or not hasattr(up, "read"):
+    if not isinstance(up, UploadFile):
         raise ValueError("send the dataset archive as multipart field 'file'")
-    data = await up.read()  # type: ignore[union-attr]
-    if len(data) > 2 * 1024 ** 3:
+    if (up.size or 0) > import_service.MAX_UPLOAD_BYTES:
         raise ValueError("archive larger than 2 GB; use a Hugging Face repo id instead")
-    src = import_service.save_upload(ctx(), pid, up.filename or "upload.zip", data)  # type: ignore[union-attr]
+    # streamed from Starlette's spooled temp file to disk off the event loop, never held in memory
+    src = await asyncio.to_thread(import_service.save_upload, ctx(), pid, up.filename or "upload.zip", up.file)
     job = await import_service.start_import(ctx(), await orch.get_project(ctx(), pid), src,
                                             max(1, min(max_episodes, 50)), actor(request))
     return job.model_dump()
@@ -788,6 +789,8 @@ async def stop_agent_collection(cid: str, request: Request):
     col = await acs.get_collection(ctx(), cid)
     if col.job_id:
         await ctx().jobs.cancel(col.job_id)
+    if col.status not in ("queued", "running"):
+        return col  # already finished: keep its real outcome
     col.status = "cancelled"
     await ctx().repo.save("agent_collections", col)
     await ctx().audit(actor(request), "stop_agent_collection", col.project_id, {"collection_id": cid}, "ok", cid)
