@@ -528,7 +528,6 @@ const TOOLS: Def[] = [
       seed: z.number().int().optional().describe("Scene randomization seed (default 0)"),
     }),
     annotations: READ,
-)
   },
 ];
 
