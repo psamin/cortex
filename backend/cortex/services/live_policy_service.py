@@ -27,6 +27,7 @@ COOLDOWN_S = 600  # after a failed request, wait before submitting again (#221: 
 POLL_S = 10  # how often a starting job is checked
 SSH_TIMEOUT_S = 60  # an ssh that hasn't finished by then is killed and counts as unreachable
 START_DEADLINE_S = 20 * 60  # queue + install + dataset prep
+TUNNEL_WAIT_S = 30  # two ssh handshakes (login node, then the GPU node) and the server's first answer
 UNREACHABLE = 255  # ssh's exit status when it can't connect (also given to a timed-out command)
 ENDED = {"COMPLETED", "COMPLETING", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED",
          "BOOT_FAIL", "DEADLINE"}
@@ -86,7 +87,8 @@ async def status(ctx: Ctx) -> dict[str, Any]:
         return {"available": True, "phase": "ready", "step": "ready", "steps": STEPS, **info}
     except (httpx.HTTPError, ValueError):
         reason = STATE["error"] or (STATE["detail"] if STATE["phase"] == "starting" else None) or (
-            "No GPU is allocated. Click Request a GPU to start one on Futurama." if STATE["phase"] == "stopped"
+            "Not connected to a GPU server. Click Request a GPU to attach to one running on Futurama, or "
+            "to start one." if STATE["phase"] == "stopped"
             else "The live GPU server isn't reachable.")
         return {"available": False, "phase": STATE["phase"], "step": STATE["step"], "steps": STEPS,
                 "reason": reason, "error": STATE["error"], "job": STATE["job"]}
@@ -208,16 +210,39 @@ async def _connect_when_ready(ctx: Ctx, job: str) -> None:
 
 
 async def open_tunnel(ctx: Ctx, node: str, port: int) -> None:
+    """Open the tunnel and wait for the server to answer through it: until then the studio keeps saying
+    "Connecting". A tunnel that fails (port in use, node unreachable) is reported, not left as a dead end."""
     s = ctx.settings
     close_tunnel()
     local = int(url(ctx).rsplit(":", 1)[-1])
     user = await _remote_user(s.futurama_ssh_host)
     target = f"{user}@{node}" if user else node
-    STATE["tunnel"] = await asyncio.create_subprocess_exec(
+    t = STATE["tunnel"] = await asyncio.create_subprocess_exec(
         "ssh", "-N", "-o", "BatchMode=yes", "-o", "ServerAliveInterval=30", "-o", "ExitOnForwardFailure=yes",
         "-J", s.futurama_ssh_host, "-L", f"{local}:127.0.0.1:{port}", f"{target}.{s.futurama_node_domain}"
-        if s.futurama_node_domain else target, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-    STATE["phase"] = "ready"
+        if s.futurama_node_domain else target, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+    deadline = time.monotonic() + TUNNEL_WAIT_S
+    while time.monotonic() < deadline:
+        try:
+            await asyncio.wait_for(t.wait(), 0.5)
+        except TimeoutError:
+            pass
+        if t.returncode is not None:  # ssh gave up: say why (its stderr, without the login banner)
+            why = _clean((await t.stderr.read()).decode(errors="replace")) if t.stderr else ""
+            STATE.update(phase="stopped", tunnel=None,
+                         error=f"Couldn't open the tunnel to {node} ({why[-200:] or f'ssh exited {t.returncode}'}).")
+            return
+        try:
+            async with httpx.AsyncClient(timeout=3) as c:
+                (await c.get(f"{url(ctx)}/policies.json")).raise_for_status()
+        except httpx.HTTPError:
+            continue
+        STATE["phase"] = "ready"
+        _step("ready")
+        return
+    close_tunnel()
+    STATE.update(phase="stopped", error=f"The tunnel to {node} is open but the GPU server didn't answer within "
+                                        f"{TUNNEL_WAIT_S} s. Try again to reconnect.")
 
 
 async def _remote_user(host: str) -> str | None:

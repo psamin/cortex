@@ -60,20 +60,31 @@ async def test_start_needs_the_cluster_configured():
         await lp.start(_ctx("http://127.0.0.1:9"))
 
 
-async def test_tunnel_goes_through_the_gpu_node(monkeypatch):
+class _Tunnel:
+    """A running `ssh -N` (the server fixture stands for the far end)."""
+    returncode, stderr = None, None
+
+    async def wait(self):
+        await asyncio.sleep(3600)
+
+    def terminate(self):
+        pass
+
+
+async def test_tunnel_goes_through_the_gpu_node(monkeypatch, server):
     calls = []
 
     async def fake_exec(*args, **kw):
         calls.append(args)
-        return SimpleNamespace(returncode=None, terminate=lambda: None)
+        return _Tunnel()
 
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    await lp.open_tunnel(_ctx("http://127.0.0.1:8765", "pi34@login.example"), "angleyne", 30568)
+    await lp.open_tunnel(_ctx(server, "pi34@login.example"), "angleyne", 30568)
     args = calls[0]
     assert args[args.index("-J") + 1] == "pi34@login.example"
-    assert args[args.index("-L") + 1] == "8765:127.0.0.1:30568"
+    assert args[args.index("-L") + 1] == f"{server.rsplit(':', 1)[1]}:127.0.0.1:30568"
     assert args[-1] == "pi34@angleyne.cc.gatech.edu"
-    assert lp.STATE["phase"] == "ready"
+    assert lp.STATE["phase"] == "ready"  # only once the server answered through the tunnel
 
 
 async def test_stop_cancels_the_job(monkeypatch):
@@ -90,7 +101,7 @@ async def test_stop_cancels_the_job(monkeypatch):
     assert lp.STATE["job"] is None and not st["available"]
 
 
-async def test_tunnel_user_comes_from_the_ssh_config_for_an_alias(monkeypatch):
+async def test_tunnel_user_comes_from_the_ssh_config_for_an_alias(monkeypatch, server):
     calls = []
 
     async def fake_sh(*args, timeout=60):
@@ -98,11 +109,11 @@ async def test_tunnel_user_comes_from_the_ssh_config_for_an_alias(monkeypatch):
 
     async def fake_exec(*args, **kw):
         calls.append(args)
-        return SimpleNamespace(returncode=None, terminate=lambda: None)
+        return _Tunnel()
 
     monkeypatch.setattr(lp, "_sh", fake_sh)
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
-    await lp.open_tunnel(_ctx("http://127.0.0.1:8765", "futurama"), "angleyne", 30579)
+    await lp.open_tunnel(_ctx(server, "futurama"), "angleyne", 30579)
     assert calls[0][-1] == "pi34@angleyne.cc.gatech.edu" and calls[0][calls[0].index("-J") + 1] == "futurama"
 
 

@@ -74,6 +74,9 @@ async def lifespan(app: FastAPI):
         log.info("resumed %d autopilot run(s)", resumed)
     app.mount("/files", StaticFiles(directory=CTX.data_dir, check_dir=False), name="files")
     yield
+    from ..services import live_policy_service
+
+    live_policy_service.close_tunnel()  # a tunnel left running would hold its local port against the next one
     await CTX.jobs.shutdown()
     from ..services import intake_service
 

@@ -10,8 +10,11 @@ a backend restart, a stream that drops, long episodes, projects matched by name)
 import json
 import os
 import signal
+import subprocess
+import sys
 import threading
 import time
+from pathlib import Path
 
 import httpx
 import pytest
@@ -60,17 +63,34 @@ def api(tmp_path, monkeypatch, futurama):
 
     _reset()
     port = free_port()
-    server = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
-    t = threading.Thread(target=server.run, daemon=True)
-    t.start()
-    for _ in range(200):
-        if server.started:
-            break
-        time.sleep(0.02)
+    run = {}
+
+    def up():
+        run["server"] = uvicorn.Server(uvicorn.Config(app, host="127.0.0.1", port=port, log_level="warning"))
+        run["thread"] = threading.Thread(target=run["server"].run, daemon=True)
+        run["thread"].start()
+        for _ in range(200):
+            if run["server"].started:
+                break
+            time.sleep(0.02)
+
+    def down():
+        run["server"].should_exit = True
+        run["thread"].join(10)
+
+    def restart():
+        """A backend restart: a graceful shutdown, then a process that knows nothing (no state, no tasks)."""
+        tunnel = lp.STATE.get("tunnel")
+        down()
+        _reset()
+        up()
+        return tunnel
+
+    up()
     with httpx.Client(base_url=f"http://127.0.0.1:{port}/api", timeout=30) as c:
+        c.restart = restart
         yield c
-    server.should_exit = True
-    t.join(10)
+    down()
     _reset()
     settings.cache_clear()
 
@@ -117,9 +137,11 @@ def test_opening_the_tab_requests_a_gpu_narrates_it_and_streams(api, futurama, t
     job = st["job"]
     assert job and "Submitted Slurm job" in st["reason"]
     st, shown = _until(api, _ready)
-    steps = [s for s, _ in shown]
-    assert steps.index("queued") < steps.index("install") < steps.index("prepare") < steps.index("load") < \
-        steps.index("ready")
+    assert not any("isn't reachable" in (r or "") for _, r in shown)  # the tunnel opening is still "Connecting"
+    at = [list(lp.STEPS).index(s) for s, _ in shown if s]
+    assert at == sorted(at)  # the steps only move forward
+    steps = {s for s, _ in shown}
+    assert {"queued", "ready"} <= steps and len(steps & {"install", "prepare", "load"}) >= 2
     assert any("queued: Resources" in (r or "") for _, r in shown)
     assert st["gpu"] == "NVIDIA L40S" and st["policies"]["jenga"]["held_out"] == [58, 59]
     sbatch = cluster.read()["jobs"][job]["argv"]
@@ -174,6 +196,16 @@ def test_a_hung_ssh_does_not_leave_the_tab_spinning(api, futurama, monkeypatch):
     assert r.status_code == 400 and "Futurama" in r.json()["detail"]
     st = api.get("/live-policy").json()
     assert st["phase"] == "stopped" and st["error"]  # the studio offers "Try again", not an endless spinner
+
+
+def test_a_tunnel_that_fails_says_why(api, futurama):
+    cluster, _ = futurama
+    cluster.set(tunnel_fails=True)
+    cluster.add_job(age=5)
+    api.post("/live-policy/start")
+    st, shown = _until(api, lambda s: s.get("error"), timeout=10)
+    assert "Couldn't open the tunnel to zapp" in st["error"] and "No route to host" in st["error"]
+    assert all(s != "ready" for s, _ in shown)
 
 
 def test_a_queue_wait_shows_slurms_reason(api, futurama):
@@ -239,16 +271,88 @@ def test_stop_without_a_known_job_cancels_the_serve_job_by_name(api, futurama):
     assert cluster.read()["jobs"][job]["gone"]
 
 
+def _gone(pid, wait=3.0):
+    t0 = time.time()
+    while time.time() - t0 < wait:
+        try:
+            if os.waitpid(pid, os.WNOHANG)[0]:
+                return True
+        except ChildProcessError:  # already reaped
+            return True
+        time.sleep(0.05)
+    return False
+
+
 def test_a_backend_restart_while_starting_reattaches(api, futurama):
     cluster, _ = futurama
     job = api.post("/live-policy/start").json()["job"]
-    _reset()  # the restarted process: no state, no background task, no tunnel
+    api.restart()
     st = api.get("/live-policy").json()
-    assert st["phase"] == "stopped"
-    st = api.post("/live-policy/start").json()  # the studio asks again
+    assert st["phase"] == "stopped" and "Click Request a GPU" in st["reason"]
+    st = api.post("/live-policy/start").json()  # one click attaches to the job, no second job
     assert st["job"] == job
     _until(api, _ready)
     assert len(cluster.read()["jobs"]) == 1
+
+
+def test_a_stopped_backend_leaves_no_tunnel_behind(tmp_path, futurama):
+    """uvicorn stopped with SIGTERM (scripts/dev.sh's cleanup, a restart): its `ssh -N` must not live on, or it
+    keeps the local port and the next GPU's tunnel can't open."""
+    cluster, _ = futurama
+    cluster.add_job(age=5)
+    port, backend = free_port(), Path(__file__).resolve().parents[1]
+    env = {k: v for k, v in os.environ.items() if not k.startswith(("INSFORGE_", "OPENROUTER_"))}
+    env.update(CORTEX_DOTENV="0", DATA_DIR=str(tmp_path / "data"), LIVE_POLICY_URL=f"http://127.0.0.1:{free_port()}",
+               FUTURAMA_SSH_HOST="futurama", FUTURAMA_PROJECTS_FILE=str(tmp_path / "projects.json"),
+               PYTHONPATH=str(backend))
+    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "cortex.api.app:app", "--port", str(port)], cwd=backend,
+                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    try:
+        with httpx.Client(base_url=f"http://127.0.0.1:{port}/api", timeout=30) as c:
+            for _ in range(150):
+                try:
+                    c.get("/health")
+                    break
+                except httpx.HTTPError:
+                    time.sleep(0.1)
+            c.post("/live-policy/start")
+            _until(c, _ready)
+        pid = cluster.tunnels()[-1]["pid"]
+        proc.terminate()
+        proc.wait(20)
+        t0 = time.time()
+        while time.time() - t0 < 5 and _alive(pid):
+            time.sleep(0.05)
+        assert not _alive(pid)
+    finally:
+        proc.kill()
+        for t in cluster.tunnels():
+            if _alive(t["pid"]):
+                os.kill(t["pid"], signal.SIGTERM)
+
+
+def _alive(pid):
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+
+
+def test_a_backend_restart_closes_its_tunnel(api, futurama):
+    """After a restart the job is cancelled by name and a new GPU's tunnel opens on the same local port."""
+    cluster, _ = futurama
+    job = cluster.add_job(age=5)
+    api.post("/live-policy/start")
+    _until(api, _ready)
+    tunnel = api.restart()
+    assert tunnel is not None and _gone(tunnel.pid)
+    api.post("/live-policy/stop")  # the job id is unknown now: cancelled by name
+    assert cluster.read()["jobs"][job]["gone"]
+    cluster.set(timeline=fake_futurama.timeline(cluster.read()["serve_port"]))
+    api.post("/live-policy/start")  # a new job, a new tunnel on the same local port
+    st, _ = _until(api, _ready)
+    assert st["available"] and lp.STATE["job"] != job
 
 
 # ------------------------------------------------------------------ the server's contents

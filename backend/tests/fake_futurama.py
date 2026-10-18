@@ -78,6 +78,11 @@ class Cluster:
         with self.edit() as st:
             st.update(kw)
 
+    def tunnels(self) -> list[dict]:
+        """Every `ssh -N` started: its pid and forward."""
+        f = self.root / "tunnels.jsonl"
+        return [json.loads(ln) for ln in f.read_text().splitlines()] if f.exists() else []
+
     def calls(self) -> list[list[str]]:
         f = self.root / "calls.jsonl"
         return [json.loads(ln) for ln in f.read_text().splitlines()] if f.exists() else []
@@ -212,6 +217,8 @@ def _ssh(cluster: Cluster, args: list[str]) -> int:
             sys.stderr.write("channel 0: open failed: connect failed: No route to host\n")
             return 255
         local, _, remote = opts["-L"][0].split(":")
+        with open(cluster.root / "tunnels.jsonl", "a") as f:
+            f.write(json.dumps({"pid": os.getpid(), "local": int(local), "remote": int(remote)}) + "\n")
         return _forward(int(local), int(remote))
     sys.stderr.write(BANNER)
     env = {**os.environ, "HOME": str(cluster.home), "USER": "pi34"}
