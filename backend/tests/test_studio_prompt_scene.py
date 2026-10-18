@@ -91,3 +91,37 @@ def test_start_intake_with_a_project_id_seeds_that_project(tmp_path):
     pid, out, projects, p = asyncio.run(go())
     assert out["project_id"] == pid and [x.id for x in projects] == [pid]
     assert [o.name for o in p.intake.objects] == ["cup"]
+
+
+def test_the_same_prompt_after_a_stopped_turn_still_builds_the_scene(tmp_path):
+    """Stop pressed right after start_intake left an intake naming the ball and no scene; sending the prompt again
+    compared with the intake, saw nothing new and never built it."""
+    prompt = "put the tennis ball in the bowl"
+
+    async def go():
+        ctx = await _ctx(tmp_path)
+        p = await orch.create_project(ctx, CreateProjectRequest(task_prompt=prompt))
+        await orch.call_tool(ctx, "start_intake", {"prompt": prompt, "project_id": p.id}, actor="agent")  # then Stop
+        events = await _turn(ctx, p.id, prompt)
+        again = await _turn(ctx, p.id, prompt)  # built now: the same prompt doesn't rebuild it
+        return events, again, await orch.get_project(ctx, p.id)
+
+    events, again, p = asyncio.run(go())
+    assert "build_simulation" in [d["tool"] for ev, d in events if ev == "tool_call"]
+    assert p.scene is not None and set(p.scene["objects"]) == {"tennis_ball"}
+    assert "start_intake" not in [d["tool"] for ev, d in again if ev == "tool_call"]
+
+
+def test_a_prompt_longer_than_the_intake_keeps_still_builds_its_scene(tmp_path):
+    """A 7000-character prompt failed start_intake ("prompt: at most 500 characters") and stayed on the cube."""
+    prompt = "pick up a water bottle and put it in the bin. " + "It stands on the left, near the edge. " * 180
+
+    async def go():
+        ctx = await _ctx(tmp_path)
+        p = await orch.create_project(ctx, CreateProjectRequest(task_prompt=prompt))
+        events = await _turn(ctx, p.id, prompt)
+        return events, await orch.get_project(ctx, p.id)
+
+    events, p = asyncio.run(go())
+    assert all(d.get("ok", True) for ev, d in events if ev == "tool_result")
+    assert p.scene is not None and set(p.scene["objects"]) == {"water_bottle"} and len(p.intake.prompt) == 500
