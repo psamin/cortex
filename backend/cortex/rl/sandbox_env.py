@@ -4,8 +4,9 @@ Each seed draws its own object offset around the weak branch's offset, its own l
 and friction/mass jitter on the task object (restored afterwards), so RL can't overfit one
 scene. The return is a weighted sum of measured terms:
   success        1 if the simulator's success test passes
-  lifted         1 if the object rose above 4.5 cm
-  held_at_carry  1 if it rose above 6 cm (it survived the lift into the carry)
+  lifted         1 if the object's centre rose 3 cm above its resting height (h/2 on intake scenes)
+  held_at_carry  1 if it rose 4.5 cm above it (it survived the lift into the carry)
+Heights are relative to the resting height, so a tall object standing still earns nothing (#152).
   place_dist     1 - min(1, final object-target distance / 0.3 m)
 """
 
@@ -16,8 +17,13 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
+from ..sim.expert import MAX_DEG_PER_STEP
 from ..sim.so101 import PickPlaceEnv, Variation
+from ..workers.sim_worker import CUBE_REST_Z
 from .types import SandboxEnv
+
+LIFT_M, CARRY_M = 0.03, 0.045  # rise above the resting height: lifted, and survived into the carry
+GRIP_RATE = 8.0  # deg/step: both skills move the gripper this fast
 
 
 @dataclass
@@ -80,6 +86,7 @@ class Physics:
 
 # DART-style noise (Laskey et al. 2017): perturb the skill's free-space waypoints so demos visit off-nominal
 # states and show the skill recovering from them. Contact legs (grasp, close, release) are left alone.
+# The perturbed command is what runs; the demo's action label is the clean skill's command (act_labelled).
 DART_LEGS = (0, 3, 4)  # TunedSkill legs: hover, lift, carry
 DART_PHASES = ("hover", "transit", "carry")  # PickPlaceSkill single-target phases
 
@@ -87,6 +94,7 @@ DART_PHASES = ("hover", "transit", "carry")  # PickPlaceSkill single-target phas
 def dart_perturb(skill, rng: np.random.Generator, sigma_deg: float = 3.0) -> None:
     """Add N(0, sigma_deg) to the arm joints of the skill's free-space targets, in place, after ``plan()``."""
     if hasattr(skill, "waypoints"):  # rl.skill.TunedSkill: a fixed list of (q, hold)
+        skill.clean_waypoints = list(skill.waypoints)
         for i in DART_LEGS:
             q, hold = skill.waypoints[i]
             skill.waypoints[i] = (np.r_[q[:5] + rng.normal(0, sigma_deg, 5), q[5:]], hold)
@@ -95,17 +103,52 @@ def dart_perturb(skill, rng: np.random.Generator, sigma_deg: float = 3.0) -> Non
 
     def noisy():
         for t in moves:
+            t.clean_q = np.asarray(t.q, dtype=np.float64).copy()
             if t.phase in DART_PHASES:
                 t.q = np.asarray(t.q, dtype=np.float64) + rng.normal(0, sigma_deg, len(t.q))
             yield t
     skill.moves = noisy()
 
 
+def _step_toward(cmd: np.ndarray, target: np.ndarray, rate: float) -> np.ndarray:
+    d = target - cmd
+    step = np.clip(d, -rate, rate)
+    step[5] = np.clip(d[5], -GRIP_RATE, GRIP_RATE)
+    return (cmd + step).astype(np.float32)
+
+
+def act_labelled(skill) -> tuple[np.ndarray, np.ndarray]:
+    """One step of a (possibly DART-perturbed) skill: ``(executed, label)``.
+
+    ``executed`` is the perturbed command the skill issues. ``label`` is the command the unperturbed skill would
+    issue from the same command state: the same rate-limited step, towards the leg's clean target. So the demo
+    shows off-nominal states, labelled with the correction back towards the clean path, never the noise (#152).
+    Without a perturbation the two are equal."""
+    prev = np.asarray(skill.cmd, dtype=np.float64).copy()
+    if hasattr(skill, "waypoints"):  # rl.skill.TunedSkill
+        i = skill.i
+        a = skill.act()
+        clean = getattr(skill, "clean_waypoints", None)
+        if clean is None or i >= len(clean):
+            return a, a.copy()
+        return a, _step_toward(prev, np.asarray(clean[i][0], dtype=np.float64), MAX_DEG_PER_STEP)
+    if skill.cur is None and not skill.finished:  # what act() would do first; done here to see the target
+        skill._next()
+    cur = skill.cur
+    a = skill.act()
+    if cur is None:
+        return a, a.copy()
+    q = np.asarray(getattr(cur, "clean_q", cur.q), dtype=np.float64)
+    return a, _step_toward(prev, np.r_[q[:5], cur.grip], cur.rate)
+
+
 def episode_return(ep: dict, weights: dict[str, float]) -> tuple[float, dict[str, float]]:
+    """``ep``: success, max_cube_z, final_cube_box_dist and rest_z (the object's resting centre height)."""
+    lift = ep["max_cube_z"] - ep.get("rest_z", CUBE_REST_Z)
     terms = {
         "success": float(ep["success"]),
-        "lifted": float(ep["max_cube_z"] > 0.045),
-        "held_at_carry": float(ep["max_cube_z"] > 0.06),
+        "lifted": float(lift > LIFT_M),
+        "held_at_carry": float(lift > CARRY_M),
         "place_dist": float(1 - min(1.0, ep["final_cube_box_dist"] / 0.3)),
     }
     total = sum(weights.get(k, 0.0) * v for k, v in terms.items())

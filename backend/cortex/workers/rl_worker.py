@@ -32,14 +32,16 @@ import numpy as np
 
 from ..errors import worker_error
 from ..rl.learner import cem
-from ..rl.sandbox_env import Physics, dart_perturb, draw, episode_return, widen
+from ..rl.sandbox_env import Physics, act_labelled, dart_perturb, draw, episode_return, widen
 from ..rl.stats import mcnemar_exact
 from ..rl.types import IterationStats, Pilot, RLSandbox, SandboxResult
 from ..services.simulation_runner import wilson
 from ..sim.so101 import FPS, PickPlaceEnv, configure_gl
-from .sim_worker import Preview, emit, failure_mode, write_mp4
+from ..sim import env_factory
+from .sim_worker import Preview, emit, failure_mode, rest_height, write_mp4
 
 STATS_EVERY = 15  # control steps between sim_stats events
+DEFAULT_MAX_STEPS = 300  # the cube task's episode length
 LIVE_EVERY_S = 0.5  # live.jpg throttle
 SETTLE_STEPS = 10
 UNSTABLE_Z, UNSTABLE_DIST = 0.5, 1.0  # metres: the object left the workspace, i.e. the physics blew up
@@ -64,13 +66,13 @@ def physics_step(env: PickPlaceEnv, action: np.ndarray, render: bool):
 
 
 def make_env(scene: dict[str, Any] | None, max_steps: int) -> PickPlaceEnv:
-    if not scene:
-        return PickPlaceEnv(episode_steps=max_steps)
-    try:
-        from ..sim import env_factory  # type: ignore[attr-defined]  (#99)
-    except ImportError as e:  # no silent fallback to the tabletop
-        raise RuntimeError("scene sandboxes need sim/env_factory.py (#99), which isn't on this build") from e
     return env_factory.make_env(scene, max_steps)
+
+
+def step_limit(scene: dict[str, Any] | None, cfg: dict[str, Any]) -> int:
+    """Control steps per rollout: the cube task's 300, or the intake scene's longer limit (side grasps need
+    more than 500 steps; cutting them at 300 scored base and tuned skills ~0, #152)."""
+    return env_factory.max_steps(scene, int(cfg.get("max_steps", DEFAULT_MAX_STEPS)))
 
 
 def make_policy(scene: dict[str, Any] | None, params: dict[str, float]):
@@ -94,7 +96,7 @@ class Runner:
         self.live_dir = Path(cfg.get("live_dir") or self.out)
         self.live_dir.mkdir(parents=True, exist_ok=True)
         self.seed_base = int(cfg.get("seed_base", 0))
-        self.max_steps = int(cfg.get("max_steps", 300))
+        self.max_steps = step_limit(self.scene, cfg)
         self.stop_file = Path(cfg["stop_file"]) if cfg.get("stop_file") else None
         self.env = make_env(self.scene, self.max_steps)
         self.env.reset(self.seed_base, draw(self.sb.env, self.seed_base).var)
@@ -122,12 +124,13 @@ class Runner:
         video: list[np.ndarray] = []
         success, settle, t0 = False, 0, time.time()
         for step in range(self.max_steps):
-            action = policy.act(obs)
+            # DART: the perturbed command runs; the label is the clean skill's command (#152)
+            action, label = act_labelled(policy.ex) if dart else (policy.act(obs),) * 2
             if record:
                 buf["front"].append(obs["pixels"]["front"])
                 buf["wrist"].append(obs["pixels"]["wrist"])
                 buf["state"].append(obs["agent_pos"])
-                buf["action"].append(action)
+                buf["action"].append(label)
             nxt, reward, success, _, _ = physics_step(env, action, render=record)
             obs = nxt if nxt is not None else obs
             if record:
@@ -145,9 +148,10 @@ class Runner:
         self.episodes += 1
         self.sim_s += time.time() - t0
         dist = float(np.linalg.norm(env.cube_pos()[:2] - env.box_pos()[:2]))
+        rest = rest_height(env)
         ep = {"seed": seed, "success": bool(success), "steps": steps, "max_cube_z": env.max_cube_z,
-              "final_cube_box_dist": dist,
-              "failure_mode": failure_mode(success, env.max_cube_z, steps, self.max_steps, dist)}
+              "rest_z": rest, "final_cube_box_dist": dist,
+              "failure_mode": failure_mode(success, env.max_cube_z, steps, self.max_steps, dist, rest)}
         if env.max_cube_z > UNSTABLE_Z or dist > UNSTABLE_DIST:  # never reward a physics blow-up as a "lift"
             ep.update({"success": False, "failure_mode": "sim_unstable", "return": 0.0})
         else:
@@ -159,7 +163,7 @@ class Runner:
 
     def _stats(self, step: int, policy, success: bool) -> None:
         env = self.env
-        so_far = {"success": success, "max_cube_z": env.max_cube_z,
+        so_far = {"success": success, "max_cube_z": env.max_cube_z, "rest_z": rest_height(env),
                   "final_cube_box_dist": float(np.linalg.norm(env.cube_pos()[:2] - env.box_pos()[:2]))}
         emit(type="sim_stats", sandbox_id=self.sb.id, phase=self.phase, skill_phase=getattr(policy.ex, "phase", None),
              step=step, joints=[round(float(v), 2) for v in env.world.joint_state()],
@@ -277,7 +281,8 @@ class Runner:
             meta = {**ep, "num_frames": m, "fps": FPS, "out_dir": str(d), "dart": dart, "params": params,
                     "condition": self.sb.env.condition.model_dump(mode="json"),
                     "provenance": {"planner": f"rl_sandbox:{self.sb.id}", "mode": "privileged",
-                                   "method": self.sb.method, "dart": dart, "params": params}}
+                                   "method": self.sb.method, "dart": dart, "params": params,
+                                   "action_labels": "clean skill command" if dart else "executed command"}}
             (d / "result.json").write_text(json.dumps(meta))
             kept.append(d.name)
         return kept
