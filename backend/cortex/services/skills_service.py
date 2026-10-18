@@ -84,11 +84,15 @@ def replay_file(ctx: Ctx, task: str, name: str) -> Path:
 
 
 def _read_seen(ctx: Ctx) -> dict[str, dict[str, Any]]:
+    """skills_seen.json, without malformed entries (missing keys, hand edits): one would fail every listing."""
     try:
         d = json.loads((ctx.data_dir / SEEN).read_text())
     except (OSError, ValueError):
         return {}
-    return {k: v for k, v in d.items() if isinstance(v, dict)} if isinstance(d, dict) else {}
+    need = _seeded(next(iter(SEEDED))).keys()  # every key a listed skill has
+    return {k: v for k, v in d.items() if isinstance(v, dict) and v.keys() >= need and v["task"] == k
+            and isinstance(v["score"], dict) and isinstance(v["runs"], list) and isinstance(v["evidence"], list)
+            } if isinstance(d, dict) else {}
 
 
 def _seeded(task: str) -> dict[str, Any]:

@@ -278,6 +278,18 @@ async def test_sim_skills_stay_listed_with_their_replays_while_the_gpu_server_is
     assert p["thumbnail_url"] == "/api/skills/pick_place/replays/pp.mp4" and p["score"]["kind"] == "none"
 
 
+async def test_a_malformed_skills_seen_entry_is_skipped_not_fatal(world):
+    """#319: one entry missing keys (a hand edit, an older file) made every GET /api/skills fail with KeyError."""
+    ctx, *_ = world
+    ok = skills_service._seeded("jenga_big")
+    (ctx.data_dir / skills_service.SEEN).write_text(json.dumps({
+        "jenga": {"id": "sk_served_sim_jenga"}, "palletize": "not a skill", "unscrew_black": {**ok, "score": None},
+        "conveyor": {**ok, "task": "suture"}, "jenga_big": ok}))
+    by_task = {s["task"]: s for s in await skills_service.list_skills(ctx)}
+    assert set(by_task) == {"unscrew", "jenga_big"}
+    assert by_task["jenga_big"]["run"]["note"] == skills_service.DOWN
+
+
 async def test_a_replay_file_never_leaves_its_folder(world):
     ctx, *_ = world
     _replay(ctx, "unscrew", "run 1.mp4", 1000)
