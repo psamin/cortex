@@ -29,7 +29,7 @@ from ..models import (
     SimulationBranch,
 )
 from ..sim.so101 import ENVHUB_REVISION, ENVHUB_URI
-from .jobs import Job
+from .jobs import TERMINAL, Job
 
 DEFAULT_BRANCHES = [
     BranchSpec(name="baseline", condition=Condition(cube_region="center", lighting="normal")),
@@ -41,6 +41,19 @@ DEFAULT_BRANCHES = [
 
 log = logging.getLogger(__name__)
 INTERRUPTED = "interrupted by a backend restart"
+START_TIMEOUT_S = 120.0  # launch -> each branch on its way to its worker; past it the branch never will (#125)
+_WATCHDOGS: set[asyncio.Task] = set()  # running start watchdogs (the loop only keeps weak references)
+
+
+class BranchNeverStarted(RuntimeError):
+    """A branch that did not get to its worker within START_TIMEOUT_S. The message is written for people."""
+
+    user_facing = True
+
+
+def never_started() -> str:
+    return (f"Never started: no simulation worker was launched within {START_TIMEOUT_S:.0f} s, so Cortex stopped "
+            "waiting for it. Run the evaluation again.")
 
 
 async def sweep_interrupted(ctx: Ctx) -> int:
@@ -127,8 +140,10 @@ async def launch_evaluation(ctx: Ctx, project: Project, req: LaunchEvaluationReq
                     {"policy": req.policy.model_dump(), "branches": [s.name for s in specs],
                      "episodes_per_branch": req.episodes_per_branch, "base_seed": req.base_seed,
                      "executor": executor, "env": ENVHUB_URI}, "ok", f"evaluation {run.id} started")
+    began = asyncio.Event()  # the job got to its branches; the start watchdog waits for this
 
     async def run_all(job: Job) -> str:
+        began.set()
         try:
             results = await asyncio.gather(*(run_branch(ctx, job, run, b, policy_cfg, scene) for b in branches),
                                            return_exceptions=True)
@@ -153,9 +168,51 @@ async def launch_evaluation(ctx: Ctx, project: Project, req: LaunchEvaluationReq
         return run.id
 
     job = ctx.jobs.submit("evaluate", project.id, run_all, idempotency_key=f"eval:{run.id}")
+    watchdog = asyncio.create_task(watch_start(ctx, job, run, branches, began))
+    _WATCHDOGS.add(watchdog)
+    watchdog.add_done_callback(_WATCHDOGS.discard)
     run.job_id = job.id
     await ctx.repo.save("evaluation_runs", run)
     return run
+
+
+async def watch_start(ctx: Ctx, job: Job, run: EvaluationRun, branches: list[SimulationBranch],
+                      began: asyncio.Event) -> None:
+    """The start watchdog (#125). It runs beside the job, not in it, since the job's own task is what stopped there:
+    a job that has not got to its branches within START_TIMEOUT_S never will, so its branches, the evaluation and
+    the job are failed with the reason instead of staying queued and running forever."""
+    try:
+        await asyncio.wait_for(began.wait(), START_TIMEOUT_S)
+        return
+    except TimeoutError:
+        pass
+    if ctx.jobs.closing:
+        return  # the startup sweep ends it
+    msg = never_started()
+    log.error("evaluation %s: job %s never reached its branches in %.0f s; failing it", run.id, job.id,
+              START_TIMEOUT_S)
+    for b in branches:
+        if b.status in (JobStatus.queued, JobStatus.running):
+            b.status, b.error = JobStatus.failed, msg
+            await ctx.repo.save("simulation_branches", b, project_id=run.project_id)
+            ctx.changed(run.project_id, "simulation_branches", b.id)
+    run.status = JobStatus.failed
+    await ctx.repo.save("evaluation_runs", run)
+    ctx.changed(run.project_id, "evaluation_runs", run.id)
+    if job.status not in TERMINAL:
+        ctx.jobs.update(job, status="failed", error=msg)
+
+
+async def _start(ctx: Ctx, run: EvaluationRun, b: SimulationBranch) -> None:
+    """Record the branch as running, its last step before the worker, within START_TIMEOUT_S: a store call that
+    never returns fails the branch with the reason instead of leaving it queued forever (#125)."""
+    try:
+        async with asyncio.timeout(START_TIMEOUT_S):
+            b.status = JobStatus.running
+            await ctx.repo.save("simulation_branches", b, project_id=run.project_id)
+    except TimeoutError:
+        raise BranchNeverStarted(never_started()) from None
+    ctx.changed(run.project_id, "simulation_branches", b.id)
 
 
 async def run_branch(ctx: Ctx, job: Job, run: EvaluationRun, b: SimulationBranch,
@@ -168,12 +225,10 @@ async def run_branch(ctx: Ctx, job: Job, run: EvaluationRun, b: SimulationBranch
         "env_revision": ENVHUB_REVISION,
         "scene": scene,
     }
-    b.status = JobStatus.running
-    await ctx.repo.save("simulation_branches", b, project_id=run.project_id)
-    ctx.changed(run.project_id, "simulation_branches", b.id)
     loop = asyncio.get_running_loop()
     t0 = loop.time()
     try:
+        await _start(ctx, run, b)  # inside the try, so a failure here is recorded on the branch, not lost
         cfg["out_dir"] = str(ctx.local(key))
 
         def on_event(ev: dict[str, Any]) -> None:
@@ -202,7 +257,8 @@ async def run_branch(ctx: Ctx, job: Job, run: EvaluationRun, b: SimulationBranch
         if ctx.jobs.stop_requested(job.id):  # the stop ended the worker before the task saw the cancel
             b.status, b.error = JobStatus.cancelled, "stopped by user"
         else:
-            b.status, b.error = JobStatus.failed, f"{type(e).__name__}: {e}"[:500]
+            b.status, b.error = JobStatus.failed, (str(e) if isinstance(e, BranchNeverStarted)
+                                                   else f"{type(e).__name__}: {e}")[:500]
         raise
     finally:
         await ctx.repo.save("simulation_branches", b, project_id=run.project_id)
