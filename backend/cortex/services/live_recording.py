@@ -49,7 +49,7 @@ class StreamRecorder:
         self.instruction = ""
         self.success_frames: list[int] = []
         self.policy = ""  # sim streams: X-Policy, <variant>@<step>
-        self.finished = False  # set by the proxy when the upstream stream ended on its own
+        self.finished = False  # set by the proxy when the upstream connection closed cleanly
 
     def feed(self, chunk: bytes) -> None:
         self.buf += chunk
@@ -121,9 +121,12 @@ class StreamRecorder:
 
     @property
     def complete(self) -> bool:
-        """The stream ran to its end (the server finished), rather than the viewer leaving."""
-        return self.finished or (self.total is not None and self.last_index is not None
-                                 and self.last_index + 1 >= self.total)
+        """The run reached its end: the episode's last frame (X-Frame i/n) or, in sim, the simulator's verified
+        success (the server stops shortly after it). A closed connection proves nothing by itself: a dropped
+        tunnel or Stop GPU looks the same as a finished stream. Servers without X-Frame: the stream closed."""
+        if self.total is not None and self.last_index is not None:
+            return self.last_index + 1 >= self.total or self.success is True
+        return self.finished
 
 
 def _headers(raw: bytes | bytearray) -> dict[str, str]:

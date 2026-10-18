@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import time
+from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
@@ -32,6 +33,7 @@ UNREACHABLE = 255  # ssh's exit status when it can't connect (also given to a ti
 ENDED = {"COMPLETED", "COMPLETING", "FAILED", "CANCELLED", "TIMEOUT", "NODE_FAIL", "OUT_OF_MEMORY", "PREEMPTED",
          "BOOT_FAIL", "DEADLINE"}
 _CONNECT: dict[str, asyncio.Task | None] = {"task": None}  # the poller of the job being started
+_STREAM: dict[str, asyncio.Task | None] = {"pump": None}  # the stream playing (the server plays one at a time)
 STATE: dict[str, Any] = {"job": None, "tunnel": None, "phase": "stopped", "step": None, "detail": None, "failed_at": 0.0,
                          "error": None}
 # What the studio shows while a GPU comes up, in order.
@@ -264,11 +266,52 @@ def close_tunnel() -> None:
     STATE["tunnel"] = None
 
 
+async def relay(ctx: Ctx, path: str, rec: Any) -> AsyncIterator[bytes]:
+    """Proxy one MJPEG stream from the GPU server (`path`, e.g. /sim/jenga/7), feeding `rec` as it passes.
+
+    The server plays one stream at a time and makes the next one wait. So a new stream (a second viewer, or
+    "Run on a new layout" while a run plays) ends the one playing, instead of showing a blank image until it
+    finishes; the ended run is saved as partial."""
+    q: asyncio.Queue[bytes | None] = asyncio.Queue()
+
+    async def pump() -> None:
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
+                async with c.stream("GET", f"{url(ctx)}{path}") as r:
+                    async for chunk in r.aiter_raw():
+                        q.put_nowait(chunk)
+            rec.finished = True
+        except Exception as e:  # noqa: BLE001 - a dropped tunnel or server: the stream just ends
+            log.info("live stream %s ended: %r", path, e)
+        finally:
+            q.put_nowait(None)
+
+    end_stream()
+    task = _STREAM["pump"] = asyncio.get_running_loop().create_task(pump())
+    try:
+        while (chunk := await q.get()) is not None:
+            rec.feed(chunk)
+            yield chunk
+    finally:
+        task.cancel()
+        if _STREAM["pump"] is task:
+            _STREAM["pump"] = None
+
+
+def end_stream() -> None:
+    """End the stream playing, if any (its viewer sees the last frame; the run is saved as partial)."""
+    t = _STREAM["pump"]
+    if t is not None and not t.done():
+        t.cancel()
+    _STREAM["pump"] = None
+
+
 async def stop(ctx: Ctx) -> dict[str, Any]:
     """Close the tunnel and cancel the serve job. After a backend restart the job id is unknown, so the job
     is cancelled by its name (cortex-serve)."""
     job = STATE["job"]
     _cancel_connect()
+    end_stream()
     close_tunnel()
     STATE.update(job=None, phase="stopped", step=None, detail=None, error=None)
     if ctx.settings.futurama_ssh_host:
