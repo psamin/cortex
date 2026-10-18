@@ -19,6 +19,7 @@ from pydantic import BaseModel, Field
 from ..context import Ctx
 from ..errors import NotFound
 from ..models import (
+    AgentCollection,
     Collector,
     StartAgentCollectionRequest,
     Augmentation,
@@ -1092,6 +1093,125 @@ async def t_register_agent(ctx, a, actor):
             "name": name, "tell_user": tell, "url": url, "session_named": named is not None}
 
 
+LIST_KINDS = ("projects", "sim_tasks", "skills", "jobs", "datasets", "checkpoints", "training", "evaluations",
+              "replays", "rl_sandboxes", "agent_log")
+PROJECT_KINDS = {"jobs", "datasets", "checkpoints", "training", "evaluations", "replays", "rl_sandboxes", "agent_log"}
+
+
+class ListArgs(BaseModel):
+    kind: Literal["projects", "sim_tasks", "skills", "jobs", "datasets", "checkpoints", "training", "evaluations",
+                  "replays", "rl_sandboxes", "agent_log"] = Field(description=(
+        "projects: your projects | sim_tasks: built-in sim tasks you can train on (jenga, conveyor, suture, ...) | "
+        "skills: every trained Physical Skill | jobs, datasets, checkpoints, training, evaluations, replays, "
+        "rl_sandboxes, agent_log: one project's (needs project_id)"))
+    project_id: str | None = None
+    limit: int = Field(20, ge=1, le=200, description="newest first")
+
+
+def _compact(d: dict[str, Any]) -> dict[str, Any]:
+    """Scalars and short scalar lists only, strings trimmed: enough to act on without flooding the context."""
+    out: dict[str, Any] = {}
+    for k, v in d.items():
+        if isinstance(v, str):
+            out[k] = v if len(v) <= 300 else v[:300] + "..."
+        elif isinstance(v, (int, float, bool)) or v is None:
+            out[k] = v
+        elif isinstance(v, list) and len(v) <= 12 and all(isinstance(x, (str, int, float, bool)) for x in v):
+            out[k] = v
+    return out
+
+
+def _newest(rows: list[dict[str, Any]], limit: int) -> list[dict[str, Any]]:
+    key = next((k for k in ("created_at", "started_at", "updated_at") if rows and k in rows[0]), None)
+    if key:
+        rows = sorted(rows, key=lambda r: str(r.get(key) or ""), reverse=True)
+    return rows[:limit]
+
+
+async def t_list(ctx, a, actor):
+    if a.kind in PROJECT_KINDS and not a.project_id:
+        raise ValueError(f"list kind='{a.kind}' needs project_id (use kind='projects' to find it)")
+    pid = a.project_id
+    if pid:
+        await get_project(ctx, pid)
+    k = a.kind
+    if k == "projects":
+        rows = [{"id": p.id, "name": p.name, "goal": getattr(p.spec, "goal", None), "created_at": p.created_at}
+                for p in await ctx.repo.list("projects", Project)]
+    elif k == "sim_tasks":
+        import importlib
+
+        from ..sim.tasks import TASKS
+        rows = []
+        for name, mod in TASKS.items():
+            try:
+                env = importlib.import_module(f"cortex.sim.tasks.{mod}").Env
+                rows.append({"task": name, "instruction": env.instruction, "max_steps": env.max_steps})
+            except Exception as e:  # noqa: BLE001 - one broken task must not hide the others
+                rows.append({"task": name, "error": f"{type(e).__name__}: {e}"[:200]})
+    elif k == "skills":
+        from . import skills_service
+        rows = [_compact(s) for s in await skills_service.list_skills(ctx)]
+    elif k == "jobs":
+        rows = [_compact(j.model_dump(mode="json")) for j in ctx.jobs.list(pid)]
+    elif k == "datasets":
+        rows = []
+        for v in await dataset_service.list_versions(ctx, pid):
+            d = v.model_dump(mode="json") if hasattr(v, "model_dump") else dict(v)
+            rows.append({**_compact(d), "episodes": len(d.get("links") or [])})
+    elif k == "checkpoints":
+        rows = [_compact(c.model_dump(mode="json")) for c in await ctx.repo.list("checkpoints", Checkpoint, project_id=pid)]
+    elif k == "training":
+        rows = [_compact(t.model_dump(mode="json")) for t in await ctx.repo.list("training_jobs", TrainingJob, project_id=pid)]
+    elif k == "evaluations":
+        rows = []
+        for e in await simulation_runner.list_evaluations(ctx, pid):
+            run = e["run"].model_dump(mode="json") if hasattr(e["run"], "model_dump") else e["run"]
+            branches = [b.model_dump(mode="json") if hasattr(b, "model_dump") else b for b in e["branches"]]
+            rows.append({**_compact(run), "branches": [
+                {"name": b["spec"]["name"], "status": b["status"],
+                 **({"successes": b["result"]["successes"], "n": b["result"]["n"]} if b.get("result") else {})}
+                for b in branches]})
+    elif k == "replays":
+        from . import replay_service
+        rows = [_compact(r.model_dump(mode="json") if hasattr(r, "model_dump") else r)
+                for r in await replay_service.list_replays(ctx, pid)]
+    elif k == "rl_sandboxes":
+        from . import rl_service
+        rows = [_compact(rl_service.status_view(s)) for s in await rl_service.list_sandboxes(ctx, pid)]
+    else:  # agent_log
+        from .agent_obs import project_calls
+        rows = [{"tool": c.get("tool"), "status": c.get("status"), "agent": c.get("agent_name") or c.get("client")
+                 or c.get("actor"), "summary": (c.get("summary") or "")[:300], "started_at": c.get("started_at"),
+                 **({"kind": c["args"].get("kind"), "text": c["args"].get("text")} if c.get("tool") == "log_decision"
+                    else {})} for c in await project_calls(ctx, pid)]
+    rows = _newest(rows, a.limit)
+    where = f" in {pid}" if pid else ""
+    return {"summary": f"{len(rows)} {k.replace('_', ' ')}{where}", "ref_ids": [str(r.get("id")) for r in rows if r.get("id")][:20],
+            "kind": k, "items": rows}
+
+
+class CancelJobArgs(BaseModel):
+    job_id: str = Field(description="a job_id you started (from get_job, list kind='jobs', or a tool's result)")
+
+
+async def t_cancel_job(ctx, a, actor):
+    j = ctx.jobs.get(a.job_id)
+    if j is None:
+        raise NotFound(f"job {a.job_id}")
+    if j.status not in ("queued", "running"):
+        return {"summary": f"{j.kind} job {j.id} already {j.status}; nothing to stop", "ref_ids": [j.id],
+                "job": j.model_dump(mode="json")}
+    await ctx.jobs.cancel(j.id)
+    if j.kind == "agent_collect":  # keep the collection's own status in step, like the studio's Stop
+        for col in await ctx.repo.list("agent_collections", AgentCollection, project_id=j.project_id):
+            if col.job_id == j.id and col.status in ("queued", "running"):
+                col.status = "cancelled"
+                await ctx.repo.save("agent_collections", col)
+    await ctx.audit(actor, "cancel_job", j.project_id, {"job_id": j.id}, "ok", f"stopped {j.kind}")
+    return {"summary": f"Stopped the {j.kind} job {j.id}.", "ref_ids": [j.id], "job_id": j.id, "kind": j.kind}
+
+
 class GpuArgs(BaseModel):
     project_id: str | None = Field(None, description="the project this GPU is for, so the request shows in its Agent log")
 
@@ -1153,6 +1273,13 @@ async def t_log_decision(ctx, a, actor):
 
 
 TOOLS.update({t.name: t for t in [
+    Tool("list", "One read-only query for everything in Cortex, compact and newest first: your projects, the "
+         "built-in sim tasks you can train on, Physical Skills, and one project's jobs, datasets, checkpoints, "
+         "training, evaluations, replays, RL sandboxes or Agent log. Use it to find ids, check what exists before "
+         "creating something, and see what you (or another agent) already did.", ListArgs, t_list),
+    Tool("cancel_job", "Stop a background job you started (a recording, demo collection, dataset build, "
+         "evaluation or RL run) that is wrong, stuck or no longer needed. Finished jobs keep their result.",
+         CancelJobArgs, t_cancel_job),
     Tool("register_agent", "Call this first when you connect: give yourself a short, distinctive name (and what you "
          "are here to do). Cortex labels your session, every call and the Agent log with it. Then tell your user, "
          "in one line, the name and the watch link this returns.", RegisterAgentArgs, t_register_agent),
