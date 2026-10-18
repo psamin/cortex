@@ -2145,6 +2145,59 @@
       },
       "agentCallable": true,
       "needsApproval": false
+    },
+    {
+      "name": "save_physical_skill",
+      "mcpTools": [
+        "cortex.save_physical_skill"
+      ],
+      "description": "After training and evaluation: name a finished checkpoint as a Physical Skill, e.g. 'Jenga v1'. It is already listed (every finished checkpoint is); this names it, and returns its id and measured score. Find checkpoints and skills with cortex_list(kind=\"skills\").",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "checkpoint_id": {
+            "description": "a finished training job's checkpoint (ck_...)",
+            "type": "string"
+          },
+          "name": {
+            "description": "what the skill does, e.g. 'Jenga v1'",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id",
+          "checkpoint_id",
+          "name"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "deploy_physical_skill",
+      "mcpTools": [
+        "cortex.deploy_physical_skill"
+      ],
+      "description": "Deploy a Physical Skill: requests or attaches the Futurama GPU server (the same safeguards as request_gpu) and sets up a live closed-loop run of the skill in the deployment simulator, on an unseen layout. Returns deployment_url (the studio page that plays the run; share it as View deployment) and the run id. While the GPU comes up it returns deployed=false: poll get_gpu_status, then call it again. Find skills with cortex_list(kind=\"skills\").",
+      "inputSchema": {
+        "properties": {
+          "skill_id": {
+            "description": "a Physical Skill id (sk_...), from save_physical_skill or cortex_list(kind=\"skills\")",
+            "type": "string"
+          }
+        },
+        "required": [
+          "skill_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
     }
   ]
 }

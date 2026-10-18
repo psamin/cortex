@@ -100,7 +100,7 @@ curl -X POST http://localhost:8000/api/tools/get_project_state \
 
 ## Docs
 
-- [Full tool reference](http://localhost:5173/llms-full.txt): all 54 registry tools with descriptions, arguments and JSON schemas
+- [Full tool reference](http://localhost:5173/llms-full.txt): all 56 registry tools with descriptions, arguments and JSON schemas
 - [MCP discovery document](http://localhost:5173/.well-known/mcp.json): endpoint, transport, REST mirror and tool list
 - [MCP Server Card](http://localhost:5173/server-card.json): SEP-2127 server card
 - [MCP server README](https://github.com/psamin/speculativespeculativeagentaction/blob/main/mcp/README.md): tool table, approvals, long-running jobs

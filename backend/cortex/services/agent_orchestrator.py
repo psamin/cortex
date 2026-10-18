@@ -1325,3 +1325,106 @@ async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str, c
     # validated inside observe, so an agent's invalid arguments show up in its timeline too
     return await agent_obs.observe(ctx, caller, name, raw_args, actor,
                                    lambda: tool.fn(ctx, tool.args.model_validate(raw_args), actor))
+
+
+# ------------------------------------------------------------------ Physical Skills (#310)
+# After training and evaluation, the agent names the checkpoint as a Physical Skill, then deploys it: a live run
+# in the deployment simulator (the GPU server's closed-loop MuJoCo) on an unseen layout, which the studio shows.
+
+class SaveSkillArgs(BaseModel):
+    project_id: str
+    checkpoint_id: str = Field(description="a finished training job's checkpoint (ck_...)")
+    name: str = Field(min_length=1, max_length=80, description="what the skill does, e.g. 'Jenga v1'")
+
+
+class DeploySkillArgs(BaseModel):
+    skill_id: str = Field(description="a Physical Skill id (sk_...), from save_physical_skill or cortex_list(kind=\"skills\")")
+
+
+def _skill_brief(s: dict[str, Any]) -> dict[str, Any]:
+    sc, run = s.get("score") or {}, s.get("run") or {}
+    return {"skill_id": s["id"], "name": s["name"], "saved": bool(s.get("saved")), "task": s.get("task"),
+            "project_id": s.get("project_id"), "checkpoint_id": s.get("checkpoint_id"), "policy": s.get("policy"),
+            "steps": s.get("steps"), "score": {k: sc.get(k) for k in ("kind", "value", "n", "label")},
+            "deployable": run.get("kind") == "sim" and bool(run.get("task")), "live_now": bool(run.get("live_now")),
+            "run_note": run.get("note")}
+
+
+def _skill_url(ctx: Ctx, skill_id: str, seed: int | None = None) -> str:
+    from urllib.parse import quote
+
+    url = f"{ctx.settings.cortex_studio_url.rstrip('/')}/studio/skills/{quote(skill_id, safe='')}"
+    return f"{url}?seed={seed}" if seed is not None else url
+
+
+async def t_save_skill(ctx, a, actor):
+    from . import skills_service
+
+    await get_project(ctx, a.project_id)
+    row = await ctx.store.get("checkpoints", a.checkpoint_id)
+    ck = Checkpoint.model_validate(row["data"]) if row else None
+    if ck is None or ck.project_id != a.project_id:
+        raise NotFound(f"checkpoint {a.checkpoint_id} not found in project {a.project_id}")
+    if ck.training_job_id:
+        tj = await ctx.repo.get("training_jobs", ck.training_job_id, TrainingJob)
+        if tj is not None and tj.status != JobStatus.succeeded:
+            raise ValueError(f"training job {tj.id} is {tj.status.value}; save the skill once it has succeeded")
+    ck.skill_name = " ".join(a.name.split())
+    await ctx.repo.save("checkpoints", ck, status=row.get("status") or "ready")
+    skill = next((s for s in await skills_service.list_skills(ctx) if s.get("project_id") == a.project_id and (
+        s.get("checkpoint_id") == ck.id or s["id"] in (f"sk_{ck.training_job_id}", f"sk_{ck.id}"))), None)
+    if skill is None:
+        raise ValueError(f"checkpoint {ck.id} is not a sim-trained policy, so it isn't in Physical Skills")
+    b = _skill_brief(skill)
+    await ctx.audit(actor, "save_physical_skill", a.project_id, {"checkpoint_id": ck.id, "name": ck.skill_name}, "ok",
+                    skill["id"])
+    return {"summary": f"Saved physical skill '{b['name']}' ({b['score']['label']}).", "ref_ids": [b["skill_id"], ck.id],
+            **b, "skill_url": _skill_url(ctx, b["skill_id"])}
+
+
+async def t_deploy_skill(ctx, a, actor):
+    import random
+
+    from . import live_policy_service as lp
+    from . import skills_service
+
+    s = await skills_service.get_skill(ctx, a.skill_id)
+    b, run = _skill_brief(s), s.get("run") or {}
+    if not b["deployable"]:
+        raise ValueError(f"'{b['name']}' can't be deployed: {run.get('note') or 'it has no live sim task'}")
+    out = {"deployment_url": _skill_url(ctx, b["skill_id"]), "run_id": None, "skill_id": b["skill_id"],
+           "skill_name": b["name"], "project_id": b["project_id"], "task": b["task"]}
+    st = await lp.status(ctx)
+    if not st.get("available"):
+        try:  # the same path as cortex.request_gpu: one server at a time, the cooldown after a failed request
+            st = await lp.start(ctx)
+        except (ValueError, RuntimeError) as e:
+            raise ValueError(str(e)) from e
+        if not st.get("available"):
+            return {"summary": f"Deploying physical skill '{b['name']}': {_gpu_summary(st)} Its live run starts on "
+                               f"the deployment page once the GPU is live. Call deploy_physical_skill again then for "
+                               f"the run id.", "ref_ids": [st["job"]] if st.get("job") else [], **out,
+                    "deployed": False, **_gpu_view(st)}
+        s = await skills_service.get_skill(ctx, a.skill_id)
+        run = s.get("run") or {}
+    if not run.get("live_now"):
+        raise ValueError(f"'{b['name']}' can't run live yet: {run.get('note')}")
+    seed = random.randint(skills_service.UNSEEN_FROM, 999_999)  # a layout it never trained on
+    out.update(deployment_url=_skill_url(ctx, b["skill_id"], seed), run_id=f"live_sim/{b['task']}/{seed}", seed=seed,
+               stream_path=f"/api/live-policy/sim/{b['task']}/{seed}")
+    return {"summary": f"Deploying physical skill '{b['name']}' on unseen layout {seed}. The live run plays in the "
+                       f"deployment simulator when the View deployment page opens: {out['deployment_url']}",
+            "ref_ids": [out["run_id"]], **out, "deployed": True, "gpu": st.get("gpu"),
+            "score": b["score"]}
+
+
+TOOLS.update({t.name: t for t in [
+    Tool("save_physical_skill", "After training and evaluation: name a finished checkpoint as a Physical Skill, e.g. "
+         "'Jenga v1'. It is already listed (every finished checkpoint is); this names it, and returns its id and "
+         "measured score. Find checkpoints and skills with cortex_list(kind=\"skills\").", SaveSkillArgs, t_save_skill),
+    Tool("deploy_physical_skill", "Deploy a Physical Skill: requests or attaches the Futurama GPU server (the same "
+         "safeguards as request_gpu) and sets up a live closed-loop run of the skill in the deployment simulator, "
+         "on an unseen layout. Returns deployment_url (the studio page that plays the run; share it as View "
+         "deployment) and the run id. While the GPU comes up it returns deployed=false: poll get_gpu_status, then "
+         "call it again. Find skills with cortex_list(kind=\"skills\").", DeploySkillArgs, t_deploy_skill),
+]})
