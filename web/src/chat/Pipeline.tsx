@@ -209,7 +209,7 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
           </div>
         )}
       </Tile>
-      <Tile label="Avg demo length" value={avgLen ? `${avgLen.toFixed(1)}s` : "—"} sub="simulated time" />
+      <Tile label="Avg demo length" value={avgLen ? `${avgLen.toFixed(1)}s` : "—"} sub="per accepted demo" />
       <Tile label="Policy version" value={version ?? "—"} sub={trainedIt?.checkpoint_id ?? "none trained yet"} />
       <Tile label="Model spend" value={budget.data ? `$${budget.data.spent_usd.toFixed(2)}` : "—"} sub={budget.data ? `of $${budget.data.budget_usd.toFixed(0)} approved` : undefined} />
     </div>

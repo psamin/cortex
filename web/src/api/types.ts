@@ -124,7 +124,7 @@ export interface AutopilotRun {
 }
 
 // ------------------------------------------------------------------- episodes
-export type EpisodeSource = "sim_scripted" | "sim_agent" | "sim_teleop" | "real_teleop";
+export type EpisodeSource = "sim_scripted" | "sim_agent" | "sim_teleop" | "real_teleop" | "imported";
 
 /** Who produced an episode's actions. planner: "gpt-6-astra" | "scripted_ik_oracle". */
 export interface EpisodeProvenance {
@@ -135,8 +135,16 @@ export interface EpisodeProvenance {
   attempt_id?: string;
   collection_id?: string;
   scenario?: Scenario;
+  /** imported demos: "hf:<repo>" | "upload:<name>", the dataset's task text, camera keys */
+  source?: string;
+  task?: string;
+  cameras?: string[];
   [k: string]: unknown;
 }
+
+/** Imported human demonstrations carry no simulator verdict and no known scene condition. */
+export const isImported = (e: { source?: string; provenance?: { planner?: string } }) =>
+  e.source === "imported" || /imported/i.test(e.provenance?.planner ?? "");
 export type EpisodeStatus = "recorded" | "accepted" | "rejected";
 
 export interface QualityFlag {

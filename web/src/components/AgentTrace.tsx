@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { AlertOctagon, Bot, Check, Cog, Eye, VideoOff, X } from "lucide-react";
+import { AlertOctagon, Bot, Check, Cog, Eye, UserRound, VideoOff, X } from "lucide-react";
 import { resolveMediaUrl } from "../api/client";
 import { useAgentAttempt } from "../api/hooks";
 import type { AgentAttempt, Condition, Episode, Scenario, TraceStep } from "../api/types";
@@ -27,11 +27,20 @@ export function ProvenanceBadge({
   planner,
   mode,
   source,
+  detail,
 }: {
   planner?: string | null;
   mode?: string | null;
   source?: string;
+  /** tooltip, e.g. the imported dataset's source and task */
+  detail?: string;
 }) {
+  if (/imported/i.test(planner ?? "") || source === "imported")
+    return (
+      <Badge tone="neutral" icon={<UserRound className="h-3 w-3" />} title={detail ?? "Human demonstration imported from a LeRobot dataset; not judged by the simulator"}>
+        Human demo · imported
+      </Badge>
+    );
   if (planner === "gpt-6-astra" || planner === "astra" || source === "sim_agent")
     return (
       <Badge tone="servo" icon={<Bot className="h-3 w-3" />} title="Planned by GPT-6 Astra, executed by validated IK in MuJoCo">
@@ -49,7 +58,20 @@ export function ProvenanceBadge({
 }
 
 export function EpisodeProvenance({ e }: { e: Episode }) {
-  return <ProvenanceBadge planner={e.provenance?.planner} mode={e.provenance?.mode} source={e.source} />;
+  const p = e.provenance ?? {};
+  return <ProvenanceBadge planner={p.planner} mode={p.mode} source={e.source} detail={p.source ? `${p.source}${p.task ? ` · ${p.task}` : ""}` : undefined} />;
+}
+
+/** Source repo/upload and task text of an imported demo (one muted line). */
+export function ImportedSource({ e, className }: { e: Episode; className?: string }) {
+  const p = e.provenance ?? {};
+  if (e.source !== "imported" && !/imported/i.test(p.planner ?? "")) return null;
+  return (
+    <p className={cn("truncate text-[11px] text-ink-3", className)} title={[p.source, p.task].filter(Boolean).join(" · ")}>
+      {p.source ?? "imported"}
+      {p.task ? ` · ${p.task}` : ""}
+    </p>
+  );
 }
 
 export function ScenarioChip({ scenario, condition, seed, className }: { scenario?: Scenario; condition?: Condition; seed?: number; className?: string }) {

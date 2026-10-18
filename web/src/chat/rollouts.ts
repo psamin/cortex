@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { api, ApiError, resolveMediaUrl } from "../api/client";
 import { useEpisodes, useEvaluations } from "../api/hooks";
-import type { Condition, Episode, EvaluationWithBranches, Iteration } from "../api/types";
+import { isImported, type Condition, type Episode, type EvaluationWithBranches, type Iteration } from "../api/types";
 
 /** One playable MuJoCo episode: a demonstration or an evaluation rollout. */
 export interface Rollout {
@@ -21,6 +21,10 @@ export interface Rollout {
   policy: string | null;
   iteration: number | null;
   createdAt: string;
+  /** imported human demo: no simulator verdict, no known scene condition */
+  imported: boolean;
+  source: string | null;
+  task: string | null;
 }
 
 function parseCondition(c: Condition | string | null | undefined): Condition | null {
@@ -31,7 +35,7 @@ function parseCondition(c: Condition | string | null | undefined): Condition | n
 }
 
 const plannerLabel = (p: string | null | undefined) =>
-  !p ? null : p === "scripted_ik_oracle" ? "Scripted oracle" : p === "gpt-6-astra" ? "GPT-6 Astra" : p === "claude-code" ? "Claude Code agent" : p.replace(/_/g, " ");
+  !p || /imported/i.test(p) ? null : p === "scripted_ik_oracle" ? "Scripted oracle" : p === "gpt-6-astra" ? "GPT-6 Astra" : p === "claude-code" ? "Claude Code agent" : p.replace(/_/g, " ");
 
 /** 404 → null (endpoint not shipped yet); other errors propagate. */
 async function optional<T>(fn: () => Promise<T>): Promise<T | null> {
@@ -45,6 +49,11 @@ async function optional<T>(fn: () => Promise<T>): Promise<T | null> {
 
 export function useIterations(pid: string) {
   return useQuery({ queryKey: ["iterations", pid], queryFn: () => optional(() => api.iterations(pid)), retry: 0 });
+}
+
+function importedFields(e: Episode) {
+  const imported = isImported(e);
+  return { imported, source: imported ? e.provenance?.source ?? null : null, task: imported ? e.provenance?.task ?? null : null };
 }
 
 function fromEpisodes(eps: Episode[]): Rollout[] {
@@ -65,6 +74,7 @@ function fromEpisodes(eps: Episode[]): Rollout[] {
       policy: e.provenance?.planner === "gpt-6-astra" ? "GPT-6 Astra" : "Scripted oracle",
       iteration: null,
       createdAt: e.created_at,
+      ...importedFields(e),
     }));
 }
 
@@ -89,6 +99,9 @@ function fromEvaluations(evs: EvaluationWithBranches[]): Rollout[] {
           policy,
           iteration: null,
           createdAt: run.created_at,
+          imported: false,
+          source: null,
+          task: null,
         });
   }
   return out;
@@ -100,6 +113,7 @@ export function useRollouts(pid: string) {
   const episodes = useEpisodes(pid);
   const evals = useEvaluations(pid);
   const data = useMemo<Rollout[] | undefined>(() => {
+    const epById = new Map((episodes.data ?? []).map((e) => [e.id, e]));
     if (remote.data)
       return remote.data.map((r) => ({
         kind: r.kind,
@@ -116,6 +130,7 @@ export function useRollouts(pid: string) {
         policy: r.policy ?? plannerLabel(r.planner),
         iteration: r.iteration ?? null,
         createdAt: r.created_at ?? "",
+        ...(epById.get(r.id) ? importedFields(epById.get(r.id)!) : { imported: /imported/i.test(r.planner ?? ""), source: null, task: null }),
       }));
     if (remote.isLoading || !episodes.data || !evals.data) return undefined;
     return [...fromEvaluations(evals.data), ...fromEpisodes(episodes.data)].sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));

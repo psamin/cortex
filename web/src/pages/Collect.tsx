@@ -5,7 +5,7 @@ import { Bot, Check, Circle, Cog, Dices, Layers, RotateCcw, Square, VideoOff, X 
 import { api } from "../api/client";
 import { isJobActive, useJob, useJobs, useTrackJob } from "../api/events";
 import { useEpisodeThumbs, useEpisodes, usePlanner, useProjectState, useRecommendations } from "../api/hooks";
-import { CUBE_REGIONS, LIGHTINGS, conditionKey, type Condition, type Episode, type Job, type PlanCell } from "../api/types";
+import { isImported, CUBE_REGIONS, LIGHTINGS, conditionKey, type Condition, type Episode, type Job, type PlanCell } from "../api/types";
 import {
   Badge,
   Button,
@@ -23,7 +23,7 @@ import {
 import { ConditionLabel, WorkcellGrid } from "../components/Workcell";
 import { SupportBadge, EvidenceList } from "./improve/Recommendations";
 import { AgentCollect } from "./AgentCollect";
-import { AttemptDrawer, EpisodeProvenance } from "../components/AgentTrace";
+import { AttemptDrawer, EpisodeProvenance, ImportedSource } from "../components/AgentTrace";
 import { resolveMediaUrl } from "../api/client";
 import { cn, errorMessage, pct } from "../lib/format";
 
@@ -471,7 +471,7 @@ export function QualityBadge({ score }: { score: number }) {
 }
 
 export function SuccessBadge({ s }: { s: boolean | null }) {
-  if (s === null) return <Badge title="Not labelled">success ?</Badge>;
+  if (s === null) return <Badge title="Not judged by the simulator (for example an imported human demo)">no sim verdict</Badge>;
   return s ? <Badge tone="pass">success</Badge> : <Badge tone="fault">failed</Badge>;
 }
 
@@ -586,7 +586,8 @@ function EpisodeCard({
         )}
       </div>
       <div className="space-y-1.5 p-2">
-        <ConditionLabel c={e.condition} />
+        {isImported(e) ? <span className="text-xs text-ink-3" title="Imported demos have no known scene condition">condition unknown</span> : <ConditionLabel c={e.condition} />}
+        <ImportedSource e={e} />
         <div className="flex flex-wrap items-center gap-1">
           <EpisodeProvenance e={e} />
           {e.provenance?.attempt_id && (

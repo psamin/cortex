@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, RotateCcw, Square, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, FileArchive, Paperclip, RotateCcw, Square, X } from "lucide-react";
 import { useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
 import { cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
+import { ImportRow, ImportSheet, useImporter } from "./Imports";
 import { Markdown } from "./Markdown";
 import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
 
@@ -25,6 +26,12 @@ export function Conversation({ pid }: { pid: string }) {
   const content = useRef<HTMLDivElement>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
+  const importer = useImporter(pid);
+  const [sheet, setSheet] = useState<{ mode: "file" | "hub"; file: File | null } | null>(null);
+  // drop a dataset archive anywhere on the chat column
+  const [dragging, setDragging] = useState(false);
+  const dragDepth = useRef(0);
+  const hasFiles = (e: React.DragEvent) => Array.from(e.dataTransfer.types).includes("Files");
 
   // Scroll: follow new content only while the reader is at the bottom; otherwise offer a pill.
   const stuck = useRef(true);
@@ -60,7 +67,35 @@ export function Conversation({ pid }: { pid: string }) {
   const lastRunning = [...chat.items].reverse().find((i) => i.kind === "tool" && i.status === "running");
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div
+      className="relative flex h-full min-h-0 flex-col"
+      onDragEnter={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current += 1;
+        setDragging(true);
+      }}
+      onDragOver={(e) => hasFiles(e) && e.preventDefault()}
+      onDragLeave={() => {
+        dragDepth.current = Math.max(0, dragDepth.current - 1);
+        if (!dragDepth.current) setDragging(false);
+      }}
+      onDrop={(e) => {
+        if (!hasFiles(e)) return;
+        e.preventDefault();
+        dragDepth.current = 0;
+        setDragging(false);
+        const f = e.dataTransfer.files[0];
+        if (f) setSheet({ mode: "file", file: f });
+      }}
+    >
+      {dragging && (
+        <div className="pointer-events-none absolute inset-2 z-30 flex flex-col items-center justify-center gap-2 rounded-2xl bg-bench/90 text-center shadow-[inset_0_0_0_2px_rgb(var(--servo)/.6)] backdrop-blur-sm">
+          <FileArchive className="h-8 w-8 text-servo" />
+          <p className="text-base font-medium text-ink">Drop a LeRobot dataset to import demos</p>
+          <p className="text-xs text-ink-3">.zip or .tar.gz of the dataset folder, up to 2 GB</p>
+        </div>
+      )}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-4">
         <span className="text-sm font-semibold">Agent</span>
         <div className="ml-auto">
@@ -143,7 +178,22 @@ export function Conversation({ pid }: { pid: string }) {
               ))}
             </div>
           )}
-          <Composer busy={chat.busy} onSend={chat.send} onStop={chat.stop} />
+          {sheet && (
+            <ImportSheet
+              mode={sheet.mode}
+              file={sheet.file}
+              onClose={() => setSheet(null)}
+              onUpload={(f, n) => ((stuck.current = true), importer.upload(f, n))}
+              onHub={(r, n) => ((stuck.current = true), importer.fromHub(r, n))}
+            />
+          )}
+          <Composer
+            busy={chat.busy}
+            onSend={chat.send}
+            onStop={chat.stop}
+            onAttach={(f) => setSheet({ mode: "file", file: f })}
+            onHub={() => setSheet({ mode: "hub", file: null })}
+          />
         </div>
       </div>
     </div>
@@ -177,6 +227,8 @@ function BlockView({ b, pid }: { b: Block; pid: string }) {
       return <ApprovalItem pid={pid} kind={it.approvalKind} refId={it.refId} summary={it.summary} args={it.args} />;
     case "job_done":
       return <JobDoneRow it={it} pid={pid} />;
+    case "import":
+      return <ImportRow it={it} pid={pid} />;
     case "meta":
       return (
         <div className="flex items-center gap-2 text-[11px] text-ink-4" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
@@ -382,9 +434,22 @@ function PendingApproval({ pid }: { pid: string }) {
   );
 }
 
-function Composer({ busy, onSend, onStop }: { busy: boolean; onSend: (t: string) => void; onStop: () => void }) {
+function Composer({
+  busy,
+  onSend,
+  onStop,
+  onAttach,
+  onHub,
+}: {
+  busy: boolean;
+  onSend: (t: string) => void;
+  onStop: () => void;
+  onAttach: (f: File) => void;
+  onHub: () => void;
+}) {
   const [text, setText] = useState("");
   const ref = useRef<HTMLTextAreaElement>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -402,8 +467,25 @@ function Composer({ busy, onSend, onStop }: { busy: boolean; onSend: (t: string)
         e.preventDefault();
         submit();
       }}
-      className="flex items-end gap-2 rounded-2xl bg-plate p-2 pl-4 shadow-[0_0_0_1px_var(--line-strong),0_8px_24px_-12px_rgba(0,0,0,.35)] focus-within:shadow-[0_0_0_1px_rgb(var(--servo)/.6),0_8px_24px_-12px_rgba(0,0,0,.35)]"
+      className="flex items-end gap-1.5 rounded-2xl bg-plate p-2 shadow-[0_0_0_1px_var(--line-strong),0_8px_24px_-12px_rgba(0,0,0,.35)] focus-within:shadow-[0_0_0_1px_rgb(var(--servo)/.6),0_8px_24px_-12px_rgba(0,0,0,.35)]"
     >
+      <input
+        ref={fileInput}
+        type="file"
+        accept=".zip,.tar.gz,.tgz,application/zip,application/gzip"
+        className="hidden"
+        onChange={(e) => {
+          const f = e.target.files?.[0];
+          if (f) onAttach(f);
+          e.target.value = "";
+        }}
+      />
+      <button type="button" onClick={() => fileInput.current?.click()} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-ink-3 hover:bg-rail hover:text-ink" aria-label="Attach demonstrations" title="Attach a LeRobot dataset (.zip or .tar.gz)">
+        <Paperclip className="h-4 w-4" />
+      </button>
+      <button type="button" onClick={onHub} className="flex h-9 shrink-0 items-center gap-1 rounded-xl px-2 text-xs text-ink-3 hover:bg-rail hover:text-ink" aria-label="Import from Hugging Face" title="Import demonstrations from a Hugging Face dataset">
+        <Download className="h-4 w-4" /> Hub
+      </button>
       <textarea
         ref={ref}
         rows={1}
@@ -416,7 +498,7 @@ function Composer({ busy, onSend, onStop }: { busy: boolean; onSend: (t: string)
           }
         }}
         placeholder={busy ? "The agent is working. You can queue a follow-up…" : "Ask the agent…"}
-        className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-[15px] leading-6 text-ink placeholder:text-ink-4 focus:outline-none"
+        className="max-h-[200px] min-h-[24px] flex-1 resize-none bg-transparent px-1 py-1.5 text-[15px] leading-6 text-ink placeholder:text-ink-4 focus:outline-none"
         aria-label="Message the agent"
       />
       {busy && !text.trim() ? (

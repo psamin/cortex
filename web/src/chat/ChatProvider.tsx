@@ -3,7 +3,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, streamAgent } from "../api/client";
 import { errorMessage } from "../lib/format";
 import { useChatStream } from "../api/events";
-import { applyEvent, historyToEvents, jobDoneEvent, type ChatEvent, type ChatItem } from "./model";
+import { applyEvent, historyToEvents, jobDoneEvent, newItemId, type ChatEvent, type ChatItem } from "./model";
 
 interface ChatState {
   items: ChatItem[];
@@ -19,7 +19,12 @@ interface ChatState {
   stop: () => void;
   reset: () => Promise<void>;
   reload: () => void;
+  /** local rows (e.g. a demo upload) that live only in this tab until the job's job_done line lands */
+  addImport: (item: Omit<ImportItem, "id" | "kind">) => number;
+  patchImport: (id: number, patch: Partial<ImportItem>) => void;
 }
+
+type ImportItem = Extract<ChatItem, { kind: "import" }>;
 
 const Ctx = createContext<ChatState | null>(null);
 
@@ -165,8 +170,17 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     setItems([]);
   }, [pid, stop]);
 
+  const addImport = useCallback((item: Omit<ImportItem, "id" | "kind">) => {
+    const id = newItemId();
+    setItems((xs) => [...xs, { ...item, kind: "import", id }]);
+    return id;
+  }, []);
+  const patchImport = useCallback((id: number, patch: Partial<ImportItem>) => {
+    setItems((xs) => xs.map((it) => (it.kind === "import" && it.id === id ? { ...it, ...patch, kind: "import", id } : it)));
+  }, []);
+
   return (
-    <Ctx.Provider value={{ items, loading, loadError, busy, status, turnStartedAt, resultTick, send, stop, reset, reload: load }}>
+    <Ctx.Provider value={{ items, loading, loadError, busy, status, turnStartedAt, resultTick, send, stop, reset, reload: load, addImport, patchImport }}>
       {children}
     </Ctx.Provider>
   );
