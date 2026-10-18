@@ -19,6 +19,8 @@ from typing import Any
 
 import numpy as np
 
+from ..errors import worker_error
+
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
 from ..sim.viewer import VIEW_H as PREVIEW_H  # noqa: F401  (presentation video size, re-exported)
 from ..sim.viewer import VIEW_W as PREVIEW_W  # noqa: F401
@@ -205,9 +207,8 @@ def main() -> None:
         (Path(cfg.get("out_dir") or cfg["live_dir"]) / "result.json").write_text(json.dumps(res))
         emit(type="result", ok=True)
     except Exception as e:  # report, then fail the process
-        import traceback
 
-        emit(type="result", ok=False, error=f"{type(e).__name__}: {e}", trace=traceback.format_exc()[-2000:])
+        emit(type="result", ok=False, **worker_error(e))
         sys.exit(1)
 
 

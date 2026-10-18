@@ -22,6 +22,8 @@ from typing import Any
 
 import numpy as np
 
+from ..errors import worker_error
+
 from ..sim.manipulation import ManipulationSession
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
 from ..sim.viewer import DemoCamera
@@ -122,7 +124,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        import traceback
 
-        emit(type="result", ok=False, error=f"{type(e).__name__}: {e}", trace=traceback.format_exc()[-2000:])
+        emit(type="result", ok=False, **worker_error(e))
         sys.exit(1)

@@ -20,6 +20,8 @@ from typing import Any
 
 import numpy as np
 
+from ..errors import worker_error
+
 
 def emit(**kw: Any) -> None:
     print(json.dumps(kw, default=str), flush=True)
@@ -116,7 +118,6 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        import traceback
 
-        emit(type="result", ok=False, error=f"{type(e).__name__}: {e}", trace=traceback.format_exc()[-1500:])
+        emit(type="result", ok=False, **worker_error(e))
         sys.exit(1)

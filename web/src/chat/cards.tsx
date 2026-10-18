@@ -438,7 +438,11 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
   const live = useJob(id);
   const q = useJobQuery(id, !live || isJobActive(live));
   const j = live ?? q.data;
-  if (!j) return q.isLoading ? <Loading large={large} /> : null;
+  if (!j) {
+    if (q.isLoading) return <Loading large={large} />;
+    if (q.isError) return <p className="py-1 text-xs text-ink-3">This job's record is no longer available (it ran before Cortex kept job history across restarts).</p>;
+    return null;
+  }
   if (j.status === "succeeded" && j.result_ref && prefixOf(j.result_ref) !== "job") return <ResultCard pid={pid} refId={j.result_ref} large={large} />;
   const active = isJobActive(j);
   return (

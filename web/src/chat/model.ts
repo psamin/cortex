@@ -29,7 +29,7 @@ export type ChatItem =
   /** A demo import started from this studio (not in agent history): upload progress, then the live job card. */
   | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; jobId?: string }
   /** Written by Cortex (not the LLM) when a background job finishes. */
-  | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[] };
+  | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[]; detail?: string | null; superseded?: boolean };
 
 export type ChatEvent =
   | { type: "user"; text: string }
@@ -40,7 +40,7 @@ export type ChatEvent =
   | { type: "done"; turns?: number | null; cost_usd?: number | null; duration_ms?: number | null; is_error?: boolean | null }
   | { type: "status"; state: string; tool?: string }
   | { type: "error"; message: string }
-  | { type: "job_done"; job_id: string; job_kind: string; status: string; text: string; ref_ids: string[] };
+  | { type: "job_done"; job_id: string; job_kind: string; status: string; text: string; ref_ids: string[]; detail?: string | null; superseded?: boolean };
 
 // ------------------------------------------------------------------ friendly labels
 const LABELS: Record<string, string> = {
@@ -192,7 +192,13 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
     case "job_done":
       // the same line can arrive live (SSE) and again from history: one row per job
       if (items.some((it) => it.kind === "job_done" && it.jobId === ev.job_id)) return items;
-      return [...items, { kind: "job_done", id: id(), jobId: ev.job_id, jobKind: ev.job_kind, status: ev.status, text: ev.text, refIds: ev.ref_ids ?? [] }];
+      {
+        // a success makes earlier failures of the same kind history: they stop showing
+        const prior = ev.status === "succeeded"
+          ? items.map((it) => (it.kind === "job_done" && it.status === "failed" && it.jobKind === ev.job_kind ? { ...it, superseded: true } : it))
+          : items;
+        return [...prior, { kind: "job_done", id: id(), jobId: ev.job_id, jobKind: ev.job_kind, status: ev.status, text: ev.text, refIds: ev.ref_ids ?? [], detail: ev.detail ?? null, superseded: !!ev.superseded }];
+      }
     case "status":
       return items;
   }
@@ -241,6 +247,8 @@ export function jobDoneEvent(r: Record<string, unknown>): ChatEvent {
     status: String(r.status ?? "succeeded"),
     text: String(r.text ?? ""),
     ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [],
+    detail: typeof r.detail === "string" ? r.detail : null,
+    superseded: r.superseded === true,
   };
 }
 

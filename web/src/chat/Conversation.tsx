@@ -297,7 +297,9 @@ const REF_NOUN: Record<string, string> = { ds: "dataset", ev: "evaluation", ac: 
 
 /** A background job finished: one fixed line written by Cortex, with links to what it produced. */
 function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; pid: string }) {
+  const [showDetail, setShowDetail] = useState(false);
   const status = it.status === "succeeded" ? "ok" : it.status === "cancelled" ? "cancelled" : "error";
+  if (it.superseded) return null; // a later run of the same kind succeeded: the old failure is history
   return (
     <div className="enter flex items-start gap-2.5 py-1">
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
@@ -305,6 +307,14 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
       </span>
       <div className="min-w-0 flex-1">
         <p className={cn("text-sm leading-snug", status === "error" ? "text-fault" : "text-ink-2")}>{it.text}</p>
+        {it.detail && (
+          <button type="button" onClick={() => setShowDetail((o) => !o)} className="mt-0.5 text-xs text-ink-3 hover:text-ink-2">
+            {showDetail ? "Hide details" : "Details"}
+          </button>
+        )}
+        {it.detail && showDetail && (
+          <pre className="mt-1 max-h-40 overflow-auto whitespace-pre-wrap rounded-md bg-rail px-2 py-1.5 font-mono text-[11px] text-ink-3">{it.detail}</pre>
+        )}
         {it.refIds.length > 0 && (
           <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
             {it.refIds.map((r) => {
