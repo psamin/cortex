@@ -89,16 +89,13 @@ def _remember(hist: list[dict[str, Any]], event: str, data: dict[str, Any]) -> N
 
 
 async def _emit(hist: list[dict[str, Any]], events: AsyncIterator[tuple[str, dict[str, Any]]]) -> AsyncIterator[str]:
-    """Stream guide events as SSE and keep them in the history (text is joined into one assistant turn)."""
-    said: list[str] = []
+    """Stream guide events as SSE and keep them in the history, in order."""
     async for event, data in events:
         if event == "text":
-            said.append(data["delta"])
+            hist.append({"role": "assistant", "content": data["delta"]})
         else:
             _remember(hist, event, data)
         yield _sse(event, data)
-    if said:
-        hist.append({"role": "assistant", "content": " ".join(said)})
 
 
 async def chat(ctx: Ctx, pid: str, message: str, patch: dict[str, Any] | None = None) -> AsyncIterator[str]:
