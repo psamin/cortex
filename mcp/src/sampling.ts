@@ -207,7 +207,7 @@ export function registerSampling(server: MCPServer) {
             hypotheses: z.array(hypothesis).min(1).max(3).optional().describe("up to 3 hypotheses"),
             error: z.string().max(300).optional().describe("instead of hypotheses: why you could not assess this episode"),
           }),
-        ).min(1).max(6),
+        ).min(1).max(6).describe("one entry per episode from cortex_get_diagnosis_inputs (1-6)"),
       }),
       annotations: { title: "Submit failure hypotheses", ...WRITE },
     },
