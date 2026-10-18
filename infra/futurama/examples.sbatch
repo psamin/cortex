@@ -10,7 +10,7 @@ set -euo pipefail
 JOB_DIR="$1"; [ -d "$JOB_DIR" ] || JOB_DIR="${JOB_DIR/#\/nethome\//\/nethome-instruction\/}"
 cd "$JOB_DIR"
 SCR="/dev/shm/cortex-${SLURM_JOB_ID}"; mkdir -p "$SCR"; trap 'rm -rf "$SCR"' EXIT INT TERM
-export UV_CACHE_DIR="$SCR/uv" HF_HOME="$SCR/hf" MUJOCO_GL=egl PYOPENGL_PLATFORM=egl PYTHONPATH="$JOB_DIR/code" PATH="$SCR/bin:$HOME/.local/bin:$PATH"
+export UV_CACHE_DIR="$SCR/uv" HF_HOME="$SCR/hf" CORTEX_CACHE="$SCR/cache" MUJOCO_GL=egl PYOPENGL_PLATFORM=egl PYTHONPATH="$JOB_DIR/code" PATH="$SCR/bin:$HOME/.local/bin:$PATH"
 command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | env UV_INSTALL_DIR="$SCR/bin" UV_NO_MODIFY_PATH=1 sh
 uv venv -q --python 3.12 "$SCR/venv"; source "$SCR/venv/bin/activate"
 uv pip install -q "lerobot[dataset,training,smolvla]==0.6.1" "mujoco>=3.3.7"
