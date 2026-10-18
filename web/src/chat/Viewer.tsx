@@ -57,6 +57,7 @@ export function Viewer({
   pid,
   goal,
   asked,
+  sceneDigest,
   activity,
   sel,
 }: {
@@ -64,6 +65,8 @@ export function Viewer({
   goal: string;
   /** the user's request when the simulated task differs from it */
   asked?: string | null;
+  /** the scene built from the user's prompt, shown until there are videos */
+  sceneDigest?: string | null;
   activity: { label: string; busy: boolean } | null;
   sel: ViewerSelection;
 }) {
@@ -209,7 +212,15 @@ export function Viewer({
           </div>
         ) : !current ? (
           <div className="relative flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-            <SketchScene width={300} label="SCENE" value="NO ROLLOUTS" className="mb-2" />
+            {sceneDigest && !(rollouts.data ?? []).length ? (
+              <div className="mb-2 h-[min(55%,360px)]">
+                <Frame>
+                  <img src={api.sceneFrameUrl(pid, sceneDigest)} alt="The simulation built from your prompt, top camera" className="h-full w-auto object-contain" />
+                </Frame>
+              </div>
+            ) : (
+              <SketchScene width={300} label="SCENE" value="NO ROLLOUTS" className="mb-2" />
+            )}
             <p className="kn-display text-[28px] text-ink">{(rollouts.data ?? []).length ? "No matches" : "No videos yet"}</p>
             <p className="max-w-sm text-xs leading-5 text-ink-3">Ask the agent to collect demos.</p>
           </div>

@@ -105,11 +105,11 @@ export function ProjectChatPage() {
         <div className="min-w-0 flex-1">
           <Viewer pid={pid} goal={state.data?.project.spec.goal ?? state.data?.project.task_prompt ?? "…"}
             asked={
-              // the simulator only has the cube-and-bowl scene: say so when the request was about something else
-              state.data && state.data.project.spec.objects[0] && !state.data.project.task_prompt.toLowerCase().includes(state.data.project.spec.objects[0].toLowerCase())
+              // without a scene built from the prompt the sim is the cube tabletop: say so when the request was about something else
+              state.data && !state.data.project.scene && state.data.project.spec.objects[0] && !state.data.project.task_prompt.toLowerCase().includes(state.data.project.spec.objects[0].toLowerCase())
                 ? state.data.project.task_prompt
                 : null
-            } activity={activity} sel={sel} />
+            } sceneDigest={state.data?.project.scene?.digest ?? null} activity={activity} sel={sel} />
         </div>
       </div>
       <Pipeline pid={pid} open={pipelineOpen} onToggle={() => setPipelineOpen(!pipelineOpen)} sel={sel} />
