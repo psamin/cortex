@@ -574,6 +574,7 @@ const TOOLS: Def[] = [
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
       "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface.\n" +
       "USE WHEN: the user describes a custom scene (their own objects, place zones, cameras or obstacles). SO-101 arm, simulated only.\n" +
+      "Moving conveyors and assembly lines are supported: describe the belt in environment.conveyors and put the object `on` it.\n" +
       "USE INSTEAD: cortex_create_policy_project for the built-in tabletop pick-and-place scene (the fast path).\n" +
       "NEXT: cortex_update_intake until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
@@ -593,6 +594,7 @@ const TOOLS: Def[] = [
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
       "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. Unknown " +
       "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
+      "Moving conveyors: environment.conveyors is a list of {name, start: [x, y], end: [x, y] (the direction of travel), width (m), height (belt top above the table, m), speed_mps (m/s)}, merged by `name`; an object with `on: '<conveyor>'` starts on that belt and rides it (a missed object falls off the end). The feasibility report from cortex_build_simulation gives the reachable intercept window along the belt.\n" +
       "NEXT: call again until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
       project_id: projectId,
