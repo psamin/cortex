@@ -29,7 +29,7 @@ export function RefChip({ pid, id }: { pid: string; id: string }) {
       type="button"
       disabled={!to}
       onClick={() => to && nav(to)}
-      className="rounded-sm bg-rail px-1.5 py-px font-mono text-[10.5px] text-ink-2 shadow-[0_0_0_1px_var(--line)] hover:text-servo disabled:cursor-default disabled:hover:text-ink-2"
+      className="rounded-sm border border-line-strong bg-plate px-1.5 py-px font-mono text-[10.5px] text-ink-2 hover:border-ink hover:text-ink disabled:cursor-default disabled:hover:border-line-strong disabled:hover:text-ink-2"
       title={to ? `Open ${id}` : id}
     >
       {id}
