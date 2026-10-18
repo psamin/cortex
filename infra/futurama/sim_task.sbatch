@@ -2,6 +2,7 @@
 # Sim-only policies for the hand-built tasks (issue #161), on one GPU (EGL rendering + training).
 #   MODE=demos TASK=jenga EPISODES=200 sbatch -J sim-demos sim_task.sbatch <job_dir>
 #   (faster: PARTS=4 PART=0..3 on four GPUs, then MODE=merge with --dependency=afterok:<the four>)
+#   practice layouts: LAYOUTS=N (seeds 0..N-1) or LAYOUT_SEEDS=0+2+5 ('+' because sbatch --export splits on commas)
 #       -> <job_dir>/<task>/dataset (oracle demos, LeRobotDataset v3) and <task>/examples/*.mp4
 #   MODE=train TASK=jenga VARIANT=act STEPS=30000 sbatch -J sim-act sim_task.sbatch <job_dir>
 #       -> <job_dir>/<task>/runs/<variant>/ checkpoints, then eval/<step>/ closed-loop metrics + videos
@@ -44,7 +45,7 @@ if [ "$MODE" = demos ]; then  # SHARDS recorders in parallel, then one dataset
     rm -rf "$OUTS/shard$g"
     ex=(); [ "$g" = 0 ] && [ "$P" = 1 ] && ex=(--examples "$T/examples")  # multi-part: use examples.sbatch
     python -m cortex.sim.tasks.run demos "$TASK" "$OUTS/shard$g" --episodes "${EPISODES:-200}" \
-      --size "${SIZE:-240x320}" --shard "$g" --shards $((N * P)) --noise-deg "${NOISE_DEG:-2.0}" --layouts "${LAYOUTS:-0}" "${ex[@]}" \
+      --size "${SIZE:-240x320}" --shard "$g" --shards $((N * P)) --noise-deg "${NOISE_DEG:-2.0}" --layouts "${LAYOUTS:-0}" --layout-seeds "${LAYOUT_SEEDS:-}" "${ex[@]}" \
       > "$OUTS/shard$g.log" 2>&1 &
     pids+=($!); roots+=("$OUTS/shard$g")
   done
@@ -96,6 +97,6 @@ echo "[sim] TRAINING_DONE"
 for ck in "$OUT"/checkpoints/[0-9]*/pretrained_model; do
   step=$(basename "$(dirname "$ck")")
   python -m cortex.sim.tasks.run evaluate "$TASK" "$ck" "$OUT/eval/$step" --episodes "${EVAL_EPISODES:-50}" \
-    --size "${SIZE:-240x320}" --videos "${EVAL_VIDEOS:-4}" --layouts "${LAYOUTS:-0}" "${CAMS[@]}" | tail -1
+    --size "${SIZE:-240x320}" --videos "${EVAL_VIDEOS:-4}" --layouts "${LAYOUTS:-0}" --layout-seeds "${LAYOUT_SEEDS:-}" "${CAMS[@]}" | tail -1
 done
 echo "[sim] EVAL_DONE"
