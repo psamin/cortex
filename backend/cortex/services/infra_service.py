@@ -68,7 +68,7 @@ async def options(ctx: Ctx, project: Project) -> dict[str, Any]:
         "walltime_min": {"min": 15, "max": 24 * 60, "note": "Futurama's general partition allows up to 1 day"},
         "evaluation": [
             opt("local_mujoco", "MuJoCo on this machine (parallel conditions)", True),
-            opt("futurama", "MuJoCo on Futurama", False, "not available yet (issue #17)"),
+            opt("futurama", "MuJoCo on Futurama", False, "not built yet; see issue #17"),
         ],
         "robot": [
             opt("sim", "Simulated SO-101 (MuJoCo)", True),

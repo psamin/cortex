@@ -621,6 +621,46 @@ class ImportArgs(BaseModel):
     max_episodes: int = Field(10, ge=1, le=50)
 
 
+class InfraArgs(BaseModel):
+    project_id: str
+
+
+class SetInfraArgs(BaseModel):
+    project_id: str
+    planner: Literal["auto", "claude_code", "model"] | None = None
+    training_backend: Literal["auto", "futurama_slurm", "manual"] | None = None
+    training_gres: Literal["gpu:l40s:1", "gpu:l40:1", "gpu:l4:1", "gpu:h200:1"] | None = None
+    training_walltime_min: int | None = Field(None, ge=15, le=24 * 60)
+
+
+def _infra_summary(out: dict[str, Any]) -> str:
+    c = out["choice"]
+    lines = [f"Chosen: planner {c['planner']}, training {c['training_backend']} on {c['training_gres']} for "
+             f"{c['training_walltime_min']} min."]
+    for group in ("planner", "training_backend", "evaluation", "robot"):
+        for o in out[group]:
+            lines.append(f"- {group} / {o['label']}: " + ("available" if o["available"] else f"unavailable ({o['reason']})"))
+    return "\n".join(lines)
+
+
+async def t_get_infra(ctx, a, actor):
+    from . import infra_service
+
+    out = await infra_service.options(ctx, await get_project(ctx, a.project_id))
+    return {"summary": _infra_summary(out), "ref_ids": [], **out}
+
+
+async def t_set_infra(ctx, a, actor):
+    from ..models import InfraChoice
+    from . import infra_service
+
+    p = await get_project(ctx, a.project_id)
+    update = {k: v for k, v in a.model_dump().items() if k != "project_id" and v is not None}
+    await infra_service.set_choice(ctx, p, InfraChoice.model_validate({**p.infra.model_dump(), **update}), actor)
+    out = await infra_service.options(ctx, p)
+    return {"summary": "Saved. " + _infra_summary(out), "ref_ids": [], **out}
+
+
 async def t_import(ctx, a, actor):
     from . import import_service
 
@@ -675,6 +715,11 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "conditions.", AgentArgs.EvalLearned, t_eval_learned),
     Tool("import_demonstrations", "Import existing human/robot demonstrations from a LeRobot dataset on the Hugging "
          "Face Hub (the user's own SO-101 recordings or public ones). Returns job_id.", ImportArgs, t_import),
+    Tool("get_infrastructure", "Where this project's stages run: planner, training backend (Futurama GPU or manual), "
+         "GPU and walltime, evaluation and robot, each with live availability and the reason when unavailable.",
+         InfraArgs, t_get_infra),
+    Tool("set_infrastructure", "Change this project's infrastructure choices (planner, training backend, GPU, "
+         "walltime). Only stores the choice: training still needs the human's approval.", SetInfraArgs, t_set_infra),
     Tool("robot_start_episode", "Start a simulated SO-101 episode you will control yourself (fresh seed; optional cube "
          "region/lighting). Returns session_id.", RobotArgs.Start, t_robot_start, agent_callable=False),
     Tool("robot_act", "Run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, "
