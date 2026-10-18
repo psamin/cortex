@@ -170,7 +170,9 @@ async def check_budget(ctx: Ctx, project: Project, req: StartAgentCollectionRequ
 # ------------------------------------------------------------------ start
 
 async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollectionRequest,
-                           actor: str = "gui") -> AgentCollection:
+                           actor: str = "gui", cycles: int = 0) -> AgentCollection:
+    """``cycles`` (behind a flag until the request model carries it) runs the cycle protocol instead of
+    independent attempts: demo, reset and recover segments in one sim, each segment an attempt."""
     if project.mode != "sim":
         raise SimulationOnly("Autonomous collection runs in simulation only; physical robots need the local "
                               "hardware adapter with an operator present.")
@@ -179,6 +181,9 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
     # the scripted oracle always reads simulator object poses, so it is privileged by construction
     mode = "privileged" if req.collector == "oracle" else (req.mode or project.autopilot.planning_mode)
     if req.collector == "agent" and await use_claude_code(ctx, req):
+        if cycles:
+            raise ValueError("cycle collection with the Claude Code planner is not supported yet; "
+                             "use planner='model' or collector='oracle'")
         return await _start_claude_code_collection(ctx, project, req, actor)
     planner = resolve_planner(ctx) if req.collector == "agent" else None
     if req.collector == "agent" and planner is None:
@@ -200,10 +205,23 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
     attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
                              seed=base_seed + i, scenario=s, status="failed", mode=mode,
                              provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
+    cycle = None
+    if cycles:
+        from .intake_service import scene_payload
+        from .recording_service import reset_policy_for
+
+        if scene_payload(ctx, project) is None:
+            raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
+        cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
+                 "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
+        col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
+        attempts = []  # one attempt per segment, created as the worker reports them
     await ctx.repo.save("agent_collections", col)
     await ctx.audit(actor, "start_agent_collection", project.id,
                     {**req.model_dump(mode="json"), "budget_cap_usd": cap, "provider": col.provider,
-                     "model": col.model, "mode": mode}, "ok", f"{col.id}: {req.num_demos} {req.collector} attempts")
+                     "model": col.model, "mode": mode, "cycles": cycles}, "ok",
+                    f"{col.id}: " + (f"{cycles} {req.collector} cycles" if cycles else
+                                     f"{req.num_demos} {req.collector} attempts"))
 
     async def run(job: Job) -> str:
         col.status, col.job_id = "running", job.id
@@ -213,6 +231,9 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
 
         async def on_event(ev: dict[str, Any]) -> None:
             t = ev.get("type")
+            if cycle is not None and t in ("segment_start", "segment", "operator_reset_required", "cycles_done"):
+                await _on_cycle_event(ctx, project, col, attempts, ev, blur_ref, job)
+                return
             if t == "episode_start":  # oracle worker: same shape as the agent's attempt_start
                 a = attempts[ev["index"]]
                 ev = {"type": "attempt_start", "index": ev["index"], "total": ev["total"], "seed": a.seed,
@@ -250,6 +271,8 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                                "reasoning_effort": "low"},
                    "attempts": [{"seed": a.seed, "scenario": a.scenario.model_dump(),
                                  "out_dir": str(ctx.local(attempt_key(a)))} for a in attempts]}
+            if cycle is not None:
+                cfg.update(cycle, attempts=[{"seed": base_seed, "scenario": scenarios[0].model_dump()}])
             await ctx.jobs.run_worker(job, "cortex.workers.agent_worker", cfg,
                                       ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event,
                                       env={"CORTEX_PLANNER_API_KEY": planner["api_key"]})  # type: ignore[index]
@@ -260,6 +283,8 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                    "episodes": [{"seed": a.seed, "condition": a.scenario.condition.model_dump(),
                                  "scenario": a.scenario.model_dump(), "out_dir": str(ctx.local(attempt_key(a)))}
                                 for a in attempts]}
+            if cycle is not None:
+                cfg.update(cycle, condition=scenarios[0].condition.model_dump(), episodes=[])
             await ctx.jobs.run_worker(job, "cortex.workers.sim_worker", cfg,
                                       ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
         if col.status == "running":
@@ -341,6 +366,47 @@ def attempt_key(a: AgentAttempt, name: str = "") -> str:
     return f"projects/{a.project_id}/attempts/{a.id}/{name}".rstrip("/")
 
 
+def cycle_root(project_id: str, collection_id: str) -> str:
+    return f"projects/{project_id}/cycles/{collection_id}"
+
+
+async def _on_cycle_event(ctx: Ctx, project: Project, col: AgentCollection, attempts: list[AgentAttempt],
+                          ev: dict[str, Any], blur_ref: float | None, job: Job) -> None:
+    """Cycle protocol: each segment is an attempt; successful ones become episodes tagged with the segment."""
+    t, n = ev["type"], 2 * col.totals["cycles"]["requested"]
+    if t == "segment_start":
+        live = LIVE.setdefault(col.id, {"index": None, "start": None, "steps": []})
+        live.update(index=ev["segment_index"], start=ev, steps=[])
+        ctx.bus.publish(project.id, "agent_step", {"collection_id": col.id, **ev, "index": ev["segment_index"]})
+        ctx.jobs.update(job, message=f"{col.collector} cycle {ev['cycle'] + 1}/{n // 2}: {ev['segment']}",
+                        progress=min(0.99, ev["segment_index"] / n))
+    elif t == "segment":
+        k = ev["segment_index"]
+        a = AgentAttempt(project_id=project.id, collection_id=col.id, index=k, collector=col.collector,
+                         seed=col.request.base_seed or 0, scenario=Scenario(), status="failed", mode=col.mode,
+                         provider=col.provider, model=col.model)
+        if col.scenarios:
+            a.seed = int(col.scenarios[0]["seed"])
+            a.scenario = Scenario.model_validate({k2: v for k2, v in col.scenarios[0].items() if k2 != "seed"})
+        attempts.append(a)
+        if not ev.get("success"):
+            ev = {**ev, "stop_reason": ev.get("stop_reason") or ev.get("failure_reason")}
+        from .recording_service import segment_provenance
+
+        seg = {"segment": ev["segment"], "provenance": segment_provenance(col.id, ev, col.totals["cycles"]["reset_policy"])}
+        await _record_attempt(ctx, project, col, a, ev, blur_ref,
+                              base=f"{cycle_root(project.id, col.id)}/seg_{k:03d}", segment=seg)
+        cnt = col.totals["cycles"]["segments"].setdefault(ev["segment"], {"attempts": 0, "successes": 0})
+        cnt["attempts"] += 1
+        cnt["successes"] += int(bool(ev.get("success")))
+        await _save(ctx, col)
+    elif t == "operator_reset_required":
+        col.totals["stopped_reason"] = ev["reason"]
+    elif t == "cycles_done":
+        col.totals["cycles"].update(done=ev["cycles"], recorded=ev["recorded"], stop_reason=ev["stop_reason"])
+        await _save(ctx, col)
+
+
 def _empty_totals(cap: float) -> dict[str, Any]:
     return {"attempts": 0, "successes": 0, "failures": 0, "model_calls": 0, "cost_usd": 0.0, "recoveries": 0,
             "tool_errors": 0, "sim_seconds": 0.0, "wall_s": 0.0, "cells": {}, "budget_cap_usd": cap}
@@ -353,7 +419,13 @@ def _summary(col: AgentCollection) -> str:
 
 
 async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: AgentAttempt, ev: dict[str, Any],
-                          blur_ref: float | None) -> None:
+                          blur_ref: float | None, base: str | None = None,
+                          segment: dict[str, Any] | None = None) -> None:
+    """``base``: the storage prefix of the attempt's files (default attempts/<id>/); ``segment``: the
+    cycle-protocol tag and provenance for the episode a successful segment becomes."""
+    def key(name: str) -> str:
+        return f"{base}/{name}" if base else attempt_key(a, name)
+
     success = bool(ev.get("success"))
     a.status = "success" if success else "failed"
     a.usage = ev.get("usage") or {}
@@ -367,13 +439,13 @@ async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: A
     a.trace_len = int(ev.get("trace_len") or 0)
     a.endpoint = ev.get("endpoint")
     if a.collector == "oracle":
-        (ctx.local(attempt_key(a)) / "trace.json").write_text(json.dumps(
+        (ctx.local(key("trace.json"))).write_text(json.dumps(
             {"planner": "scripted_ik_oracle", "seed": a.seed, "scenario": a.scenario.model_dump(), "trace": [],
              "note": "the scripted oracle has no tool trace; it follows fixed IK waypoints from simulator state"}))
     for kind, name in (("episode", "episode.npz"), ("front", "front.mp4"), ("thumb", "thumb.jpg"),
                        ("trace", "trace.json")):
-        if ctx.local(attempt_key(a, name)).exists():
-            a.artifacts[kind] = attempt_key(a, name)
+        if ctx.local(key(name)).exists():
+            a.artifacts[kind] = key(name)
             await ctx.publish_file(a.artifacts[kind])
     if success and "episode" in a.artifacts and a.num_frames:
         eps = await list_episodes(ctx, project.id)
@@ -383,7 +455,9 @@ async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: A
                      artifacts={k: v for k, v in a.artifacts.items() if k in ("episode", "front", "thumb")},
                      provenance={"planner": a.model if a.collector == "agent" else "scripted_ik_oracle",
                                  "provider": a.provider, "model": a.model, "mode": a.mode,
-                                 "attempt_id": a.id, "collection_id": col.id, "scenario": a.scenario.model_dump()})
+                                 "attempt_id": a.id, "collection_id": col.id, "scenario": a.scenario.model_dump(),
+                                 **(segment or {}).get("provenance", {})},
+                     segment=(segment or {}).get("segment", "demo"))
         ep.quality = quality_for(ctx, ep, blur_ref)
         if ep.quality.score >= AUTO_ACCEPT_MIN_SCORE:
             ep.status = EpisodeStatus.accepted

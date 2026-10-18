@@ -118,3 +118,47 @@ Error bodies carry a `code`:
 - 503 `{detail, code: "planner_unavailable"}`.
 
 `StartAgentCollectionRequest.task` optionally overrides the planner's task text. Oracle collections are recorded with `mode: "privileged"`.
+
+## Cycle protocol (PRODUCT_SPEC 3.2)
+
+A cycle is a **demo** segment (home → pick the object from its start → place it in the task zone → home)
+followed by a **reset** segment (home → pick it from the zone → place it at the next start → home). The next
+demo starts wherever the reset left the object; only the first placement of a run teleports the object, and
+that teleport is labelled as the operator's reset. After a failed segment a **recover** segment puts the object
+back at a valid start; if recovery fails twice, the run ends with `stop_reason` set.
+
+Where a reset puts the object comes from the intake's `task.reset_policy`:
+- `return_to_origin`: the object's nominal start;
+- `cycle_zones`: the extra place zones (`task.place[1:]`) in turn;
+- `random_zone`: a seeded random extra zone, or, without extra zones, a seeded random reachable spot 3–5 cm
+  from the origin.
+
+Each successful segment is its own episode (the same `episode.npz` layout), with `Episode.segment` set to
+`demo`, `reset` or `recover` (existing episodes default to `demo`). Its `provenance` carries `run_id`,
+`cycle_id`, `cycle`, `segment_index`, `goal`, `target`, `start_pose`, `end_pose` and `reset_policy`. Failed
+segments are kept as diagnostics (video and `result.json`, plus an `AgentAttempt` for collections) and never
+become episodes.
+
+`CreateDatasetVersionRequest.segments` picks which segments go into a dataset version. The default is
+`["demo", "reset"]`, so recover segments are excluded unless asked for. The choice and the per-segment counts are
+written to the dataset lineage (`meta/cortex_lineage.json`, key `segments`).
+
+Starting a run (service level for now; the request models don't carry it yet):
+`recording_service.start_recording(..., cycles=N)` for the scripted oracle, and
+`agent_collection_service.start_collection(..., cycles=N)` for either collector. Both need the project's intake
+scene.
+
+**Worker events** (JSON lines on the worker's stdout, next to the existing `episode_start` / `episode` /
+`progress`):
+
+| `type` | Fields |
+|---|---|
+| `operator_reset` | `reason`, `pose`: the run's first placement (a sim teleport standing in for the operator) |
+| `segment_start` | `cycle`, `segment`, `segment_index`, `goal`, `target` (`{zone}` or `{xy, label}`), `total_cycles`, `start_pose` |
+| `segment` | the same fields plus `success`, `recorded`, `steps`, `num_frames`, `failure_reason`, `end_pose`, `wall_s`, `out_dir` |
+| `operator_reset_required` | `reason`, `pose`: recovery failed twice |
+| `cycles_done` | `cycles`, `segments`, `recorded`, `by_segment` (`{demo, reset, recover}` counts), `stop_reason`, `reset_policy` |
+
+A pose is `{xyz, yaw, upright, arm}` (object position in metres, yaw in radians, arm joints in degrees).
+Agent collections relay `segment_start` on the project stream as `agent_step` (with `index` = `segment_index`),
+and each segment's `AgentAttempt` as `agent_attempt`.
