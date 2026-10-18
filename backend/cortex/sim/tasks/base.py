@@ -13,6 +13,7 @@ successful episodes. Oracle protocol: ``reset(env, obs, seed)``, ``act(obs) -> (
 from __future__ import annotations
 
 import hashlib
+import os
 import tempfile
 import xml.etree.ElementTree as ET  # nosec B405 - our own pinned file
 from pathlib import Path
@@ -62,7 +63,10 @@ class TaskEnv(PickPlaceEnv):
         out = Path(tempfile.gettempdir()) / "cortex_tasks"
         out.mkdir(parents=True, exist_ok=True)
         path = out / f"{self.name}_{hashlib.sha256(xml.encode()).hexdigest()[:12]}.xml"
-        path.write_text(xml)
+        if not path.exists():  # parallel recorders share this file: write it whole, then move it into place
+            tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+            tmp.write_text(xml)
+            os.replace(tmp, path)
         super().__init__(height=height, width=width, episode_steps=self.max_steps, scene=str(path),
                          instruction=self.instruction)
 

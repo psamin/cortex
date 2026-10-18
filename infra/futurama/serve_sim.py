@@ -56,6 +56,7 @@ def best_checkpoints(sim_dir: Path) -> dict[str, dict[str, Any]]:
 
 
 def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
+    """Every task's best checkpoint on the GPU, each with its own sim. Runs in the sim process (see Sims)."""
     from cortex.sim.policies import LeRobotPolicy
     from cortex.sim.tasks import make
 
@@ -68,14 +69,13 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
         env, _ = make(task, 240, 320)
         policy = LeRobotPolicy(info["checkpoint"], device="cuda", task=env.instruction,
                                cameras=CAMERAS.get(info["variant"]))
-        out[task] = {**info, "task": task, "policy": policy, "instruction": env.instruction, "max_steps": env.max_steps}
-        env.close()  # the worker thread builds its own (EGL contexts belong to their thread)
+        out[task] = {**info, "task": task, "policy": policy, "env": env, "instruction": env.instruction,
+                     "max_steps": env.max_steps}
         where = f"{info['layouts']} practice layouts" if info.get("layouts") else "unseen layouts"
         score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} runs over {where}"
                  if info["success_rate"] is not None else "score pending")
         print(f"[serve] sim {task}: {info['variant']} step {info['step']}, {score}", flush=True)
     return out
-
 
 def visible_seed(task: str, env, seed: int) -> int:
     """For the live demo, the bolt in its brightest trained finish (brass) so people can see it. Brass is one of
@@ -113,13 +113,24 @@ def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> 
     return buf.getvalue()
 
 
-def _episode(p: dict[str, Any], env, seed: int, cancel, fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
-    """(jpeg, step, inference ms, success) per shown frame, at real time, until done, out of steps or cancelled.
-    Runs on the worker thread with the env that thread built."""
+VIEWS = ("both", "front", "wrist")
+
+
+def _view(obs: dict[str, Any], view: str) -> np.ndarray:
+    """The live view, from the policy's own cameras (already rendered every step), scaled up. A second MuJoCo
+    renderer in this process drew garbage under headless EGL, so the live view adds no renderer of its own."""
+    cam = obs["pixels"]["wrist" if view == "wrist" else "front"]
+    img = np.asarray(Image.fromarray(cam).resize((640, 480), Image.BILINEAR))
+    return _inset(img, obs["pixels"]["wrist"]) if view == "both" else img
+
+
+def _episode(p: dict[str, Any], seed: int, stop, view: str = "both",
+             fps: int = 30) -> Iterator[tuple[bytes, int, float, bool]]:
+    """(jpeg, step, inference ms, success) per shown frame, at real time, until done, out of steps or stopped."""
     import torch
     from cortex.sim.tasks.run import SETTLE
 
-    policy = p["policy"]
+    policy, env = p["policy"], p["env"]
     if p.get("layout_seeds"):
         seed = p["layout_seeds"][seed % len(p["layout_seeds"])]  # a practice layout it was trained on
     elif p.get("layouts"):
@@ -128,96 +139,149 @@ def _episode(p: dict[str, Any], env, seed: int, cancel, fps: int = 30) -> Iterat
         seed = visible_seed(p["task"], env, seed)
     obs = env.reset(seed)
     policy.reset(env, obs, seed)
-    # The live view is the policy's own front camera (already rendered every step), scaled up, with its wrist camera
-    # inset. A second MuJoCo renderer in this process drew garbage under headless EGL (mujoco.Renderer does not
-    # re-select its GL context after the env's renderer runs), so the live view adds no renderer of its own.
     held = 0
-    try:
-        for step in range(env.max_steps):
-            if cancel.is_set():
-                return
-            t0 = time.perf_counter()
-            action = policy.act(obs)
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            ms = (time.perf_counter() - t0) * 1000
-            if step % 2:  # 15 fps of video is plenty and halves the bandwidth; the policy still runs every step
-                obs, _, success, _, _ = env.step(action)
-                held = held + 1 if success else 0
-                if held >= 3 * SETTLE:
-                    break
-                time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
-                continue
-            front = Image.fromarray(obs["pixels"]["front"]).resize((640, 480), Image.BILINEAR)
-            frame = _inset(np.asarray(front), obs["pixels"]["wrist"])
-            obs, _, success, _, _ = env.step(action)
-            held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
+    t_act = t_step = t_frame = 0.0
+    steps = 0
+    success = False
+    for step in range(env.max_steps):
+        if stop():
+            break
+        t0 = time.perf_counter()
+        action = policy.act(obs)
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        t1 = time.perf_counter()
+        ms = (t1 - t0) * 1000
+        shown = step % 2 == 0  # 15 fps of video is plenty and halves the bandwidth; the policy still runs every step
+        frame = _view(obs, view) if shown else None
+        t2 = time.perf_counter()
+        obs, _, success, _, _ = env.step(action)
+        t3 = time.perf_counter()
+        t_act, t_step, t_frame, steps = t_act + t1 - t0, t_step + t3 - t2, t_frame + t2 - t1, steps + 1
+        held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
+        if frame is not None:
             status = ("Task complete (verified by the simulator)", (110, 220, 130)) if success else (
                 "Running", (200, 200, 200))
             jpg = _overlay(frame, [
                 (TITLES.get(p["task"], p["task"]), (240, 240, 240)),
                 (f"{p['variant'].upper()} trained only in sim  ·  "
-                 + (f"practice layout {seed}" if p.get("layouts") else f"unseen layout (seed {seed})"), (160, 200, 255)),
+                 + (f"practice layout {seed}" if p.get("layouts") or p.get("layout_seeds")
+                    else f"unseen layout (seed {seed})"), (160, 200, 255)),
                 (f"step {step}  ·  inference {ms:5.1f} ms on GPU", (160, 200, 255)),
                 status])
             yield jpg, step, ms, success
-            if held >= 3 * SETTLE:
-                break
-            time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
-    finally:
-        pass
+        if held >= 3 * SETTLE:
+            break
+        time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
+    n = max(steps, 1)
+    print(f"[serve] sim {p['task']} layout {seed}: {steps} steps, success={success}, per step: act "
+          f"{t_act / n * 1000:.1f} ms, sim+render {t_step / n * 1000:.1f} ms, frame {t_frame / n * 1000:.1f} ms",
+          flush=True)
 
-# ---------------------------------------------------------------- one thread owns MuJoCo / OpenGL
+
+# ---------------------------------------------------------------- the sims run in their own process
 #
-# MuJoCo's EGL contexts are bound to the thread that made them, and building or freeing one on a request thread
-# while another run is ending aborted the server. So one long-lived worker thread builds every sim once, runs
-# every episode, and hands JPEG frames to the request thread through a queue. A new run cancels the current one.
+# MuJoCo's renderer aborted the whole server (SIGABRT in Renderer.render) when it ran on a worker thread next to
+# the HTTP threads, and every stream died with it until the job was resubmitted (#307). So the policies and sims
+# live in a child process that does everything on its main thread, like the recording and evaluation jobs, and if
+# it dies anyway the next run restarts it. Runs are numbered: starting one bumps the number, and the child drops
+# any run that is no longer current (a newer run, or a viewer that left).
 
-import queue
-import threading
+import multiprocessing as mp  # noqa: E402
+import queue  # noqa: E402
+import threading  # noqa: E402
 
-_JOBS: queue.Queue[tuple] = queue.Queue()
-_CURRENT: dict[str, Any] = {"cancel": None}
-_ENVS: dict[str, Any] = {}
+_MP = mp.get_context("spawn")  # never fork a process that holds CUDA / EGL state
+INFO = ("task", "variant", "step", "success_rate", "eval_episodes", "eval_seeds", "instruction", "max_steps",
+        "layouts", "layout_seeds")
+LOOP = 50  # layouts per stream: after each episode it resets onto the next practice layout
 
 
-def _worker(policies: dict[str, dict[str, Any]]) -> None:
-    from cortex.sim.tasks import make
-
-    for task in policies:  # built here, on the thread that will render them
-        _ENVS[task], _ = make(task, 240, 320)
-    while True:
-        task, seed, out, cancel = _JOBS.get()
-        p = policies[task]
+def _put(q, item, stop) -> bool:
+    while not stop():
         try:
-            for item in _episode(p, _ENVS[task], seed, cancel):
-                while not cancel.is_set():  # never block forever on a viewer that left
-                    try:
-                        out.put(item, timeout=1)
-                        break
-                    except queue.Full:
-                        continue
-                if cancel.is_set():
-                    break
-        except Exception as e:  # noqa: BLE001 - report it to the viewer, keep the worker alive
-            print(f"[serve] sim {task} run failed: {type(e).__name__}: {e}", flush=True)
-        try:
-            out.put(None, timeout=1)
+            q.put(item, timeout=1)
+            return True
         except queue.Full:
-            pass
+            continue
+    return False
 
 
-def start_worker(policies: dict[str, dict[str, Any]]) -> None:
-    threading.Thread(target=_worker, args=(policies,), daemon=True, name="sim-worker").start()
+def _child(sim_dir: str, jobs, frames, info, gen) -> None:
+    import torch
+
+    torch.set_num_threads(4)
+    policies = load(Path(sim_dir))
+    info.put({t: {k: p.get(k) for k in INFO} for t, p in policies.items()})
+    while True:
+        g, task, seed, view = jobs.get()
+
+        def stop(g=g):
+            return gen.value != g
+
+        try:
+            for i in range(LOOP):
+                for item in _episode(policies[task], seed + i, stop, view):
+                    if not _put(frames, (g, item), stop):
+                        break
+                if stop():
+                    break
+        except Exception as e:  # noqa: BLE001 - report it, keep the process serving
+            print(f"[serve] sim {task} run failed: {type(e).__name__}: {e}", flush=True)
+        _put(frames, (g, None), stop)
 
 
-def submit(task: str, seed: int) -> tuple[queue.Queue, threading.Event]:
-    """Queue a run; the run before it (if any) is cancelled. Returns (frames, cancel)."""
-    if _CURRENT["cancel"] is not None:
-        _CURRENT["cancel"].set()
-    out: queue.Queue = queue.Queue(maxsize=60)
-    cancel = threading.Event()
-    _CURRENT["cancel"] = cancel
-    _JOBS.put((task, seed, out, cancel))
-    return out, cancel
+class Sims:
+    """The HTTP server's handle on the sim process."""
 
+    def __init__(self, sim_dir: Path):
+        self.sim_dir = str(sim_dir)
+        self.gen = _MP.Value("i", 0)
+        self.lock = threading.Lock()
+        self.info: dict[str, dict[str, Any]] = {}
+        self._spawn()
+
+    def _spawn(self) -> None:
+        self.jobs, self.frames, info = _MP.Queue(), _MP.Queue(maxsize=30), _MP.Queue()
+        self.proc = _MP.Process(target=_child, args=(self.sim_dir, self.jobs, self.frames, info, self.gen),
+                                daemon=True, name="sims")
+        self.proc.start()
+        while True:
+            try:
+                self.info = info.get(timeout=5)
+                return
+            except queue.Empty:
+                if not self.proc.is_alive():
+                    raise RuntimeError(f"the sim process exited ({self.proc.exitcode}) while loading") from None
+
+    def run(self, task: str, seed: int, view: str = "both") -> Iterator[tuple[bytes, int, float, bool]]:
+        """Frames of a new run; any older run stops. Ends when the run does, or when the caller closes it."""
+        with self.lock:
+            if not self.proc.is_alive():
+                print(f"[serve] sim process exited ({self.proc.exitcode}); restarting it", flush=True)
+                self._spawn()
+            with self.gen.get_lock():
+                self.gen.value += 1
+                mine = self.gen.value
+            frames = self.frames
+            self.jobs.put((mine, task, seed, view if view in VIEWS else "both"))
+        idle = 0
+        try:
+            while self.gen.value == mine:
+                try:
+                    g, item = frames.get(timeout=1)
+                except queue.Empty:
+                    idle += 1
+                    if idle > 120 or not self.proc.is_alive():
+                        return
+                    continue
+                idle = 0
+                if g != mine:
+                    continue  # left over from an older run
+                if item is None:
+                    return
+                yield item
+        finally:
+            with self.gen.get_lock():
+                if self.gen.value == mine:
+                    self.gen.value += 1  # the viewer left: stop the run
