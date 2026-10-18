@@ -2,7 +2,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState, ty
 import { useQueryClient } from "@tanstack/react-query";
 import { api, ApiError, streamAgent } from "../api/client";
 import { errorMessage } from "../lib/format";
-import { applyEvent, historyToEvents, type ChatEvent, type ChatItem } from "./model";
+import { useChatStream } from "../api/events";
+import { applyEvent, historyToEvents, jobDoneEvent, type ChatEvent, type ChatItem } from "./model";
 
 interface ChatState {
   items: ChatItem[];
@@ -43,7 +44,13 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
         ok: d.ok as boolean | undefined,
       };
     case "approval_required":
-      return { type: "approval_required", kind: String(d.kind ?? "training"), ref_id: String(d.ref_id ?? ""), summary: String(d.summary ?? ""), args: (d.args as Record<string, unknown>) ?? {} };
+      return {
+        type: "approval_required",
+        kind: String(d.card_kind ?? d.kind ?? "training"),
+        ref_id: String(d.training_job_id ?? d.ref_id ?? ""),
+        summary: String(d.summary ?? ""),
+        args: (d.args as Record<string, unknown>) ?? {},
+      };
     case "done":
       return { type: "done", turns: d.turns as number, cost_usd: d.cost_usd as number, duration_ms: d.duration_ms as number, is_error: d.is_error as boolean };
     case "status":
@@ -86,6 +93,13 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     load();
     return () => abort.current?.abort();
   }, [load]);
+
+  // Cortex-written lines (job finished, …) arrive on the project event stream, outside agent turns
+  useChatStream((entry) => {
+    if (entry.kind !== "job_done") return;
+    setItems((xs) => applyEvent(xs, jobDoneEvent(entry)));
+    qc.invalidateQueries({ predicate: (q) => q.queryKey.includes(pid) });
+  });
 
   const run = useCallback(
     async (text: string) => {
