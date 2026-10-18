@@ -16,7 +16,7 @@ Cortex is an open-source (MIT) MCP server and studio for training robot policies
 
 MCP: `cortex.create_project` · REST: `POST /api/tools/create_project`
 
-Create a robot-learning project from a natural-language task; returns task spec, success criteria and an initial demonstration plan.
+Create a project for the built-in cube task only (for any other object use start_intake); returns task spec, success criteria and an initial demonstration plan.
 
 Arguments:
 
@@ -67,7 +67,7 @@ JSON schema:
 
 MCP: `cortex.record_demonstrations` · REST: `POST /api/tools/record_demonstrations`
 
-Record scripted-expert demonstrations in MuJoCo for the given conditions (simulation only).
+Record scripted-expert demonstrations in MuJoCo for the given conditions (simulation only; cube_region applies to the built-in cube task only).
 
 Arguments:
 
@@ -446,7 +446,7 @@ JSON schema:
 
 MCP: `cortex.robot_start_episode` · REST: `POST /api/tools/robot_start_episode` · agent_callable: false
 
-Start a simulated SO-101 episode you will control yourself (fresh seed; optional cube region/lighting). Returns session_id.
+Simulated arm (MuJoCo, no hardware): start an SO-101 episode you will control yourself (fresh seed; optional cube region/lighting). Returns session_id.
 
 Arguments:
 
@@ -465,7 +465,7 @@ JSON schema:
 
 MCP: `cortex.robot_observe`, `cortex.robot_state`, `cortex.robot_propose_grasp`, `cortex.robot_move`, `cortex.robot_gripper`, `cortex.robot_verify_grasp`, `cortex.robot_place`, `cortex.robot_check_success` · REST: `POST /api/tools/robot_act` · agent_callable: false
 
-Run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, move_end_effector, set_gripper, verify_grasp, place_object, check_task_success).
+Simulated arm (MuJoCo, no hardware): run one validated robot tool in your session (observe_scene, get_robot_state, propose_grasp, move_end_effector, set_gripper, verify_grasp, place_object, check_task_success).
 
 Arguments:
 
@@ -483,7 +483,7 @@ JSON schema:
 
 MCP: `cortex.robot_finish_episode` · REST: `POST /api/tools/robot_finish_episode` · agent_callable: false
 
-End your episode; the simulator judges success and successes become demonstrations.
+Simulated arm (MuJoCo, no hardware): end your episode; the simulator judges success and successes become demonstrations.
 
 Arguments:
 
@@ -541,12 +541,12 @@ Answer intake questions by merging a partial spec. Returns the merged spec, what
 Arguments:
 
 - `project_id` (string, required)
-- `patch` (object, required): Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name.
+- `patch` (object, required): Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table.
 
 JSON schema:
 
 ```json
-{"properties":{"project_id":{"type":"string"},"patch":{"additionalProperties":true,"description":"Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name.","type":"object"}},"required":["project_id","patch"],"type":"object"}
+{"properties":{"project_id":{"type":"string"},"patch":{"additionalProperties":true,"description":"Partial intake spec to merge. Each open question carries a ready-to-send patch; lists of objects/zones/cameras/obstacles merge by name. Sizes in metres: box = [x, y, z] full extents, cylinder = [diameter, height] (not radius), sphere = [diameter]. Positions: +x away from the arm base, +y to its left, z up from the table.","type":"object"}},"required":["project_id","patch"],"type":"object"}
 ```
 
 ### get_intake_status
@@ -585,7 +585,7 @@ JSON schema:
 
 MCP: `cortex.capture_frame` · REST: `POST /api/tools/capture_frame`
 
-Render a scene camera (top, front, wrist_cam) so you can check the sim matches the real setup you described.
+Render a scene camera (valid: top, front, wrist_cam) so you can check the sim matches the real setup you described.
 
 Arguments:
 
