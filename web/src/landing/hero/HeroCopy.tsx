@@ -13,6 +13,7 @@ export function HeroCopy() {
       </div>
 
       <h1
+        id="hero-title"
         className="reveal mt-5 kn-serif sm:mt-7 text-[clamp(2.6rem,5.4vw,5.1rem)] font-light leading-[1.02] tracking-[-0.022em] text-[#171717]"
         style={{ animationDelay: "160ms" }}
       >
