@@ -89,6 +89,22 @@ export async function callTool(tool: string, args: Json, signal?: AbortSignal): 
 
   if (res.ok && body !== undefined) {
     const refs = ids(data);
+    if (typeof data.image_b64 === "string" && data.image_b64) {
+      // Camera image for the agent to look at. Claude Code shows the model structuredContent
+      // instead of content when both exist, so image results carry no structuredContent.
+      const { image_b64, ...rest } = data;
+      const result = (rest.result ?? {}) as Json;
+      return {
+        content: [
+          ...text(
+            String(rest.summary ?? `cortex.${tool} ok`),
+            typeof rest.image_kind === "string" && `image: ${rest.image_kind}`,
+            `result: ${JSON.stringify(result).slice(0, 1500)}`,
+          ),
+          { type: "image", data: image_b64 as string, mimeType: "image/jpeg" },
+        ],
+      };
+    }
     return {
       content: text(
         String(data.summary ?? `cortex.${tool} ok`),
