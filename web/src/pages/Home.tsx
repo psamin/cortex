@@ -52,9 +52,6 @@ export function HomePage() {
           <br />
           <span className="kn-second">robot learn?</span>
         </h1>
-        <p className="mt-5 max-w-[34rem] text-[15px] leading-[1.65] text-ink-2">
-          Describe a skill. Cortex collects demonstrations in simulation, trains a policy, tests it, and keeps improving it.
-        </p>
         <form
           onSubmit={(e) => {
             e.preventDefault();

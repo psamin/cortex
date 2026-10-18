@@ -36,10 +36,6 @@ export function EvaluationsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-3">
-          Each evaluation runs three sim branches in parallel local worker processes: baseline, shifted object, and changed lighting. Success rates
-          carry 95% confidence intervals; with small n they are wide.
-        </p>
         <Button variant="primary" size="sm" onClick={() => setOpen(true)}>
           <Play className="h-3.5 w-3.5" /> Launch evaluation
         </Button>

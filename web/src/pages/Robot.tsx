@@ -24,9 +24,6 @@ export function RobotPage() {
     <div className="space-y-4 px-5 py-5">
       <div>
         <h1 className="kn-display text-[36px] leading-tight">Real SO-101 arm</h1>
-        <p className="mt-0.5 text-sm text-ink-3">
-          Teleop recording and policy runs on the physical arm. Every run needs a human approval here and a held deadman; nothing moves on its own.
-        </p>
       </div>
       {status.isLoading ? (
         <Skeleton className="h-40 w-full" />

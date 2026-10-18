@@ -203,7 +203,6 @@ export function Viewer({
           <div className="relative flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
             <SketchScene width={300} label="FIG.02 / SCENE" value="NO ROLLOUTS YET" className="mb-2" />
             <p className="kn-display text-[28px] text-ink">{(rollouts.data ?? []).length ? "Nothing matches this filter." : "No simulation videos yet."}</p>
-            <p className="max-w-sm text-xs leading-5 text-ink-3">Ask the agent to collect demonstrations. The robot appears here live while it works.</p>
           </div>
         ) : compare && counterpart ? (
           <CompareStage a={current} b={counterpart} camera={camera} />
@@ -215,9 +214,6 @@ export function Viewer({
       {/* selector */}
       {!showLive && filtered.length > 0 && (
         <div className="relative border-t border-line bg-bench">
-          <p className="px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
-            Newest first · ✓ succeeded (checked by the simulator) · ✗ failed · not judged: human demos have no simulator verdict
-          </p>
           <div className="flex gap-1.5 overflow-x-auto px-4 pb-2.5 pt-1.5 scroll-thin">
             {filtered.slice(0, 80).map((r) => (
               <button
@@ -487,50 +483,30 @@ function Hud({
         </div>
       </div>
       {rollout && (
-        <dl className="flex min-w-0 max-w-[50%] shrink flex-col items-stretch gap-1.5 pt-0.5 font-mono text-[10.5px] uppercase tracking-[0.1em]">
-          <Readout k="By">{rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who}</Readout>
-          {(rollout.imported || rollout.condition) && (
-            <Readout k={rollout.imported ? "Data" : "Cond"} title={[rollout.source, rollout.task].filter(Boolean).join(" · ") || undefined}>
-              {rollout.imported ? `${rollout.source ?? "imported dataset"}${rollout.task ? ` · “${rollout.task}”` : ""}` : rollout.condition ? conditionWords(rollout.condition) : ""}
-            </Readout>
-          )}
-          <Readout k="Result" tone={rollout.success === null ? "text-ink-2" : rollout.success ? "text-pass" : "text-fault"}>
-            {rollout.success === null ? "Not judged by the simulator" : rollout.success ? "Success, verified by the simulator" : `Failed${rollout.failureMode ? `: ${rollout.failureMode.replace(/_/g, " ")}` : ""}`}
-          </Readout>
-          {aug && (
-            <Readout k="Aug" title={aug.tip}>
-              <span className="cursor-help border-b border-dotted border-ink-3">
-                +{aug.n} augmented {aug.n === 1 ? "copy" : "copies"} (training only)
-              </span>
-            </Readout>
-          )}
-          <Readout k="Run">
-            {[rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null, rollout.frames ? `${rollout.frames} frames` : null, rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null]
-              .filter(Boolean)
-              .join(" · ") || "—"}
-          </Readout>
-          {cam && (
-            <Readout k="Cam" title={cam.detail}>
-              {cam.label}
-              {cam.detail ? <span className="normal-case tracking-normal text-ink-3"> · {cam.detail}</span> : ""}
-            </Readout>
-          )}
-        </dl>
+        <p
+          className="min-w-0 max-w-[50%] shrink truncate pt-0.5 font-mono text-[11px] uppercase tracking-[0.08em] text-ink-2"
+          title={[
+            rollout.origin === "oracle" ? "Scripted oracle (uses simulator state)" : rollout.who,
+            rollout.imported ? [rollout.source, rollout.task].filter(Boolean).join(" · ") : null,
+            rollout.seed !== null && rollout.seed >= 0 ? `seed ${rollout.seed}` : null,
+            rollout.frames ? `${rollout.frames} frames` : null,
+            cam ? `${cam.label}${cam.detail ? `: ${cam.detail}` : ""}` : null,
+            aug?.tip ?? null,
+          ].filter(Boolean).join("\n")}
+        >
+          {[
+            rollout.origin === "oracle" ? "Oracle" : rollout.who,
+            rollout.imported ? (rollout.source ?? "imported") : rollout.condition ? conditionWords(rollout.condition) : null,
+            rollout.durationS ? `${rollout.durationS.toFixed(1)} s` : null,
+            aug ? `+${aug.n} aug` : null,
+          ].filter(Boolean).join(" · ")}
+          {" · "}
+          <span className={rollout.success === null ? "text-ink-3" : rollout.success ? "text-pass" : "text-fault"}>
+            {rollout.success === null ? "not judged" : rollout.success ? "✓ success" : `✗ ${rollout.failureMode ? rollout.failureMode.replace(/_/g, " ") : "failed"}`}
+          </span>
+        </p>
       )}
     </div>
   );
 }
 
-/** One mono readout with a callout leader drawn towards the frame (a node, a diagonal and a run). */
-function Readout({ k, tone, title, children }: { k: string; tone?: string; title?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 items-center justify-end gap-2" title={title}>
-      <svg aria-hidden width="34" height="12" viewBox="0 0 34 12" className="sk-svg hidden shrink-0 md:block">
-        <path d="M3 10 L11 2 L34 2" className="sk-leader" fill="none" />
-        <circle cx="3" cy="10" r="2.2" className="sk-node" />
-      </svg>
-      <dt className="shrink-0 text-ink-3">{k}</dt>
-      <dd className={cn("min-w-0 truncate text-ink", tone)}>{children}</dd>
-    </div>
-  );
-}

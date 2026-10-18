@@ -50,10 +50,6 @@ export function DatasetsTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-3">
-          Immutable dataset versions in LeRobot format. Augmented copies always point back to their source episode, and the
-          train/eval split is made over source episodes so copies never leak into eval.
-        </p>
         <Button variant="primary" size="sm" onClick={() => setOpen(true)}>
           <Plus className="h-3.5 w-3.5" /> New version
         </Button>

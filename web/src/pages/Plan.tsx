@@ -103,7 +103,6 @@ export function ProjectSpecView({ project }: { project: Project }) {
             );
           }}
         />
-        <p className="mt-3 text-2xs text-ink-3">Collected / target demos per condition. Columns are where the cube starts, rows are the lighting.</p>
       </Panel>
     </div>
   );

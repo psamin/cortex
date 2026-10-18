@@ -50,9 +50,6 @@ export function AnalyzePage() {
       <div className="flex items-end justify-between gap-4">
         <div>
           <h1 className="kn-display text-[36px] leading-tight">Analyze</h1>
-          <p className="mt-0.5 text-sm text-ink-3">
-            Measured quality checks plus VLM diagnoses. Diagnoses are hypotheses until you confirm them.
-          </p>
         </div>
       </div>
 

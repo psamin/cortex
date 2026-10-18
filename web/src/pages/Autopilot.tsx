@@ -212,11 +212,6 @@ export function AutopilotHero({ project }: { project: Project }) {
         </div>
       ) : !run ? (
         <div className="px-4 py-6">
-          <p className="max-w-[560px] text-sm text-ink-2">
-            Autopilot runs the whole loop for you: collect demos, check quality, build a dataset, train, evaluate in three
-            sim branches, and decide what to collect next. It stops at your target success rate or round limit, and only
-            pauses for things outside your standing approvals.
-          </p>
         </div>
       ) : (
         <>

@@ -153,7 +153,6 @@ export function Conversation({ pid }: { pid: string }) {
                   <br />
                   <span className="kn-second">do next?</span>
                 </p>
-                <p className="mt-4 max-w-[30rem] text-sm leading-6 text-ink-2">The agent collects demonstrations, trains, tests, and improves the policy. It asks before anything costs money or needs a GPU.</p>
               </div>
             )}
             {blocks.map((b, i) => (

@@ -122,9 +122,7 @@ export function RecommendationsTab() {
         <ErrorState error={state.error} onRetry={() => state.refetch()} />
       ) : ranked.length === 0 ? (
         <Panel>
-          <EmptyState title="No open recommendations" action={<Button size="sm" onClick={() => refresh.mutate()}>Generate recommendations</Button>}>
-            Recommendations are computed from plan coverage, episode quality, failure clusters, and evaluation results.
-          </EmptyState>
+          <EmptyState title="No open recommendations" action={<Button size="sm" onClick={() => refresh.mutate()}>Generate recommendations</Button>}></EmptyState>
         </Panel>
       ) : (
         <ol className="space-y-2.5">

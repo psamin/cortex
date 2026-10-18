@@ -400,9 +400,6 @@ function FailureAnalysis({ pid, iterations, sel }: { pid: string; iterations: It
     <div className="min-w-0">
       <div className="kn-label kn-label-rule"><span>Failure analysis</span></div>
       <p className="mt-2.5 text-sm text-ink-2">No learned-policy failures to analyze yet.</p>
-      <p className="mt-1 text-xs text-ink-3">
-        When a trained policy fails a test condition, Cortex explains it here, generates targeted demonstrations for that condition, and trains the next version.
-      </p>
     </div>
   );
 }
