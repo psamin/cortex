@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useState } from "react";
 import { NavLink, Outlet, useLocation, useMatch, useNavigate, useParams } from "react-router-dom";
-import { ArrowLeft, Camera, FlaskConical, Joystick, LayoutDashboard, Server, MessagesSquare, ScanSearch, Sparkles, type LucideIcon } from "lucide-react";
+import { ArrowLeft, Camera, FlaskConical, Joystick, LayoutDashboard, Server, MessagesSquare, ScanSearch, Boxes, type LucideIcon } from "lucide-react";
 import { ProjectEventsProvider } from "../api/events";
 import { ChatProvider, useChat } from "../chat/ChatProvider";
 import { ChatHistoryPanel, ChatHistoryPanelCtx } from "../chat/ChatHistoryPanel";
@@ -102,7 +102,7 @@ function ManualRail({ pid, historyOpen, onChat }: { pid: string; historyOpen: bo
         onClick={onChat}
         expanded={historyOpen}
       />
-      <RailLink to="/studio/skills" label="Physical Skills" hint="Every policy you've trained, ready to run live" icon={Sparkles} />
+      <RailLink to="/studio/skills" label="Physical Skills" hint="Every policy you've trained, ready to run live" icon={Boxes} />
       <div className="my-2 h-px w-6 bg-[var(--line)]" />
       <span className="pb-1 font-mono text-[8.5px] uppercase tracking-[0.06em] text-ink-3">Manual</span>
       {SECTIONS.map((s) => (

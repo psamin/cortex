@@ -1,7 +1,7 @@
 import { BRAND } from "../landing/brand";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Outlet, useMatch } from "react-router-dom";
-import { ChevronDown, Sparkles } from "lucide-react";
+import { ChevronDown } from "lucide-react";
 import { ThemeToggle } from "../components/ThemeToggle";
 import { describeProvider } from "../components/HealthPills";
 import { useEngine, useHealth, useProjects } from "../api/hooks";
@@ -145,12 +145,10 @@ export function AppShell() {
           </Link>
           <Link
             to="/studio/skills"
-            className={cn("inline-flex h-7 items-center gap-1.5 rounded-full px-2.5 text-[13px] hover:text-ink", onSkills ? "bg-rail text-ink" : "text-ink-2")}
+            className={cn("inline-flex h-7 items-center rounded-full px-2.5 text-[13px] hover:text-ink", onSkills ? "bg-rail text-ink" : "text-ink-2")}
             title="Every policy you've trained, ready to run live"
-            aria-label="Physical Skills"
           >
-            <Sparkles className="h-3.5 w-3.5" strokeWidth={1.5} />
-            <span className="hidden sm:inline">Physical Skills</span>
+            Physical Skills
           </Link>
           <Link
             to="/studio/agents"
