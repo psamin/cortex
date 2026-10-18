@@ -44,6 +44,8 @@ if [ -n "${POLICY_PATH:-}" ]; then
 fi
 EXTRA=()
 [ -f rename_map.json ] && EXTRA+=(--rename_map="$(cat rename_map.json)")
+# Train split only: the dataset also holds the held-out eval episodes (episodes.txt is "[0,2,5]").
+[ -f episodes.txt ] && EXTRA+=(--dataset.episodes="$(cat episodes.txt)")
 lerobot-train \
   --dataset.repo_id="$REPO_ID" --dataset.root="$SCR/dataset" \
   "${POLICY_ARGS[@]}" --policy.device=cuda --policy.push_to_hub=false "${EXTRA[@]}" \

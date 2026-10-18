@@ -15,12 +15,11 @@ import mujoco
 import numpy as np
 
 from .scene import SceneInfo
-from .so101 import LIGHT_SCALE, PickPlaceEnv, Variation
+from .so101 import LIGHT_SCALE, SETTLED_SPEED, PickPlaceEnv, Variation  # noqa: F401  (SETTLED_SPEED re-exported)
 
 REST_TOL_Z = 0.012  # object centre within this of its resting height
 UPRIGHT_COS = 0.98  # cylinder axis within ~11 degrees of vertical (a 20 degree lean fails)
 FACE_DOWN_COS = 0.9  # a box rests on some face
-SETTLED_SPEED = 0.02  # m/s: faster is falling or being carried, not resting
 ZONE_MARGIN = 0.005
 
 
@@ -44,8 +43,6 @@ class SceneEnv(PickPlaceEnv):
         self.cube = mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, self.info.objects[self.pick])
         self.cube_qadr = w._free_qadr(self.cube)
         self.parked = []  # the upstream cubes are parked by the generated scene itself
-        grip = {mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, b) for b in ("gripper", "moving_jaw_so101_v1")}
-        self.gripper_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] in grip}
         self.obj_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] == self.cube}
         self.others = {n: w._free_qadr(mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, b))
                        for n, b in self.info.objects.items() if n != self.pick}
@@ -117,19 +114,6 @@ class SceneEnv(PickPlaceEnv):
         R = self.world.data.xmat[self.cube].reshape(3, 3)
         half = self.world.model.geom_size[min(self.obj_geoms)]
         return float(half[int(np.argmax(np.abs(R[2, :])))])
-
-    def held(self) -> bool:
-        d = self.world.data
-        for i in range(d.ncon):
-            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
-            if (g1 in self.gripper_geoms and g2 in self.obj_geoms) or (g2 in self.gripper_geoms and g1 in self.obj_geoms):
-                return True
-        return False
-
-    def settled(self) -> bool:
-        m = self.world.model
-        dof = m.jnt_dofadr[m.body_jntadr[self.cube]]
-        return bool(np.linalg.norm(self.world.data.qvel[dof:dof + 3]) < SETTLED_SPEED)
 
     def resting(self) -> bool:
         p = self.cube_pos()

@@ -42,6 +42,8 @@ REGION_XY = {
 REGION_JITTER = 0.015
 LIGHT_SCALE = {"dim": 0.3, "normal": 1.0, "bright": 2.0}
 PARKED = [(0.6, 1.0, -0.735), (0.7, 1.0, -0.735), (0.8, 1.0, -0.735)]
+SETTLED_SPEED = 0.02  # m/s: faster is falling or being carried, not resting
+GRIPPER_BODIES = ("gripper", "moving_jaw_so101_v1")
 
 
 @lru_cache
@@ -108,6 +110,9 @@ class PickPlaceEnv:
         self.cube_qadr = w._free_qadr(self.cube)
         self.parked = [w._free_qadr(b) for b in w.cube_bodies[1:]]
         self.site = mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_SITE, "gripperframe")
+        grip = {mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, b) for b in GRIPPER_BODIES}
+        self.gripper_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] in grip}
+        self.obj_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] == self.cube}
         self._light0 = (w.model.light_diffuse.copy(), w.model.vis.headlight.diffuse.copy(),
                         w.model.vis.headlight.ambient.copy())
 
@@ -156,12 +161,28 @@ class PickPlaceEnv:
         q = self.world.data.xquat[self.cube]
         return float(np.arctan2(2 * (q[0] * q[3] + q[1] * q[2]), 1 - 2 * (q[2] ** 2 + q[3] ** 2)))
 
+    def held(self) -> bool:
+        """The gripper touches the object."""
+        d = self.world.data
+        for i in range(d.ncon):
+            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
+            if (g1 in self.gripper_geoms and g2 in self.obj_geoms) or (g2 in self.gripper_geoms and g1 in self.obj_geoms):
+                return True
+        return False
+
+    def settled(self) -> bool:
+        m = self.world.model
+        dof = m.jnt_dofadr[m.body_jntadr[self.cube]]
+        return bool(np.linalg.norm(self.world.data.qvel[dof:dof + 3]) < SETTLED_SPEED)
+
     def in_box(self) -> bool:
+        """Task success: the cube is inside the box, released and still (a held cube is not success)."""
         w = self.world
         center, rot = w.data.xpos[w.box_body], w.data.xmat[w.box_body].reshape(3, 3)
         local = (w.data.xpos[self.cube] - center) @ rot
         return bool(np.all(np.abs(local[:2]) < self.module.BOX_INNER_HALF)
-                    and local[2] < self.module.IN_BOX_MAX_HEIGHT)
+                    and local[2] < self.module.IN_BOX_MAX_HEIGHT
+                    and self.settled() and not self.held())
 
     def reward(self) -> float:
         """1.0 when the cube rests in the box, else shaped progress in [0, 0.75)."""

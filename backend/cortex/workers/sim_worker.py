@@ -128,6 +128,8 @@ def rollout(env: PickPlaceEnv, policy, obs: dict[str, Any], seed: int, max_steps
             if (settle_max is None and settle >= SETTLE_STEPS) or (
                     settle_max is not None and (success or settle >= settle_max)):
                 break
+        else:
+            settle = 0  # consecutive steps only: a momentary success doesn't end the episode
     steps = step + 1
     c, b = env.cube_pos(), env.box_pos()
     final_dist = float(np.linalg.norm(c[:2] - b[:2]))
