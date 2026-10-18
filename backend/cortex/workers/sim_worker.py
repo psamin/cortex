@@ -62,7 +62,7 @@ def write_mp4(frames: list[np.ndarray], path: Path, fps: int = FPS) -> None:
         s = out.add_stream("libx264", rate=fps)
         s.width, s.height = frames[0].shape[1], frames[0].shape[0]
         s.pix_fmt = "yuv420p"
-        s.options = {"crf": "26", "preset": "veryfast", "movflags": "+faststart"}
+        s.options = {"crf": "22", "preset": "faster", "movflags": "+faststart"}
         for f in frames:
             for pkt in s.encode(av.VideoFrame.from_ndarray(f, format="rgb24")):
                 out.mux(pkt)
