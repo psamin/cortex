@@ -37,6 +37,7 @@ ACTOR = "autopilot"  # the standing approval (training_service.approve accepts i
 APPROVER = "standing approval (autonomous mode)"
 MAX_AUTO_TURNS = 24  # wake-ups in a row without a user message (a full round is about 4)
 WAKE_DELAY_S = 1.5  # let sibling job lines land before waking the agent
+DATASET_KINDS = ("dataset", "train_from_agent")  # a failure here ends the chain: no improvised training data
 
 WAKE_PROMPT = ("[Cortex, autonomous mode] Background work finished: {reason}. Continue the workflow toward the goal "
                "on your own. If the target is met, or the next step needs the human (spend outside the standing "
@@ -219,6 +220,12 @@ async def job_done(ctx: Ctx, job, entry: dict[str, Any]) -> dict[str, Any] | Non
     except Exception:  # the project is gone
         disarm(ctx, pid)
         return None
+    if job.status == "failed" and job.kind in DATASET_KINDS:
+        # a woken agent would improvise a dataset (prj_e5e9c205d5f3 took another task's demos) and the standing
+        # approval would start training on it: the human decides what the policy learns from
+        disarm(ctx, pid)
+        return notice("needs_you", f"Stopped the automatic steps: the dataset step failed ({job.error or 'no detail'})."
+                                   " Nothing was trained. Tell me which demos to use, or collect more.")
     st = _state(ctx).setdefault(pid, {"thread": armed, "pending": []})
     st.setdefault("pending", []).append({"text": entry.get("text", ""), "at": time.time()})
     _flush(ctx)

@@ -97,9 +97,9 @@ def test_manual_mode_never_approves(tmp_path):
     run(go())
 
 
-async def chain(tmp_path, monkeypatch, mode: str):
-    """A user turn starts a background job and ends; the job then finishes. Returns what the agent was sent,
-    the thread's rows and the live events published for the studio."""
+async def chain(tmp_path, monkeypatch, mode: str, kind: str = "record", error: str | None = None):
+    """A user turn starts a background job and ends; the job then finishes (or fails with `error`). Returns what
+    the agent was sent, the thread's rows and the live events published for the studio."""
     ctx, p = await setup(tmp_path, mode)
     agent.install_job_listener(ctx)
     release = asyncio.Event()
@@ -113,8 +113,11 @@ async def chain(tmp_path, monkeypatch, mode: str):
         if len(sent) == 1:  # the user's turn starts a collection and ends, as the system prompt asks
             async def work(job):
                 await release.wait()
+                if error:
+                    from cortex.errors import UserError
+                    raise UserError(error)  # what Cortex's own code raises: shown to people as written
                 return None
-            job = ctx_.jobs.submit("record", pid, work)
+            job = ctx_.jobs.submit(kind, pid, work)
             yield sse("tool_call", {"tool": "record_demonstrations", "args": {}})
             yield sse("tool_result", {"tool": "record_demonstrations", "summary": "started", "ref_ids": [job.id]})
         yield sse("text", {"delta": "Recording is running." if len(sent) == 1 else "Next: building the dataset."})
@@ -153,6 +156,32 @@ def test_a_finished_job_wakes_the_agent_in_autonomous_mode(tmp_path, monkeypatch
     assert any(r["kind"] == "notice" and r["text"].startswith("Continuing on my own") for r in rows)
     assert rows[-2]["text"] == "Next: building the dataset."
     assert "text" in live and live[-1] == "done"  # the studio sees the automatic turn live
+
+
+def test_a_failed_dataset_step_stops_the_chain_instead_of_improvising_training(tmp_path, monkeypatch):
+    """prj_e5e9c205d5f3: the dataset step failed, the woken agent built one from another task's demos and the
+    standing approval started training on it. A failed dataset step now ends the chain and asks the human."""
+    sent, rows, live = run(chain(tmp_path, monkeypatch, "autonomous", "train_from_agent",
+                                 "no accepted sim_agent episodes to snapshot"))
+    assert len(sent) == 1  # not woken
+    note = next(r for r in rows if r["kind"] == "notice")
+    assert note["tone"] == "needs_you" and "nothing was trained" in note["text"].lower()
+    assert "sim_agent" in note["text"]
+
+
+def test_training_is_never_proposed_on_a_dataset_without_train_episodes(tmp_path):
+    from cortex.models import DatasetEpisodeLink, DatasetVersion
+
+    async def go():
+        ctx, p = await setup(tmp_path)
+        ds = DatasetVersion(project_id=p.id, name="v1", links=[DatasetEpisodeLink(episode_id="ep_1", split="eval",
+                                                                                  lerobot_episode_index=0)])
+        await ctx.repo.save("dataset_versions", ds, status="ready")
+        with pytest.raises(ValueError, match="no train-split episodes"):
+            await training_service.propose(ctx, p, ds.id)
+        return await ctx.repo.list("training_jobs", TrainingJob, project_id=p.id)
+
+    assert run(go()) == []
 
 
 def test_manual_mode_waits_for_the_user(tmp_path, monkeypatch):
