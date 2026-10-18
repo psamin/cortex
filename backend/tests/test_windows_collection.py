@@ -13,7 +13,7 @@ def test_live_frame_survives_a_reader_holding_the_file(tmp_path):
     with open(tmp_path / "live.jpg", "rb"):  # a reader (the studio) has it open: on Windows replace is refused
         write_live_jpg(frame + 1, tmp_path)  # must not raise, whatever the OS does
     assert write_live_jpg(frame + 2, tmp_path)  # and frames resume once the reader lets go
-    assert not (tmp_path / "live.jpg.tmp").exists()
+    assert not list(tmp_path.glob("*.tmp"))
 
 
 def test_demo_prompt_names_the_intake_object_and_zone():

@@ -26,7 +26,10 @@ pids=()
 cleanup() { kill "${pids[@]}" 2>/dev/null || true; }
 trap cleanup EXIT INT TERM
 
-(cd "$ROOT/backend" && uv sync -q && exec uv run uvicorn cortex.api.app:app --host 127.0.0.1 --port 8000) \
+# --timeout-graceful-shutdown: an open studio tab holds an event stream, and without a cap uvicorn waits for it
+# forever on stop, so the old backend lingers (still running jobs) next to the restarted one
+(cd "$ROOT/backend" && uv sync -q && exec uv run uvicorn cortex.api.app:app --host 127.0.0.1 --port 8000 \
+  --timeout-graceful-shutdown 3) \
   > "$LOGS/backend.log" 2>&1 & pids+=($!)
 # always sync deps (fast when unchanged): a pulled lockfile change must not leave the studio broken
 (cd "$ROOT/web" && pnpm install --frozen-lockfile --silent && exec pnpm dev --host 127.0.0.1) \

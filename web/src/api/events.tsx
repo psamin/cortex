@@ -174,8 +174,20 @@ export function ProjectEventsProvider({ pid, children }: { pid: string; children
   useEffect(() => {
     const es = new EventSource(api.eventsUrl(pid));
     store.setStatus("connecting");
-    es.onopen = () => store.setStatus("open");
-    es.onerror = () => store.setStatus(es.readyState === EventSource.CLOSED ? "error" : "connecting");
+    let dropped = false;
+    es.onopen = () => {
+      store.setStatus("open");
+      if (!dropped) return;
+      // back after a drop (e.g. the backend restarted): events in between are lost, so take the jobs as they are
+      // now (a run the restart ended no longer shows as live) and refresh this project's data
+      dropped = false;
+      api.jobs(pid).then((js) => js.forEach((j) => store.upsertJob(j))).catch(() => {});
+      qcRef.current.invalidateQueries({ predicate: (q) => q.queryKey.includes(pid) });
+    };
+    es.onerror = () => {
+      dropped = true;
+      store.setStatus(es.readyState === EventSource.CLOSED ? "error" : "connecting");
+    };
     const parse = <T,>(e: MessageEvent): T | null => {
       try {
         return JSON.parse(e.data) as T;

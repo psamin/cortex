@@ -17,7 +17,9 @@ import numpy as np
 def write_live_jpg(frame: np.ndarray, out_dir: Path, name: str = "live.jpg", quality: int = 80) -> bool:
     from PIL import Image
 
-    tmp = out_dir / f"{name}.tmp"
+    # per process: two runs in one project (e.g. a recording and a collection) share the folder, and a shared
+    # temp name let one swap away the other's file mid-write ("No such file or directory" failed a recording)
+    tmp = out_dir / f"{name}.{os.getpid()}.tmp"
     try:
         Image.fromarray(frame).save(tmp, format="JPEG", quality=quality)
     except OSError:
@@ -30,6 +32,8 @@ def write_live_jpg(frame: np.ndarray, out_dir: Path, name: str = "live.jpg", qua
             return True
         except PermissionError:
             continue
+        except OSError:  # e.g. the folder was cleared for a new run
+            break
     try:
         tmp.unlink()
     except OSError:

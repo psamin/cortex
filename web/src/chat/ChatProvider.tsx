@@ -120,13 +120,19 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   const threadRef = useRef(threadId);
   threadRef.current = threadId;
 
+  // only the latest history load may set the items: an older one landing late (StrictMode mounts twice, or a turn
+  // started meanwhile) would wipe the message the user just sent
+  const loadSeq = useRef(0);
   const load = useCallback(() => {
+    const seq = ++loadSeq.current;
+    const latest = () => seq === loadSeq.current;
     setLoading(true);
     setLoadError(null);
     api
       .agentHistory(pid, threadRef.current)
-      .then((rows) => setItems(historyToEvents(rows).reduce(applyEvent, [] as ChatItem[])))
+      .then((rows) => latest() && setItems(historyToEvents(rows).reduce(applyEvent, [] as ChatItem[])))
       .catch((e) => {
+        if (!latest()) return;
         // a project with no chat yet may 404 on older backends; treat as empty
         if (e instanceof ApiError && e.status === 404) {
           setItems([]);
@@ -134,7 +140,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         }
         else setLoadError(e);
       })
-      .finally(() => setLoading(false));
+      .finally(() => latest() && setLoading(false));
     // reads threadRef so a `thread` event mid-stream never triggers a reload
   }, [pid, setThreadId]);
 
@@ -201,6 +207,8 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
 
   const run = useCallback(
     async (text: string) => {
+      loadSeq.current++; // this turn's rows win over a history load still in flight
+      setLoading(false);
       busyRef.current = true;
       setBusy(true);
       setStatus({ state: "starting", text: "Starting…" });
