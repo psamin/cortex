@@ -228,6 +228,12 @@ class EpisodeDiagnosis(BaseModel):
     status: Literal["hypothesis", "human_confirmed", "human_rejected"] = "hypothesis"
     human_label: str | None = None
     error: str | None = None
+    # which route produced it: None for the backend's own routes (model endpoint / Claude Code CLI),
+    # "mcp_sampling" (the MCP client's model answered sampling/createMessage) or "mcp_agent" (the
+    # connected agent read the contact sheet itself and submitted its answer); `model` is then as
+    # the client reported it, unverified
+    route: Literal["mcp_sampling", "mcp_agent"] | None = None
+    client: str | None = None  # MCP client name/version as it reported itself, when known
 
 
 class FailureCluster(BaseModel):

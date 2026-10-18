@@ -32,47 +32,11 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
         route, route_label = ccd.diagnoser(ctx, project) if use_vlm else (None, "")
         an = Analysis(project_id=project.id, vlm_provider=route_label if route else None)
         await ctx.repo.save("analyses", an)
-        eps = await rec.list_episodes(ctx, project.id)
-        an.episode_count = len(eps)
-
-        # 1) quality (recomputed against the current dataset blur reference)
-        ctx.jobs.update(job, message="quality checks", progress=0.05)
-        blur_ref = await rec.dataset_blur_reference(ctx, project.id)
-        for i, ep in enumerate(eps):
-            ep.quality = await asyncio.to_thread(rec.quality_for, ctx, ep, blur_ref)
-            await ctx.repo.save("episodes", ep)
-            an.quality[ep.id] = ep.quality
-            ctx.jobs.update(job, progress=0.05 + 0.35 * (i + 1) / max(1, len(eps)))
-
-        # 2) measured failures from the latest evaluation of each policy
-        evals = await sim.list_evaluations(ctx, project.id)
-        failures: list[dict[str, Any]] = []
-        for ev in evals:
-            for b in ev["branches"]:
-                if not b.result:
-                    continue
-                for e in b.result.episodes:
-                    if not e.success:
-                        failures.append({"eval_id": ev["run"].id, "branch": b, "ep": e})
+        eps, failures = await measure(ctx, an, job)
 
         # 3) VLM hypotheses on failed eval episodes with video, then failed/flagged demos
         if route:
-            targets: list[tuple[str, list, dict[str, Any]]] = []
-            for f in failures:
-                if f["ep"].video_key and len(targets) < max_vlm:
-                    frames = await asyncio.to_thread(vlm.keyframes_from_video, ctx.local(f["ep"].video_key))
-                    targets.append((failure_ref(f), frames, {
-                        "outcome": "failure", "condition": f["branch"].spec.name,
-                        "cube_max_height_m": round(f["ep"].max_cube_z, 3),
-                        "final_cube_to_box_m": round(f["ep"].final_cube_box_dist, 3)}))
-            for ep in eps:
-                if len(targets) >= max_vlm:
-                    break
-                if ep.success is False or (ep.quality and ep.quality.flags):
-                    z = await asyncio.to_thread(rec.load_npz, ctx, ep)
-                    targets.append((ep.id, vlm.keyframes_from_array(z["front"]), {
-                        "outcome": "success" if ep.success else "failure",
-                        "quality_flags": [fl.code for fl in ep.quality.flags] if ep.quality else []}))
+            targets = await vlm_targets(ctx, eps, failures, max_vlm)
             ctx.jobs.update(job, message=f"{route_label}: reviewing {len(targets)} episodes", progress=0.5)
             if route == "claude_code":
                 an.diagnoses = await ccd.diagnose_all(
@@ -83,25 +47,84 @@ async def start_analysis(ctx: Ctx, project: Project, use_vlm: bool = True, max_v
         elif use_vlm:
             an.summary += f"VLM skipped: {route_label}. "
 
-        # 4) clusters
         ctx.jobs.update(job, message="clustering failures", progress=0.9)
-        clusters = build_clusters(project.id, an, eps, failures)
-        for c in clusters:
-            await ctx.repo.save("failure_clusters", c, status="current")
-        for old in await ctx.repo.list("failure_clusters", FailureCluster, project_id=project.id):
-            if old.analysis_id != an.id:
-                await ctx.repo.save("failure_clusters", old, status="superseded")
-        an.status = "succeeded"
-        n_flag = sum(1 for q in an.quality.values() if q.flags)
-        an.summary += (f"{len(eps)} episodes checked, {n_flag} with quality flags; "
-                       f"{len(failures)} failed evaluation episodes; "
-                       f"{sum(1 for d in an.diagnoses if d.hypotheses)} VLM reviews; {len(clusters)} clusters.")
-        await ctx.repo.save("analyses", an)
-        ctx.changed(project.id, "analyses", an.id)
-        await ctx.audit(actor, "analyze_dataset", project.id, {"use_vlm": use_vlm}, "ok", an.summary)
+        await finish(ctx, an, eps, failures, actor, "analyze_dataset", {"use_vlm": use_vlm})
         return an.id
 
     return ctx.jobs.submit("analyze", project.id, run)
+
+
+async def measure(ctx: Ctx, an: Analysis, job: Job | None = None) -> tuple[list, list[dict[str, Any]]]:
+    """Steps 1-2: quality checks on every episode, then the measured evaluation failures."""
+    eps = await rec.list_episodes(ctx, an.project_id)
+    an.episode_count = len(eps)
+
+    # 1) quality (recomputed against the current dataset blur reference)
+    if job:
+        ctx.jobs.update(job, message="quality checks", progress=0.05)
+    blur_ref = await rec.dataset_blur_reference(ctx, an.project_id)
+    for i, ep in enumerate(eps):
+        ep.quality = await asyncio.to_thread(rec.quality_for, ctx, ep, blur_ref)
+        await ctx.repo.save("episodes", ep)
+        an.quality[ep.id] = ep.quality
+        if job:
+            ctx.jobs.update(job, progress=0.05 + 0.35 * (i + 1) / max(1, len(eps)))
+
+    return eps, await measured_failures(ctx, an.project_id)
+
+
+async def measured_failures(ctx: Ctx, project_id: str) -> list[dict[str, Any]]:
+    """2) measured failures from the latest evaluation of each policy."""
+    failures: list[dict[str, Any]] = []
+    for ev in await sim.list_evaluations(ctx, project_id):
+        for b in ev["branches"]:
+            if not b.result:
+                continue
+            for e in b.result.episodes:
+                if not e.success:
+                    failures.append({"eval_id": ev["run"].id, "branch": b, "ep": e})
+    return failures
+
+
+async def vlm_targets(ctx: Ctx, eps, failures: list[dict[str, Any]],
+                      max_vlm: int) -> list[tuple[str, list, dict[str, Any]]]:
+    """(ref, keyframes, measured telemetry) for failed eval episodes with video, then failed/flagged demos."""
+    targets: list[tuple[str, list, dict[str, Any]]] = []
+    for f in failures:
+        if f["ep"].video_key and len(targets) < max_vlm:
+            frames = await asyncio.to_thread(vlm.keyframes_from_video, ctx.local(f["ep"].video_key))
+            targets.append((failure_ref(f), frames, {
+                "outcome": "failure", "condition": f["branch"].spec.name,
+                "cube_max_height_m": round(f["ep"].max_cube_z, 3),
+                "final_cube_to_box_m": round(f["ep"].final_cube_box_dist, 3)}))
+    for ep in eps:
+        if len(targets) >= max_vlm:
+            break
+        if ep.success is False or (ep.quality and ep.quality.flags):
+            z = await asyncio.to_thread(rec.load_npz, ctx, ep)
+            targets.append((ep.id, vlm.keyframes_from_array(z["front"]), {
+                "outcome": "success" if ep.success else "failure",
+                "quality_flags": [fl.code for fl in ep.quality.flags] if ep.quality else []}))
+    return targets
+
+
+async def finish(ctx: Ctx, an: Analysis, eps, failures: list[dict[str, Any]], actor: str, tool: str,
+                 args: dict[str, Any]) -> None:
+    """Step 4: rebuild failure clusters from this analysis, supersede older ones, mark it succeeded."""
+    clusters = build_clusters(an.project_id, an, eps, failures)
+    for c in clusters:
+        await ctx.repo.save("failure_clusters", c, status="current")
+    for old in await ctx.repo.list("failure_clusters", FailureCluster, project_id=an.project_id):
+        if old.analysis_id != an.id:
+            await ctx.repo.save("failure_clusters", old, status="superseded")
+    an.status = "succeeded"
+    n_flag = sum(1 for q in an.quality.values() if q.flags)
+    an.summary += (f"{len(eps)} episodes checked, {n_flag} with quality flags; "
+                   f"{len(failures)} failed evaluation episodes; "
+                   f"{sum(1 for d in an.diagnoses if d.hypotheses)} VLM reviews; {len(clusters)} clusters.")
+    await ctx.repo.save("analyses", an)
+    ctx.changed(an.project_id, "analyses", an.id)
+    await ctx.audit(actor, tool, an.project_id, args, "ok", an.summary)
 
 
 def failure_ref(f: dict[str, Any]) -> str:

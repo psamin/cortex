@@ -10,7 +10,7 @@ when the provider is not configured. `GET /api/health` reports the active provid
 | Datasets | LeRobotDataset v3 via `lerobot==0.6.1` | **verified** (written, reloaded by LeRobot) | none needed |
 | Metadata DB | InsForge Postgres (REST records API, migrations API) | **verified** on InsForge Cloud 2.3.4 (us-west), 2026-10-17: migrations 001–003 applied, full e2e smoke 18/18 | SQLite (**verified**) |
 | Asset storage | InsForge storage, private bucket, presigned download URLs | **verified**: private `cortex-assets` bucket, videos/npz/LeRobot files uploaded, signed `cdn.insforge.dev` URLs play without auth | local disk (**verified**) |
-| VLM diagnostics | InsForge Model Gateway → OpenRouter → `anthropic/claude-sonnet-5.5` | **blocked by plan**: the project's org is on a free plan; `/api/ai/*` returns 403 "AI is only available on paid plans" | VLM step skipped and disclosed; telemetry and quality analysis still run |
+| VLM diagnostics | InsForge Model Gateway → OpenRouter → `anthropic/claude-sonnet-5.5` | **blocked by plan**: the project's org is on a free plan; `/api/ai/*` returns 403 "AI is only available on paid plans" | VLM step skipped and disclosed; telemetry and quality analysis still run; or the MCP client's own model (see MCP below) |
 | Studio agent | same gateway, OpenAI-compatible tool calling | implemented, unverified | deterministic intent planner (**verified**) |
 | Manipulation planner | **Default: our own model.** `Qwen/Qwen3-VL-8B-Instruct` (Apache-2.0), served by vLLM 0.31 on a Futurama L40S ([serve_vlm.sbatch](../infra/futurama/serve_vlm.sbatch), [vlm_futurama.sh](../scripts/vlm_futurama.sh)); no per-token cost. Alternative: GPT-6 Astra via OpenRouter (InsForge gateway or our own key) | planner loop **verified against a local stub**; no real Astra call yet: blocked until the InsForge org is on a paid plan | none: refuses with 503, no substitution; scripted oracle is a separate, labelled collector |
 | Training | ACT via `lerobot-train` on GT Futurama Slurm over SSH | implemented, unverified (VPN was off) | manual command bundle + checkpoint registration |
@@ -84,6 +84,17 @@ when the provider is not configured. `GET /api/health` reports the active provid
 - **Hosted deploys:** a hosted server cannot reach localhost. Run `scripts/dev.sh --tunnel` (a
   Cloudflare quick tunnel) and deploy with `CORTEX_API_URL` and `CORTEX_MCP_KEY`.
 - **Remote access:** remote callers can only reach `/api/tools`.
+- **Bring your own model (VLM diagnosis without a Cortex key):** `cortex.diagnose_failures_with_my_model`
+  asks the MCP client's own model through sampling (`sampling/createMessage` embedded in an
+  `input_required` result, protocol 2026-07-28; one request per keyframe contact sheet). mcp-use 2.10.1
+  serves 2025-era requests statelessly, so only 2026-era clients that declare `sampling` can use it;
+  others get a refusal before any work starts. Sampling is deprecated in 2026-07-28 (SEP-2577, still
+  supported for at least 12 months). Fallback for every client: `cortex.get_diagnosis_inputs` (contact
+  sheets + prompt as image content) then `cortex.submit_failure_hypotheses` (the agent's own answers).
+  The backend validates every answer against the fixed taxonomy (one bad answer rejects the whole
+  submission, nothing stored) and stores accepted ones as unverified hypotheses with `route`
+  (`mcp_sampling` / `mcp_agent`) and the client-reported `model`
+  ([external_diagnosis.py](../backend/cortex/services/external_diagnosis.py)).
 
 ## Self-hosted planner (our own model)
 
