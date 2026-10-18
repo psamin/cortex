@@ -51,7 +51,8 @@ const TOOLS: Def[] = [
     name: "create_project",
     title: "Create project",
     description:
-      "Start a robot-learning project from a plain-language task (SO-101 arm, MuJoCo tabletop sim). " +
+      "Start a robot-learning project for the built-in cube task only (red cube into a box; SO-101 arm, MuJoCo tabletop sim). " +
+      "For any other object (a bottle, a cup, the user's own items) use cortex_start_intake instead. " +
       "Returns the project id, a task spec with measurable success criteria, and an initial demonstration plan " +
       "(condition cells with target counts). Use the returned project_id for every other cortex_* tool.\n" +
       "USE WHEN: you want an empty project and will record scripted-expert demos yourself (cortex_record_demonstrations).\n" +
@@ -93,7 +94,8 @@ const TOOLS: Def[] = [
     name: "record_demonstrations",
     title: "Record demonstrations (sim)",
     description:
-      "Record scripted-expert demonstrations in the MuJoCo simulator for the given conditions. Simulation projects only: " +
+      "Record scripted-expert demonstrations in the MuJoCo simulator for the given conditions. cube_region applies to " +
+      "the built-in cube task only. Simulation projects only: " +
       "on a 'real' project the backend refuses and a human must record with the physical robot. " +
       "Starts a background job; pass wait_s to block, otherwise poll cortex_get_job with the returned job id.\n" +
       "USE WHEN: you want scripted-expert (oracle) demos for specific condition cells on a cortex_create_project project.\n" +
@@ -103,7 +105,9 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       conditions: z.array(z.object({
-        cube_region: z.enum(["left", "center", "right"]).optional().describe("Where the cube starts (default 'center')"),
+        cube_region: z.enum(["left", "center", "right"]).optional().describe(
+          "Where the cube starts (default 'center'). Applies to the built-in cube task only, not to intake scenes",
+        ),
         lighting: z.enum(["bright", "normal", "dim"]).optional().describe("Scene lighting (default 'normal')"),
         count: z.number().int().min(1).max(20).optional().describe("Demonstrations to record for this condition (1-20, default 1)"),
       })).describe(
@@ -547,7 +551,10 @@ const TOOLS: Def[] = [
       "Start teaching a task by describing your setup. Creates a draft project and returns typed questions about the arm, " +
       "cameras, objects, place zones, surroundings and task. Every question carries a ready-to-send `patch` for " +
       "cortex_update_intake, so you can accept defaults or edit them. Objects named in the prompt (e.g. 'water bottle', " +
-      "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them.\n" +
+      "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them. " +
+      "Prefer a catalogue item (e.g. '500 ml water bottle') over guessed numbers. " +
+      "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
+      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface.\n" +
       "USE WHEN: the user describes a custom scene (their own objects, place zones, cameras or obstacles). SO-101 arm, simulated only.\n" +
       "USE INSTEAD: cortex_create_policy_project for the built-in tabletop pick-and-place scene (the fast path).\n" +
       "NEXT: cortex_update_intake until no questions remain, then cortex_build_simulation.",
@@ -563,13 +570,15 @@ const TOOLS: Def[] = [
     description:
       "Answer intake questions by merging a partial spec into the project. Lists of objects, zones, cameras and " +
       "environment.obstacles merge by `name` ({name, _delete: true} removes one; {name, confirm: true} confirms an object's " +
-      "catalogue values). Units: metres and kilograms; table frame with x away from the arm base, y to its left. Unknown " +
+      "catalogue values). Units: metres and kilograms. " +
+      "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
+      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. Unknown " +
       "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
       "NEXT: call again until no questions remain, then cortex_build_simulation.",
     inputSchema: z.object({
       project_id: projectId,
       patch: z.record(z.string(), z.unknown()).describe(
-        "Partial intake, e.g. {objects:[{name:'cup', mass_kg:0.2}], zones:[{name:'coaster', center:[0.3,0.1]}], task:{pick:'cup', place:['coaster']}, environment:{lighting:'dim', obstacles:[...]}}",
+        "Partial intake. Sizes in metres (cylinder size = [diameter, height], not radius); positions in the world frame (+x forward from the arm base, +y to its left). e.g. {objects:[{name:'cup', mass_kg:0.2}], zones:[{name:'coaster', center:[0.3,0.1]}], task:{pick:'cup', place:['coaster']}, environment:{lighting:'dim', obstacles:[...]}}",
       ),
     }),
     annotations: WRITE,
@@ -598,11 +607,11 @@ const TOOLS: Def[] = [
     name: "capture_frame",
     title: "Capture frame",
     description:
-      "Render a camera of the built scene (top, front or wrist_cam) as an image, so you can check that the simulation " +
+      "Render a camera of the built scene as an image (valid cameras: 'top' (default), 'front', 'wrist_cam'), so you can check that the simulation " +
       "matches the setup you described. Fix differences with cortex_update_intake, then cortex_build_simulation again.",
     inputSchema: z.object({
       project_id: projectId,
-      camera: z.enum(["top", "front", "wrist_cam"]).optional(),
+      camera: z.enum(["top", "front", "wrist_cam"]).optional().describe("'top' (default, overhead), 'front' or 'wrist_cam' (on the gripper)"),
       seed: z.number().int().optional().describe("Scene randomization seed (default 0)"),
     }),
     annotations: READ,
