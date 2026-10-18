@@ -374,7 +374,7 @@ def test_a_viewer_who_leaves_mid_run_is_saved_as_partial_and_frees_the_gpu(api, 
     _until(api, _ready)
     sim = _project(api, "Jenga sim", name="Jenga (sim)")
     (tmp_path / "projects.json").write_text(json.dumps({"sim_jenga": sim}))
-    serve.frames["sim"], serve.fps = 600, 60
+    serve.frames["sim"], serve.fps, serve.succeed_at = 600, 60, 500  # left while still running
     with api.stream("GET", "/live-policy/sim/jenga/11") as r:
         n = 0
         for chunk in r.iter_raw():
@@ -388,6 +388,87 @@ def test_a_viewer_who_leaves_mid_run_is_saved_as_partial_and_frees_the_gpu(api, 
             break
         time.sleep(0.05)
     assert serve.ended and serve.ended[0][2] == "viewer left"  # the GPU server is free for the next run
+
+
+
+def test_a_stream_that_drops_mid_run_is_saved_as_partial(api, futurama, tmp_path):
+    cluster, serve = futurama
+    cluster.add_job(age=5)
+    api.post("/live-policy/start")
+    _until(api, _ready)
+    sim = _project(api, "Jenga sim", name="Jenga (sim)")
+    (tmp_path / "projects.json").write_text(json.dumps({"sim_jenga": sim}))
+    serve.frames["sim"], serve.drop_after, serve.succeed_at = 200, 60, 150  # cut while still running
+    with api.stream("GET", "/live-policy/sim/jenga/9") as r:
+        got = b""
+        try:
+            for chunk in r.iter_raw():
+                got += chunk
+        except httpx.HTTPError:
+            pass
+    rp = _replays(api, sim)[0]
+    assert rp["status"] == "partial" and rp["episodes"][0]["frames"] == 60
+
+
+def test_stop_while_streaming_ends_the_stream_and_keeps_the_partial_run(api, futurama, tmp_path):
+    cluster, serve = futurama
+    job = cluster.add_job(age=5)
+    api.post("/live-policy/start")
+    _until(api, _ready)
+    sim = _project(api, "Jenga sim", name="Jenga (sim)")
+    (tmp_path / "projects.json").write_text(json.dumps({"sim_jenga": sim}))
+    serve.frames["sim"], serve.fps, serve.succeed_at = 600, 60, 500  # left while still running
+    out = {}
+
+    def watch():
+        n = 0
+        try:
+            with api.stream("GET", "/live-policy/sim/jenga/12") as r:
+                for chunk in r.iter_raw():
+                    n += chunk.count(b"--frame")
+        except httpx.HTTPError as e:
+            out["error"] = type(e).__name__
+        out["frames"] = n
+
+    t = threading.Thread(target=watch)
+    t.start()
+    time.sleep(1.0)
+    st = api.post("/live-policy/stop").json()
+    t.join(10)
+    assert not t.is_alive() and 0 < out["frames"] < 600
+    assert st["phase"] == "stopped" and cluster.read()["jobs"][job]["gone"]
+    assert _replays(api, sim)[0]["status"] == "partial"
+
+
+def test_two_viewers_the_newest_run_is_the_one_that_plays(api, futurama, tmp_path):
+    """The GPU server runs one stream at a time. A second viewer (or "Run on a new layout" while a run
+    plays) must not sit on a blank image until the first run ends: the newest request takes over."""
+    cluster, serve = futurama
+    cluster.add_job(age=5)
+    api.post("/live-policy/start")
+    _until(api, _ready)
+    serve.frames["sim"], serve.fps = 1200, 60  # a 20 s run
+    first = {}
+
+    def watch():
+        n = 0
+        with api.stream("GET", "/live-policy/sim/jenga/1") as r:
+            for chunk in r.iter_raw():
+                n += chunk.count(b"--frame")
+        first["frames"] = n
+
+    t = threading.Thread(target=watch)
+    t.start()
+    time.sleep(1.0)
+    t0 = time.time()
+    with api.stream("GET", "/live-policy/sim/jenga/2") as r:
+        for chunk in r.iter_raw():
+            if b"--frame" in chunk:
+                break
+    waited = time.time() - t0
+    t.join(30)
+    assert waited < 3, f"the second viewer waited {waited:.1f} s for its first frame"
+    assert first["frames"] < 1200  # the first run gave way
 
 
 # ------------------------------------------------------------------ long runs, projects by name

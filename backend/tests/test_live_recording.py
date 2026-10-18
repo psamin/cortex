@@ -47,9 +47,19 @@ def test_a_sim_stream_gives_the_verdict_steps_and_policy():
     rec = StreamRecorder()
     rec.feed(_sim_stream(45, succeed_at=30))
     assert rec.success is True and rec.last_index == 44 and rec.total == 600 and rec.policy == "act@030000"
-    assert not rec.complete  # ends by itself on success, before max_steps: complete only once the proxy says so
+    assert rec.complete  # the simulator's verdict is in: the server stops soon after success, before max_steps
+
+
+def test_a_run_cut_off_before_its_end_is_partial_even_if_the_connection_closed_cleanly():
+    """A dropped tunnel, Stop GPU or a crashed server close the connection like a finished stream."""
+    rec = StreamRecorder()
+    rec.feed(_sim_stream(25, succeed_at=30))  # still running at step 24 of 600
     rec.finished = True
-    assert rec.complete
+    assert not rec.complete
+    rec = StreamRecorder()
+    rec.feed(_stream(40, total=200))
+    rec.finished = True
+    assert not rec.complete
 
 
 @pytest.mark.parametrize("chunk", [7, 1000, 10**6])

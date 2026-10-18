@@ -714,8 +714,6 @@ async def live_policy_stop(request: Request):
 async def live_policy_stream(task: str, episode: int):
     """The policy running on the GPU over a held-out episode, as MJPEG (proxied through the tunnel).
     The session is recorded as it passes and saved to the task's project when the stream ends (#179)."""
-    import httpx
-
     from ..services import live_policy_service as lp
     from ..services import live_recording
     st = await lp.status(ctx())
@@ -727,12 +725,8 @@ async def live_policy_stream(task: str, episode: int):
 
     async def gen():
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
-                async with c.stream("GET", f"{lp.url(ctx())}/live/{task}/{episode}") as r:
-                    async for chunk in r.aiter_raw():
-                        rec.feed(chunk)
-                        yield chunk
-            rec.finished = True
+            async for chunk in lp.relay(ctx(), f"/live/{task}/{episode}", rec):
+                yield chunk
         finally:  # finished, or the viewer left: encode and store in the background
             live_recording.save_soon(ctx(), task, episode, rec, st, lp.STATE.get("job"))
 
@@ -743,8 +737,6 @@ async def live_policy_stream(task: str, episode: int):
 async def live_policy_sim(task: str, seed: int):
     """A sim-trained policy running closed loop in MuJoCo on the GPU, on an unseen layout, as MJPEG.
     The run is recorded as it passes and saved to the sim_<task> project when the stream ends (#179)."""
-    import httpx
-
     from ..services import live_policy_service as lp
     from ..services import live_recording
     st = await lp.status(ctx())
@@ -756,12 +748,8 @@ async def live_policy_sim(task: str, seed: int):
 
     async def gen():
         try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(10, read=None)) as c:
-                async with c.stream("GET", f"{lp.url(ctx())}/sim/{task}/{seed}") as r:
-                    async for chunk in r.aiter_raw():
-                        rec.feed(chunk)
-                        yield chunk
-            rec.finished = True
+            async for chunk in lp.relay(ctx(), f"/sim/{task}/{seed}", rec):
+                yield chunk
         finally:  # finished, or the viewer left: encode and store in the background
             live_recording.save_soon(ctx(), task, seed, rec, st, lp.STATE.get("job"), kind="live_sim")
 
