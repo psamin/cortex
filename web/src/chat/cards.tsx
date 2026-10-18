@@ -33,6 +33,7 @@ import { useChat } from "./ChatProvider";
 import { useViewerFocus } from "./focus";
 import { AUG_NOTE, datasetBreakdown } from "../lib/augment";
 import { prefixOf } from "./model";
+import { GlowEdge } from "../components/ui/spotlight-card";
 
 // ------------------------------------------------------------------ shell
 export function CardShell({
@@ -182,6 +183,7 @@ function DemoRow({ pid, refId, text, ids, live }: { pid: string; refId: string; 
   const to = refRoute(pid, refId);
   return (
     <div className="enter flex items-center gap-2.5 sk-depth relative rounded border border-line-strong bg-plate px-3 py-2">
+      <GlowEdge />
       {live ? <CircleDashed className="h-4 w-4 shrink-0 animate-spin text-servo" /> : <Play className="h-4 w-4 shrink-0 text-ink-3" />}
       <span className="min-w-0 flex-1 truncate text-sm text-ink-2" title={text}>
         {text}

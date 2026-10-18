@@ -1,23 +1,11 @@
 import { BRAND } from "../landing/brand";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Link, Outlet, useMatch } from "react-router-dom";
-import { ChevronDown, Moon, Sun } from "lucide-react";
+import { ChevronDown } from "lucide-react";
+import { ThemeToggle } from "../components/ThemeToggle";
 import { describeProvider } from "../components/HealthPills";
 import { useEngine, useHealth, useProjects } from "../api/hooks";
 import { cn } from "../lib/format";
-
-function useTheme() {
-  const [theme, setTheme] = useState<"dark" | "light">(() => (document.documentElement.dataset.theme as "dark" | "light") || "light");
-  useEffect(() => {
-    document.documentElement.dataset.theme = theme;
-    try {
-      localStorage.setItem("cortex.theme", theme);
-    } catch {
-      /* storage unavailable */
-    }
-  }, [theme]);
-  return [theme, setTheme] as const;
-}
 
 /** The product name, shown in the wordmark. Change it here only. */
 export const BRAND_NAME = BRAND.name; // one source of truth: web/src/landing/brand.ts
@@ -116,7 +104,6 @@ function DetailsMenu({ pid }: { pid: string }) {
 }
 
 export function AppShell() {
-  const [theme, setTheme] = useTheme();
   const m = useMatch("/p/:pid/*");
   const pid = m?.params.pid;
   const projects = useProjects();
@@ -158,14 +145,7 @@ export function AppShell() {
               New project
             </Link>
           )}
-          <button
-            type="button"
-            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="rounded-full p-1.5 text-ink-3 hover:bg-rail hover:text-ink"
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
-          >
-            {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
-          </button>
+          <ThemeToggle />
         </div>
       </header>
       <div className="min-h-0 flex-1">

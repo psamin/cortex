@@ -48,7 +48,7 @@ export function HeroSection({ copy }: { copy: ReactNode }) {
   return (
     <section
       aria-labelledby="hero-title"
-      className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-white lg:block lg:h-[100svh] lg:min-h-[720px]"
+      className="relative isolate flex min-h-[100svh] flex-col overflow-hidden bg-bench lg:block lg:h-[100svh] lg:min-h-[720px]"
     >
       {/* Copy layer (left on desktop, top on mobile). Plain DOM; never waits for WebGL. */}
       <div className="relative z-20 lg:absolute lg:inset-y-0 lg:left-0 lg:w-[46%]">{copy}</div>
@@ -64,7 +64,7 @@ export function HeroSection({ copy }: { copy: ReactNode }) {
             <HeroFallback />
             {import.meta.env.DEV && (
               <p
-                className="absolute bottom-3 right-6 z-20 kn-mono text-[10px] uppercase tracking-[0.16em] text-[#858585] sm:right-10"
+                className="absolute bottom-3 right-6 z-20 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3 sm:right-10"
                 data-testid="hero-3d-note"
               >
                 {DEV_NOTE[unavailable]}

@@ -39,10 +39,10 @@ function Heading() {
   return (
     <>
       <div className="kn-label kn-label-rule">
-        <span className="text-[#171717]">FIG.02</span>
+        <span className="text-ink">FIG.02</span>
         <span>How it works</span>
       </div>
-      <h2 id="platform-title" className="kn-display mt-6 text-[clamp(2.2rem,3.5vw,3.5rem)] text-[#171717]">
+      <h2 id="platform-title" className="kn-display mt-6 text-[clamp(2.2rem,3.5vw,3.5rem)] text-ink">
         Seven layers,
         <br />
         <span className="kn-second">one training loop.</span>
@@ -55,7 +55,7 @@ function Tag({ children, on }: { children: string; on?: boolean }) {
   return (
     <span
       className={`inline-flex h-6 items-center rounded-full border px-2.5 kn-mono text-[10px] uppercase tracking-[0.14em] transition-colors ${
-        on ? "border-[#2F4F46] text-[#2F4F46]" : "border-[#E6E6E6] text-[#858585]"
+        on ? "border-servo text-servo" : "border-line text-ink-3"
       }`}
     >
       {children}
@@ -67,7 +67,7 @@ function Tag({ children, on }: { children: string; on?: boolean }) {
 export function LayersSection() {
   const mode = useMode();
   return (
-    <section id="platform" aria-labelledby="platform-title" className="relative scroll-mt-0 border-t border-[#E6E6E6]">
+    <section id="platform" aria-labelledby="platform-title" className="relative scroll-mt-0 border-t border-line">
       {mode === "pinned" ? <Pinned /> : mode === "static" ? <StaticExploded /> : <MobileStack />}
     </section>
   );
@@ -118,12 +118,12 @@ function Pinned() {
         <div className="relative z-10 flex w-[40%] shrink-0 flex-col justify-center py-16 pl-[clamp(2.5rem,5.5vw,6rem)] pr-6">
           <Heading />
 
-          <ol className="mt-10 max-w-[22rem] border-t border-[#E6E6E6]">
+          <ol className="mt-10 max-w-[22rem] border-t border-line">
             {STEPS.map((st, i) => {
               const on = i === active;
               const done = active > i;
               return (
-                <li key={st.n} className="border-b border-[#E6E6E6]">
+                <li key={st.n} className="border-b border-line">
                   <button
                     type="button"
                     onClick={() => goTo(i)}
@@ -132,12 +132,12 @@ function Pinned() {
                   >
                     <span
                       className="h-px transition-all duration-500 ease-out"
-                      style={{ width: on ? 28 : 10, background: on ? "#2F4F46" : done ? "#171717" : "#BDBDBD" }}
+                      style={{ width: on ? 28 : 10, background: on ? "var(--kn-accent)" : done ? "var(--kn-ink)" : "var(--kn-faint)" }}
                     />
-                    <span className={on ? "text-[#2F4F46]" : done ? "text-[#171717]" : "text-[#858585] group-hover:text-[#171717]"}>
+                    <span className={on ? "text-servo" : done ? "text-ink" : "text-ink-3 group-hover:text-ink"}>
                       {st.n}
                     </span>
-                    <span className={on ? "text-[#171717]" : done ? "text-[#171717]" : "text-[#858585] group-hover:text-[#171717]"}>
+                    <span className={on ? "text-ink" : done ? "text-ink" : "text-ink-3 group-hover:text-ink"}>
                       {st.label}
                     </span>
                   </button>
@@ -150,15 +150,15 @@ function Pinned() {
             {s ? (
               <div key={s.n} className="kn-panel">
                 <div className="flex items-center gap-3">
-                  <span className="kn-mono text-[10.5px] uppercase tracking-[0.18em] text-[#171717]">
-                    Step {s.n} <span className="text-[#858585]">/ 07</span>
+                  <span className="kn-mono text-[10.5px] uppercase tracking-[0.18em] text-ink">
+                    Step {s.n} <span className="text-ink-3">/ 07</span>
                   </span>
                   <Tag on>{s.tag}</Tag>
                 </div>
-                <p className="mt-4 kn-sans text-[16px] leading-[1.6] text-[#3a3a3a]">{s.body}</p>
+                <p className="mt-4 kn-sans text-[16px] leading-[1.6] text-ink-2">{s.body}</p>
               </div>
             ) : (
-              <p className="kn-sans text-[15px] leading-[1.6] text-[#858585]">
+              <p className="kn-sans text-[15px] leading-[1.6] text-ink-3">
                 Each layer is one step an agent runs through Cortex, from describing the arm to handing over a policy. Keep
                 scrolling to take the loop apart.
               </p>
@@ -171,12 +171,12 @@ function Pinned() {
         </div>
 
         {/* Scroll readout */}
-        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-4 px-[clamp(2.5rem,5.5vw,6rem)] pb-6 kn-mono text-[10px] uppercase tracking-[0.16em] text-[#858585]">
+        <div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-center gap-4 px-[clamp(2.5rem,5.5vw,6rem)] pb-6 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3">
           <span>{active < 0 ? (explode < 0.98 ? "Separating layers" : "Exploded view") : `Layer ${STEPS[active].n} of 07`}</span>
-          <span className="relative h-px flex-1 bg-[#E6E6E6]">
-            <span className="absolute inset-y-0 left-0 bg-[#171717]" style={{ width: `${p * 100}%` }} />
+          <span className="relative h-px flex-1 bg-line">
+            <span className="absolute inset-y-0 left-0 bg-ink" style={{ width: `${p * 100}%` }} />
           </span>
-          <span className="tabular-nums text-[#171717]">{p.toFixed(2)}</span>
+          <span className="tabular-nums text-ink">{p.toFixed(2)}</span>
         </div>
       </div>
     </div>
@@ -189,15 +189,15 @@ function StaticExploded() {
     <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)] gap-10 py-24 pl-[clamp(2.5rem,5.5vw,6rem)] pr-[clamp(1.5rem,3vw,3.5rem)]">
       <div>
         <Heading />
-        <ol className="mt-12 border-t border-[#E6E6E6]">
+        <ol className="mt-12 border-t border-line">
           {STEPS.map((s) => (
-            <li key={s.n} className="border-b border-[#E6E6E6] py-5">
+            <li key={s.n} className="border-b border-line py-5">
               <div className="flex items-center gap-3 kn-mono text-[10.5px] uppercase tracking-[0.18em]">
-                <span className="text-[#171717]">{s.n}</span>
-                <span className="text-[#171717]">{s.label}</span>
+                <span className="text-ink">{s.n}</span>
+                <span className="text-ink">{s.label}</span>
                 <Tag>{s.tag}</Tag>
               </div>
-              <p className="mt-2 max-w-[30rem] kn-sans text-[14.5px] leading-[1.6] text-[#555]">{s.body}</p>
+              <p className="mt-2 max-w-[30rem] kn-sans text-[14.5px] leading-[1.6] text-ink-2">{s.body}</p>
             </li>
           ))}
         </ol>
@@ -229,22 +229,22 @@ function MobileStack() {
   return (
     <div className="px-6 py-20 sm:px-10">
       <Heading />
-      <p className="mt-5 max-w-[30rem] kn-sans text-[15px] leading-[1.6] text-[#555]">
+      <p className="mt-5 max-w-[30rem] kn-sans text-[15px] leading-[1.6] text-ink-2">
         Each layer is one step an agent runs through Cortex, from describing the arm to handing over a policy.
       </p>
       <ol className="mt-10">
         {STEPS.map((s, i) => (
           <li key={s.n} ref={(el) => void (refs.current[i] = el)} data-i={i} className="relative">
-            {i > 0 && <div aria-hidden className="mx-auto h-8 w-px border-l border-dashed border-[#BDBDBD]" />}
+            {i > 0 && <div aria-hidden className="mx-auto h-8 w-px border-l border-dashed border-ink-4" />}
             <svg viewBox="-205 -118 410 250" className="mx-auto block w-full max-w-[300px]" aria-hidden>
               <Plate glyph={s.glyph} tone={active === i ? "active" : "idle"} />
             </svg>
             <div className="mt-4 flex flex-wrap items-center gap-3 kn-mono text-[10.5px] uppercase tracking-[0.18em]">
-              <span className={active === i ? "text-[#2F4F46]" : "text-[#171717]"}>{s.n}</span>
-              <span className="text-[#171717]">{s.label}</span>
+              <span className={active === i ? "text-servo" : "text-ink"}>{s.n}</span>
+              <span className="text-ink">{s.label}</span>
               <Tag on={active === i}>{s.tag}</Tag>
             </div>
-            <p className="mt-2 kn-sans text-[14.5px] leading-[1.6] text-[#555]">{s.body}</p>
+            <p className="mt-2 kn-sans text-[14.5px] leading-[1.6] text-ink-2">{s.body}</p>
           </li>
         ))}
       </ol>

@@ -2,10 +2,10 @@ import { memo } from "react";
 import { box, path, proj, ring, type P3 } from "./iso";
 import type { GlyphKind } from "./steps";
 
-export const INK = "#171717";
-export const GREY = "#858585";
-export const LINE = "#E6E6E6";
-export const ACCENT = "#2F4F46";
+export const INK = "var(--kn-ink)";
+export const GREY = "var(--kn-grey)";
+export const LINE = "var(--line)";
+export const ACCENT = "var(--kn-accent)";
 
 /** Plate half-size and thickness (plate-local units). */
 export const H = 110;
@@ -26,9 +26,9 @@ const HALO = path(ring(0, 0, 96, 0, Math.PI * 2, 96));
 export type PlateTone = "idle" | "active" | "dim";
 
 const TONES = {
-  idle: { top: "#FFFFFF", sideV: "#F4F4F4", sideU: "#E9E9E9", edge: INK, glyph: GREY, glyphFill: "#F4F4F4" },
-  dim: { top: "#FFFFFF", sideV: "#F7F7F7", sideU: "#EFEFEF", edge: "#BDBDBD", glyph: "#C4C4C4", glyphFill: "#F7F7F7" },
-  active: { top: "#F4F7F6", sideV: ACCENT, sideU: "#24403A", edge: ACCENT, glyph: ACCENT, glyphFill: "#DCE6E3" },
+  idle: { top: "var(--kn-paper)", sideV: "var(--kn-face-v)", sideU: "var(--kn-face-u)", edge: INK, glyph: GREY, glyphFill: "var(--kn-face-v)" },
+  dim: { top: "var(--kn-paper)", sideV: "var(--kn-dim-v)", sideU: "var(--kn-dim-u)", edge: "var(--kn-faint)", glyph: "var(--kn-faint-2)", glyphFill: "var(--kn-dim-v)" },
+  active: { top: "var(--kn-accent-top)", sideV: ACCENT, sideU: "var(--kn-accent-deep)", edge: ACCENT, glyph: ACCENT, glyphFill: "var(--kn-accent-fill)" },
 } as const;
 
 const ease = "fill 420ms cubic-bezier(0.23,1,0.32,1), stroke 420ms cubic-bezier(0.23,1,0.32,1), opacity 420ms ease";

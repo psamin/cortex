@@ -5,15 +5,15 @@ export function SectionHead({ fig, label, first, second, titleId, children }: { 
   return (
     <div className="max-w-[44rem]">
       <div className="kn-label kn-label-rule">
-        <span className="text-[#171717]">{fig}</span>
+        <span className="text-ink">{fig}</span>
         <span>{label}</span>
       </div>
-      <h2 id={titleId} className="kn-display mt-6 text-[clamp(2rem,3.3vw,3.25rem)] text-[#171717]">
+      <h2 id={titleId} className="kn-display mt-6 text-[clamp(2rem,3.3vw,3.25rem)] text-ink">
         {first}
         <br />
         <span className="kn-second">{second}</span>
       </h2>
-      {children && <div className="mt-6 max-w-[34rem] kn-sans text-[15px] leading-[1.65] text-[#555]">{children}</div>}
+      {children && <div className="mt-6 max-w-[34rem] kn-sans text-[15px] leading-[1.65] text-ink-2">{children}</div>}
     </div>
   );
 }

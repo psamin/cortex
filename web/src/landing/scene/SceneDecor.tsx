@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import { useFrame } from "@react-three/fiber";
 import { ContactShadows, Grid, Line } from "@react-three/drei";
 import * as THREE from "three";
-import { INK, PALETTE } from "../robot/RobotMaterials";
+import { useScenePalette } from "../robot/RobotMaterials";
 import { useRuntime } from "../robot/runtime";
 import { maxReach } from "../../robotics/robotConfig";
 
@@ -18,6 +18,7 @@ export function SceneLighting() {
 }
 
 export function EngineeringGrid({ visible = true }: { visible?: boolean }) {
+  const pal = useScenePalette();
   return (
     <group visible={visible}>
       <Grid
@@ -25,10 +26,10 @@ export function EngineeringGrid({ visible = true }: { visible?: boolean }) {
         args={[12, 12]}
         cellSize={0.1}
         cellThickness={0.55}
-        cellColor="#EFEFEF"
+        cellColor={pal.gridCell}
         sectionSize={0.5}
         sectionThickness={0.8}
-        sectionColor="#E2E2E2"
+        sectionColor={pal.gridSection}
         fadeDistance={4.2}
         fadeStrength={2.2}
         fadeFrom={0}
@@ -40,6 +41,7 @@ export function EngineeringGrid({ visible = true }: { visible?: boolean }) {
 }
 
 export function GroundShadow() {
+  const pal = useScenePalette();
   return (
     <ContactShadows
       position={[0, 0.0005, 0]}
@@ -48,7 +50,7 @@ export function GroundShadow() {
       blur={2.6}
       far={1.1}
       opacity={0.22}
-      color="#000000"
+      color={pal.shadow}
       frames={Infinity}
     />
   );
@@ -56,6 +58,7 @@ export function GroundShadow() {
 
 /** Dashed reach circle and yaw ticks on the floor: construction lines of the drawing. */
 export function FloorConstruction() {
+  const pal = useScenePalette();
   const r = maxReach() * 0.62;
   const circle = useMemo(() => {
     const pts: THREE.Vector3[] = [];
@@ -77,14 +80,14 @@ export function FloorConstruction() {
   }, [r]);
   return (
     <group>
-      <Line points={circle} color="#BDBDBD" lineWidth={0.8} dashed dashSize={0.025} gapSize={0.02} />
-      <Line points={ticks} segments color="#BDBDBD" lineWidth={0.8} />
+      <Line points={circle} color={pal.construction} lineWidth={0.8} dashed dashSize={0.025} gapSize={0.02} />
+      <Line points={ticks} segments color={pal.construction} lineWidth={0.8} />
       <Line
         points={[
           [-r - 0.15, 0.002, 0],
           [r + 0.15, 0.002, 0],
         ]}
-        color="#D4D4D4"
+        color={pal.guide}
         lineWidth={0.7}
         dashed
         dashSize={0.04}
@@ -95,7 +98,7 @@ export function FloorConstruction() {
           [0, 0.002, -r - 0.15],
           [0, 0.002, r + 0.15],
         ]}
-        color="#D4D4D4"
+        color={pal.guide}
         lineWidth={0.7}
         dashed
         dashSize={0.04}
@@ -128,6 +131,7 @@ const reticlePoints = (() => {
 
 /** Camera-facing target reticle + dashed trajectory from the TCP to the target. */
 export function TargetMarkers() {
+  const pal = useScenePalette();
   const rt = useRuntime();
   const group = useRef<THREE.Group>(null);
   const traj = useRef<THREE.Object3D & { geometry: { setPositions: (a: ArrayLike<number>) => void }; computeLineDistances: () => void }>(null);
@@ -165,11 +169,11 @@ export function TargetMarkers() {
   return (
     <>
       <group ref={group}>
-        <Line points={reticlePoints.ring} color={INK} lineWidth={1.1} depthTest={false} renderOrder={10} />
-        <Line points={reticlePoints.ticks} segments color={INK} lineWidth={1.1} depthTest={false} renderOrder={10} />
+        <Line points={reticlePoints.ring} color={pal.ink} lineWidth={1.1} depthTest={false} renderOrder={10} />
+        <Line points={reticlePoints.ticks} segments color={pal.ink} lineWidth={1.1} depthTest={false} renderOrder={10} />
         <mesh renderOrder={10}>
           <circleGeometry args={[0.007, 20]} />
-          <meshBasicMaterial color={INK} depthTest={false} />
+          <meshBasicMaterial color={pal.ink} depthTest={false} />
         </mesh>
       </group>
       <Line
@@ -178,7 +182,7 @@ export function TargetMarkers() {
           [0, 0, 0],
           [0, 0, 0],
         ]}
-        color={PALETTE.label}
+        color={pal.label}
         lineWidth={1}
         dashed
         dashSize={0.018}

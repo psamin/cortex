@@ -17,6 +17,7 @@ export default {
         pass: v("pass"),
         fault: v("fault"),
         caution: v("caution"),
+        line: { DEFAULT: "var(--line)", soft: "var(--line-soft)", strong: "var(--line-strong)" },
       },
       borderColor: { line: "var(--line)", "line-soft": "var(--line-soft)", "line-strong": "var(--line-strong)" },
       fontFamily: {

@@ -13,6 +13,7 @@ import { ApiError, API_BASE } from "../api/client";
 import type { JobStatus } from "../api/types";
 import { cn, errorMessage } from "../lib/format";
 import { IsoIcon, SketchScene, type IsoIconName } from "../sketch";
+import { GlowEdge } from "./ui/spotlight-card";
 
 // ------------------------------------------------------------------ Button
 type BtnVariant = "primary" | "secondary" | "ghost" | "danger";
@@ -121,6 +122,7 @@ export function Panel({
 }) {
   return (
     <section id={id} className={cn("sk-depth relative rounded bg-plate border border-line-strong", className)}>
+      <GlowEdge />
       {(title || actions) && (
         <header className="flex min-h-11 items-center gap-3 border-b border-line px-4 py-2">
           <div className="flex min-w-0 flex-1 items-center gap-2.5">

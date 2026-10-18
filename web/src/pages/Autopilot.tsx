@@ -8,6 +8,7 @@ import { ProvenanceBadge } from "../components/AgentTrace";
 import { RefChip, useApprover } from "../components/refs";
 import { Badge, Button, ErrorState, InfoTip, Input, Segmented, Skeleton, Toggle, type Tone, InlineError } from "../components/ui";
 import { cn, evidenceValue, humanize, pct } from "../lib/format";
+import { GlowEdge } from "../components/ui/spotlight-card";
 
 // ------------------------------------------------------------------ policy fields
 /** Standing approvals: what autopilot may do without asking. Shared by onboarding and the hero. */
@@ -157,6 +158,7 @@ export function AutopilotHero({ project }: { project: Project }) {
 
   return (
     <section className="sk-depth relative rounded bg-plate border border-line-strong">
+      <GlowEdge />
       <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line-soft px-4 py-3">
         <div className="flex items-center gap-2">
           <span

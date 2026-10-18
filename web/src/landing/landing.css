@@ -4,14 +4,49 @@
 .kn-sans { font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; }
 .kn-mono { font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace; }
 
+/*
+  Drawing tokens for the landing figures (FIG.02 plates, callouts). Light values are the
+  Kinetic originals; dark keeps the structure inverted (dark faces, light ink), like the sketch kit.
+*/
+:root,
+[data-theme="light"] {
+  --kn-ink: #171717;
+  --kn-grey: #858585;
+  --kn-faint: #bdbdbd;
+  --kn-faint-2: #c4c4c4;
+  --kn-paper: #ffffff;
+  --kn-face-v: #f4f4f4;
+  --kn-face-u: #e9e9e9;
+  --kn-dim-v: #f7f7f7;
+  --kn-dim-u: #efefef;
+  --kn-accent: #2f4f46;
+  --kn-accent-deep: #24403a;
+  --kn-accent-top: #f4f7f6;
+  --kn-accent-fill: #dce6e3;
+}
+[data-theme="dark"] {
+  --kn-ink: #e6e6e6;
+  --kn-grey: #8c8c8c;
+  --kn-faint: #4a4b4b;
+  --kn-faint-2: #3f4040;
+  --kn-paper: #0e0f0f;
+  --kn-face-v: #1c1d1d;
+  --kn-face-u: #262727;
+  --kn-dim-v: #151616;
+  --kn-dim-u: #1c1d1d;
+  --kn-accent: #7aa89a;
+  --kn-accent-deep: #4f7a6d;
+  --kn-accent-top: #16201d;
+  --kn-accent-fill: #22332e;
+}
+
 .kn-page {
-  background: #ffffff;
-  color: #171717;
-  color-scheme: light;
+  background: rgb(var(--bench));
+  color: rgb(var(--ink));
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
 }
-.kn-page *:focus-visible { outline-color: #171717; }
+.kn-page *:focus-visible { outline-color: rgb(var(--ink)); }
 
 /* Text entrance: pure CSS so copy never waits on JS or WebGL. */
 @keyframes kn-rise {

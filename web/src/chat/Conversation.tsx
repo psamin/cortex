@@ -11,6 +11,7 @@ import { Markdown } from "./Markdown";
 import { IsoIcon } from "../sketch";
 import { toolIcon } from "./toolIcon";
 import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
+import { GlowEdge } from "../components/ui/spotlight-card";
 
 /** [chip label, message sent] */
 const SUGGESTIONS: [string, string][] = [
@@ -302,6 +303,7 @@ function ToolGroup({ tools }: { tools: ToolItem[] }) {
   const labels = [...new Set(tools.map((t) => toolLabel(t.tool, t.args)))];
   return (
     <div className="enter sk-depth relative rounded border border-line-strong bg-plate">
+      <GlowEdge />
       <button type="button" onClick={() => setOpen((o) => !o)} className="group flex w-full items-center gap-2.5 px-3 py-2 text-left" aria-expanded={open}>
         <IsoIcon name={toolIcon((running ?? tools[tools.length - 1]).tool)} size={20} accent={!!running} />
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
@@ -333,6 +335,7 @@ function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; 
   if (it.superseded) return null; // a later run of the same kind succeeded: the old failure is history
   return (
     <div className="enter sk-depth relative flex items-start gap-2.5 rounded border border-line-strong bg-plate px-3 py-2.5">
+      <GlowEdge />
       <IsoIcon name={toolIcon(it.jobKind)} size={20} />
       <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
         <StatusIcon status={status} />
@@ -379,6 +382,7 @@ function ToolRow({ it, nested }: { it: ToolItem; nested?: boolean }) {
   const hasDetails = !!it.summary || args.length > 0;
   return (
     <div className={cn("enter", !nested && "sk-depth relative rounded border border-line-strong bg-plate")}>
+      {!nested && <GlowEdge />}
       <button type="button" onClick={() => hasDetails && setOpen((o) => !o)} className={cn("group flex w-full items-center gap-2.5 text-left", nested ? "py-0.5" : "px-3 py-2", hasDetails && "cursor-pointer")}>
         <IsoIcon name={toolIcon(it.tool)} size={nested ? 16 : 20} accent={it.status === "running"} />
         <span className="flex h-4 w-4 shrink-0 items-center justify-center">
