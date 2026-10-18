@@ -189,16 +189,31 @@ def test_a_job_that_left_the_queue_has_ended():
 
 
 async def test_a_failed_request_cools_down_before_asking_the_cluster_again(monkeypatch):
-    """#221: never hammer the shared cluster: after a failure, start() refuses for a while without any ssh."""
+    """#221: never hammer the shared cluster: after a failure, start() submits nothing for a while."""
     sent = []
 
     async def fake_sh(*args, timeout=60):
         sent.append(args[-1])
-        return 1, "sbatch: error: Batch job submission failed"
+        return (1, "sbatch: error: Batch job submission failed") if len(sent) == 1 else (0, "NONE\n")
 
     monkeypatch.setattr(lp, "_sh", fake_sh)
     with pytest.raises(RuntimeError):
         await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
     with pytest.raises(RuntimeError, match="protects your Futurama access"):
         await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
-    assert len(sent) == 1  # the second request never reached the cluster
+    assert "sbatch" in sent[0] and "sbatch" not in sent[1]  # during the cooldown: look for a server, submit nothing
+
+
+async def test_during_the_cooldown_an_already_running_server_is_still_attached(monkeypatch):
+    """A failed attach (e.g. to a job that was just ending) must not lock the studio out of a live server."""
+    sent = []
+
+    async def fake_sh(*args, timeout=60):
+        sent.append(args[-1])
+        return 0, "ATTACH 10639\n"
+
+    monkeypatch.setattr(lp, "_sh", fake_sh)
+    monkeypatch.setattr(lp, "_connect_when_ready", _no_connect)
+    lp.STATE["failed_at"] = lp.time.time()  # a request failed a moment ago
+    await lp.start(_ctx("http://127.0.0.1:9", "futurama"))
+    assert lp.STATE["job"] == "10639" and "sbatch" not in sent[0] and "-t PENDING,CONFIGURING,RUNNING" in sent[0]
