@@ -200,7 +200,7 @@ export function Viewer({
           </div>
         ) : !current ? (
           <div className="relative flex h-full flex-col items-center justify-center gap-2 px-8 text-center">
-            <SketchScene width={300} label="FIG.02 / SCENE" value="NO ROLLOUTS" className="mb-2" />
+            <SketchScene width={300} label="SCENE" value="NO ROLLOUTS" className="mb-2" />
             <p className="kn-display text-[28px] text-ink">{(rollouts.data ?? []).length ? "No matches" : "No videos yet"}</p>
             <p className="max-w-sm text-xs leading-5 text-ink-3">Ask the agent to collect demos.</p>
           </div>
@@ -325,14 +325,13 @@ function CompareStage({ a, b, camera }: { a: Rollout; b: Rollout; camera: Camera
       <div className="relative grid min-h-0 flex-1 grid-cols-2 gap-6 p-6 pb-3">
         {(
           [
-            [ok, vOk, rOk, "Succeeded", "bg-pass", "A"],
-            [bad, vBad, rBad, "Failed", "bg-fault", "B"],
+            [ok, vOk, rOk, "Succeeded", "bg-pass"],
+            [bad, vBad, rBad, "Failed", "bg-fault"],
           ] as const
-        ).map(([r, v, ref, label, color, letter]) => (
+        ).map(([r, v, ref, label, color]) => (
           <div key={r.id} className="flex min-h-0 flex-col gap-2">
             <div className="flex items-center gap-2 font-mono text-[10.5px] uppercase tracking-[0.14em]">
               <span className="h-px w-6 bg-ink" />
-              <span className="text-ink">FIG.02{letter}</span>
               <span className={cn("h-1.5 w-1.5 rounded-full", color)} />
               <span className="text-ink">{label}</span>
               <span className="truncate normal-case tracking-normal text-ink-3">
@@ -457,7 +456,7 @@ function Hud({
       <div className="min-w-0">
         <div className="kn-label kn-label-rule">
           <span className="truncate">
-            <span className="text-ink">FIG.02</span>&nbsp;&nbsp;{asked ? "Simulated task" : "Scene"}
+            <span className="text-ink">{asked ? "Simulated task" : "Scene"}</span>
           </span>
         </div>
         <div className="kn-display mt-2 truncate text-[24px] text-ink">{goal}</div>

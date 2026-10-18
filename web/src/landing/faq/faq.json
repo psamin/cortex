@@ -4,7 +4,12 @@
     {
       "id": "what",
       "q": "What is Cortex?",
-      "a": "Cortex is an open-source (MIT) MCP server that lets any AI agent train a robot. The agent describes its arm and a custom environment or layout; Cortex builds it in MuJoCo, collects demonstrations, trains an imitation-learning policy (ACT) and evaluates it, then carries the policy to the physical arm to train further and deploy. It is built on LeRobot, MuJoCo, ACT and the SO-101 (SO-ARM101) arm."
+      "a": "Cortex is an open-source (MIT) MCP server that lets any AI agent train a physical robot with no human in the training loop. The agent describes the arm and a custom environment; Cortex builds it in MuJoCo, the agent collects its own demonstrations, trains an ACT policy, evaluates it and fixes its weak spots, then the policy moves to the physical arm. Built on LeRobot, MuJoCo, ACT and the SO-101 (SO-ARM101) arm."
+    },
+    {
+      "id": "agents",
+      "q": "Why is Cortex built for agents?",
+      "a": "Agents can write and run software, but training a robot still needs people: someone to teleoperate demonstrations, label data, launch runs and judge results. Cortex turns each of those steps into an MCP tool with measured results, so an agent can run the whole loop itself. People only approve GPU spend and anything that moves hardware."
     },
     {
       "id": "train",
@@ -39,7 +44,7 @@
     {
       "id": "real",
       "q": "Can the agent train and deploy on the physical robot arm?",
-      "a": "That is where the loop leads: after simulation, the policy moves to the physical SO-101 to keep training on real demonstrations and then perform the task. Today the whole loop runs in MuJoCo, and a real arm runs a policy only through a local bridge with an operator present, joint, velocity and workspace limits, a watchdog and an e-stop; the API and MCP cannot drive the hardware directly."
+      "a": "That is where the loop leads: after simulation, the policy moves to the physical SO-101 to keep training on real demonstrations and then run the task on the line. Today the whole loop runs in MuJoCo, and a real arm runs a policy only through a local bridge with an operator present, joint, velocity and workspace limits, a watchdog and an e-stop; the API and MCP cannot drive the hardware directly."
     }
   ]
 }

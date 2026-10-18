@@ -1,6 +1,9 @@
 import type { MCPServer, ToolAnnotations } from "mcp-use";
 import { z } from "zod";
-import { callTool } from "./backend.js";
+import { callTool, identityOf } from "./backend.js";
+import { runIntake, withAskHuman } from "./intake.js";
+import { FOLLOW_NOTE, LONG_JOBS, runLong, withFollow } from "./progress.js";
+import { touchProject } from "./resources.js";
 
 // Input schemas mirror the backend registry (GET /api/tools). Where the
 // registry says plain `string` but the domain model only accepts a fixed set
@@ -13,11 +16,16 @@ const projectId = z.string().describe("Cortex project id (prj_...), from cortex_
 const waitS = (max: number, typical: string) =>
   z.number().int().min(0).max(max).optional().describe(
     `Seconds to block waiting for the background job to finish (0-${max}, default 0 = return immediately with the job id). ` +
-      `${typical} Many MCP clients time out a tool call after about 60 s, so prefer wait_s <= 45 and then poll with cortex_get_job.`,
+      `${typical} Ignored when the call carries a progressToken (the call then follows the job to completion with progress). ` +
+      "Without progress, many MCP clients time out a tool call after about 60 s, so prefer wait_s <= 45 and then poll with cortex_get_job.",
   );
 
 const READ: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
 const WRITE: ToolAnnotations = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+/** Overwrites earlier state (replaces derived results or settings); same input, same outcome. */
+const REPLACE: ToolAnnotations = { readOnlyHint: false, destructiveHint: true, idempotentHint: true, openWorldHint: false };
+/** May call an external model provider (agent planner / VLM) and spend the project's model budget. */
+const WRITE_EXTERNAL: ToolAnnotations = { ...WRITE, openWorldHint: true };
 
 type Def = {
   name: string;
@@ -132,7 +140,7 @@ const TOOLS: Def[] = [
       use_vlm: z.boolean().optional().describe("Also ask a vision-language model for failure hypotheses (default true). VLM output is a hypothesis, not evidence."),
       wait_s: waitS(600, "Without the VLM it finishes in about a second; VLM review takes longer."),
     }),
-    annotations: WRITE,
+    annotations: { ...WRITE_EXTERNAL, destructiveHint: true },
   },
   {
     name: "get_failure_clusters",
@@ -155,7 +163,7 @@ const TOOLS: Def[] = [
       project_id: projectId,
       budget: z.number().int().nullish().describe("Demonstrations you can still afford to collect (default: the plan budget + 12 minus accepted episodes)"),
     }),
-    annotations: WRITE,
+    annotations: { ...WRITE, destructiveHint: true },
   },
   {
     name: "create_dataset_version",
@@ -292,7 +300,7 @@ const TOOLS: Def[] = [
       ),
       model_budget_usd: z.number().positive().optional().describe("Planner spend cap in USD (may only lower the default)"),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
   {
     name: "start_agent_collection",
@@ -321,7 +329,7 @@ const TOOLS: Def[] = [
         "camera (default): the planner only sees images + proprioception. privileged: also simulator object poses (labelled as such).",
       ),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
   {
     name: "get_collection_progress",
@@ -364,8 +372,10 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       sources: z.array(z.enum(["sim_agent", "sim_scripted"])).optional().describe("Demo sources (default ['sim_agent'])"),
-      augmentation_preset: z.enum(["lighting_robustness"]).nullish(),
-      policy_type: z.enum(["act", "smolvla"]).optional(),
+      augmentation_preset: z.enum(["lighting_robustness"]).nullish().describe(
+        "Optional image augmentation: 'lighting_robustness' adds darker, brighter, warmer and shadowed copies (default none)",
+      ),
+      policy_type: z.enum(["act", "smolvla"]).optional().describe("'act' (default; fast, single-task) or 'smolvla' (language-conditioned, slower)"),
     }),
     annotations: WRITE,
   },
@@ -381,7 +391,7 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       checkpoint_id: z.string().regex(/^ck_/).describe("Checkpoint id from get_project_state training_jobs[].checkpoint_ids"),
-      episodes_per_branch: z.number().int().min(1).max(50).optional(),
+      episodes_per_branch: z.number().int().min(1).max(50).optional().describe("Held-out episodes per condition (1-50, default 10)"),
     }),
     annotations: WRITE,
   },
@@ -397,10 +407,10 @@ const TOOLS: Def[] = [
       "after they confirm, cortex_launch_training_job.",
     inputSchema: z.object({
       project_id: projectId,
-      max_new_demos: z.number().int().min(1).max(20).optional(),
-      max_usd: z.number().positive().nullish(),
+      max_new_demos: z.number().int().min(1).max(20).optional().describe("Targeted demonstrations to collect in the weakest condition (1-20)"),
+      max_usd: z.number().positive().nullish().describe("Planner spend cap in USD for this round (within the project budget)"),
     }),
-    annotations: WRITE,
+    annotations: WRITE_EXTERNAL,
   },
 
   {
@@ -417,7 +427,7 @@ const TOOLS: Def[] = [
     inputSchema: z.object({
       project_id: projectId,
       repo_id: z.string().describe("Hugging Face dataset repo id"),
-      max_episodes: z.number().int().min(1).max(50).optional(),
+      max_episodes: z.number().int().min(1).max(50).optional().describe("Import at most this many episodes (1-50)"),
     }),
     annotations: { ...WRITE, openWorldHint: true },
   },
@@ -441,9 +451,9 @@ const TOOLS: Def[] = [
       planner: z.enum(["auto", "claude_code", "model"]).optional(),
       training_backend: z.enum(["auto", "futurama_slurm", "manual"]).optional(),
       training_gres: z.enum(["gpu:l40s:1", "gpu:l40:1", "gpu:l4:1", "gpu:h200:1"]).optional(),
-      training_walltime_min: z.number().int().min(15).max(1440).optional(),
+      training_walltime_min: z.number().int().min(15).max(1440).optional().describe("Cluster walltime limit for training, in minutes (15-1440)"),
     }),
-    annotations: WRITE,
+    annotations: REPLACE,
   },
   // ---- drive the simulated arm yourself (Cortex validates + executes every command; the simulator judges success)
   {
@@ -490,7 +500,7 @@ const TOOLS: Def[] = [
     description:
       "Simulated arm (MuJoCo, no hardware): point at the red cube's centre in the most recent overhead image. Cortex back-projects the pixel through the " +
       "calibrated camera, refines it in the image, estimates the cube's yaw, and returns validated pregrasp/grasp poses.",
-    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
+    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint.describe("Pixel at the red cube's centre in the latest overhead image") }),
     annotations: ROBOT,
     backend: act("propose_grasp", (i) => ({ object_id: "red_cube", image_point: i.image_point })),
   },
@@ -498,7 +508,11 @@ const TOOLS: Def[] = [
     name: "robot_move",
     title: "Simulated arm: move gripper",
     description: "Simulated arm (MuJoCo, no hardware): move the gripper tip to a pose (use the poses from cortex_robot_propose_grasp). Validated before it moves.",
-    inputSchema: z.object({ session_id: sessionId, target: pose, reason: z.string().max(200).optional() }),
+    inputSchema: z.object({
+      session_id: sessionId,
+      target: pose.describe("Gripper-tip target pose in metres (world frame), e.g. a pose from cortex_robot_propose_grasp"),
+      reason: z.string().max(200).optional().describe("Why you are moving there (logged with the episode)"),
+    }),
     annotations: ROBOT,
     backend: act("move_end_effector", (i) => ({ target: i.target, reason: i.reason ?? "" })),
   },
@@ -522,7 +536,7 @@ const TOOLS: Def[] = [
     name: "robot_place",
     title: "Simulated arm: place",
     description: "Simulated arm (MuJoCo, no hardware): carry the held cube to the point you mark at the green box's centre (overhead image) and release it.",
-    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint }),
+    inputSchema: z.object({ session_id: sessionId, image_point: imagePoint.describe("Pixel at the green box's centre in the latest overhead image") }),
     annotations: ROBOT,
     backend: act("place_object", (i) => ({ image_point: i.image_point })),
   },
@@ -539,7 +553,11 @@ const TOOLS: Def[] = [
     title: "Simulated arm: finish episode",
     description:
       "Simulated arm (MuJoCo, no hardware): end the episode. The simulator (not you) decides success; successes are saved as demonstrations, failures as diagnostics.",
-    inputSchema: z.object({ session_id: sessionId, believes_success: z.boolean(), summary: z.string().max(400).optional() }),
+    inputSchema: z.object({
+      session_id: sessionId,
+      believes_success: z.boolean().describe("Whether you think the cube ended in the box (the simulator decides)"),
+      summary: z.string().max(400).optional().describe("Short account of the episode, kept with the demonstration"),
+    }),
     annotations: ROBOT,
     backend: (i) => ["robot_finish_episode", { session_id: i.session_id, believes_success: i.believes_success, summary: i.summary ?? "" }],
   },
@@ -581,7 +599,7 @@ const TOOLS: Def[] = [
         "Partial intake. Sizes in metres (cylinder size = [diameter, height], not radius); positions in the world frame (+x forward from the arm base, +y to its left). e.g. {objects:[{name:'cup', mass_kg:0.2}], zones:[{name:'coaster', center:[0.3,0.1]}], task:{pick:'cup', place:['coaster']}, environment:{lighting:'dim', obstacles:[...]}}",
       ),
     }),
-    annotations: WRITE,
+    annotations: REPLACE,
   },
   {
     name: "get_intake_status",
@@ -601,7 +619,7 @@ const TOOLS: Def[] = [
       "NEXT: check the scene with cortex_capture_frame, fix any infeasible items with cortex_update_intake, then collect demos " +
       "with cortex_start_agent_collection.",
     inputSchema: z.object({ project_id: projectId }),
-    annotations: WRITE,
+    annotations: { ...WRITE, idempotentHint: true },
   },
   {
     name: "capture_frame",
@@ -616,22 +634,132 @@ const TOOLS: Def[] = [
     }),
     annotations: READ,
   },
+  // ---------------------------------------------------------------- RL sandboxes (#80)
+  {
+    name: "get_policy_weaknesses",
+    title: "Get policy weaknesses",
+    description:
+      "Where the trained policy is weak, measured from its latest sim evaluation (never the scripted oracle). For each " +
+      "condition below target: success rate with a Wilson 95% interval and n, failure modes from sim telemetry " +
+      "(grasp_failed, dropped_before_target, released_outside_target), start-state clusters, and VLM hypotheses " +
+      "(unverified). Ranked by the gap that holds even at the interval's upper bound. Needs a finished " +
+      "cortex.evaluate_learned_policy run.",
+    inputSchema: z.object({
+      project_id: projectId,
+      checkpoint_id: z.string().optional().describe("A trained checkpoint (ck_...); default: the latest evaluated one"),
+      target: z.number().min(0).max(1).optional().describe("Success rate a condition should reach (default 0.8)"),
+    }),
+    annotations: READ,
+  },
+  {
+    name: "propose_rl_sandboxes",
+    title: "Propose RL sandboxes",
+    description:
+      "Propose one RL sandbox per top weakness. Method cem_skill: CEM tunes 4-5 corrections (grasp offset, depth, yaw, " +
+      "close timing, carry/release height) of the validated IK pick-and-place skill under domain randomization " +
+      "centred on the weak condition; successful rollouts become targeted demos for retraining ACT. Each sandbox runs " +
+      "a measured pilot as a background job (base skill + a short CEM pilot). Once its status is 'ready' it reports: " +
+      "pilot{n, successes, wilson_95}, predicted_sandbox_success, predicted_policy_uplift, predicted_regression_elsewhere " +
+      "(each {mean, ci90, source: measured|prior|learned}), p_improve_ge_delta, uplift_per_hour, cost{episodes, " +
+      "cpu_hours, gpu_hours, wall_clock_est_min, usd} and assumptions[]. Everything predicted is an estimate. " +
+      "Pilots take ~1-5 min; poll cortex.get_rl_sandbox_status.",
+    inputSchema: z.object({
+      project_id: projectId,
+      checkpoint_id: z.string().optional().describe("A trained checkpoint (ck_...) whose weaknesses to target; default: the latest evaluated one"),
+      max_sandboxes: z.number().int().min(1).max(6).optional().describe("Default 3"),
+      budget: z
+        .object({
+          iterations: z.number().int().min(1).max(15).optional(),
+          population: z.number().int().min(4).max(128).optional(),
+          pilot_episodes: z.number().int().min(4).max(100).optional(),
+          demos: z.number().int().min(0).max(200).optional(),
+          heldout_episodes: z.number().int().min(5).max(200).optional(),
+          max_parallel: z.number().int().min(1).max(16).optional(),
+        })
+        .optional()
+        .describe("Overrides of the sandbox budget (defaults: 12 iterations, population 32, 30 demos)"),
+      wait_s: waitS(300, "Pilots take about 1-5 minutes."),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "accept_rl_sandboxes",
+    title: "Accept RL sandboxes",
+    description:
+      "Start sandboxes whose pilot finished (status 'ready'). Local CPU sandboxes cost $0, and you may accept them " +
+      "within budget_cap and the project's standing budget. GPU or paid sandboxes come back approval_required: a " +
+      "human approves those in the Cortex studio. Each sandbox trains, evaluates base vs tuned skill on matched " +
+      "held-out seeds (McNemar), then saves successful demos with provenance rl_sandbox:<id>.",
+    inputSchema: z.object({
+      project_id: projectId,
+      ids: z.array(z.string()).min(1).describe("Sandbox ids (rl_...) from cortex.propose_rl_sandboxes"),
+      budget_cap: z.number().min(0).describe("The most these sandboxes may cost, in USD (local CPU = $0)"),
+      max_cpu_hours: z.number().positive().optional().describe("Optional cap on the estimated CPU hours"),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "get_rl_sandbox_status",
+    title: "Get RL sandbox status",
+    description:
+      "Live progress of one sandbox (sandbox_id) or all of a project's (project_id): status, phase (pilot | train | " +
+      "heldout | demos), CEM iteration, episodes, success with its interval, elite parameters, the current " +
+      "randomization ranges (they widen once the tuned skill passes 80%), elapsed time and cost so far. When it has " +
+      "finished: the measured result (base vs tuned success on matched held-out seeds, McNemar p, stop reason, demos).",
+    inputSchema: z.object({
+      project_id: z.string().optional().describe("All sandboxes of this project"),
+      sandbox_id: z.string().optional().describe("One sandbox (rl_...)"),
+    }),
+    annotations: READ,
+  },
+  {
+    name: "stop_rl_sandbox",
+    title: "Stop RL sandbox",
+    description:
+      "Stop a sandbox. A proposed or ready one is dismissed and a piloting one is cancelled. A running one stops " +
+      "after its current CEM iteration, still evaluates what it has on held-out seeds, and reports why it stopped.",
+    inputSchema: z.object({ sandbox_id: z.string().describe("Sandbox id (rl_...)") }),
+    annotations: WRITE,
+  },
+  {
+    name: "get_session_link",
+    title: "Get session link",
+    description:
+      "The Cortex studio URL where your human can watch this session live: every tool call with its arguments, " +
+      "results, images, durations and approvals. Share it with them when you start working.",
+    inputSchema: z.object({}),
+    annotations: READ,
+  },
 ];
+
+const INTAKE = new Set(["start_intake", "update_intake"]);
 
 /** Registers every backend tool as `cortex.<name>`. */
 export function registerTools(server: MCPServer) {
   for (const t of TOOLS) {
+    // Long jobs stream progress (progress.ts); intake asks the human (intake.ts); the rest is a plain proxy.
+    const long = t.name in LONG_JOBS;
+    const intake = INTAKE.has(t.name);
     server.tool(
       {
         name: `cortex.${t.name}`,
         title: t.title,
-        description: t.description,
-        inputSchema: t.inputSchema,
+        description: long ? t.description + FOLLOW_NOTE : t.description,
+        inputSchema: long ? withFollow(t.inputSchema) : intake ? withAskHuman(t.inputSchema) : t.inputSchema,
         annotations: { title: t.title, ...t.annotations },
       },
       async (input, ctx) => {
         const [name, args] = t.backend ? t.backend(input as Record<string, unknown>) : [t.name, input as Record<string, unknown>];
-        return callTool(name, args, ctx.signal);
+        if (intake) return runIntake(t.name as "start_intake" | "update_intake", args, ctx);
+        const result = long
+          ? await runLong(t.name, name, args, ctx, (p) => touchProject(server, p))
+          : await callTool(name, args, ctx.signal, identityOf(ctx));
+        const data = (result.structuredContent ?? {}) as Record<string, unknown>;
+        const project = (args.project_id ?? data.project_id) as string | undefined;
+        if (!result.isError && !t.annotations.readOnlyHint && typeof project === "string") {
+          touchProject(server, project, t.name === "create_policy_project" || t.name === "create_project");
+        }
+        return result;
       },
     );
   }

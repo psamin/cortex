@@ -152,6 +152,10 @@ async def _409(_, e: FileNotFoundError):
 
 
 def actor(request: Request) -> str:
+    from ..services.agent_obs import has_agent_headers
+
+    if has_agent_headers(request.headers):  # an agent key or session is never a human click (#105)
+        return "mcp"
     a = request.headers.get("x-cortex-actor", "gui")
     return a if a in ("gui", "agent", "mcp") else "gui"
 
@@ -628,6 +632,10 @@ def _local_human(request: Request) -> None:
     remote = request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for")
     if remote or request.client is None or request.client.host not in LOCAL:
         raise hw_setup.HardwareRefused("Real-robot controls are only available in the local studio.")
+    from ..services.agent_obs import has_agent_headers
+
+    if has_agent_headers(request.headers) or request.headers.get("x-cortex-actor") in ("mcp", "agent"):
+        raise hw_setup.HardwareRefused("Real-robot controls are a human click in the studio; agents cannot use them.")
 
 
 @app.get("/api/hardware")
@@ -876,17 +884,33 @@ async def ap_policy(pid: str, policy: dict, request: Request):
 # ------------------------------------------------------------------ agent
 class ChatReq(BaseModel):
     message: str
+    thread: str | None = None  # continue this chat thread; default: the latest
 
 
 @app.post("/api/projects/{pid}/agent")
 async def chat(pid: str, req: ChatReq):
-    return StreamingResponse(agent.chat(ctx(), pid, req.message), media_type="text/event-stream")
+    return StreamingResponse(agent.chat(ctx(), pid, req.message, req.thread), media_type="text/event-stream")
 
 
 @app.get("/api/projects/{pid}/agent/history")
-async def history(pid: str):
-    """Full chat log: [{kind: user|assistant|tool_call|tool_result|approval_required|done, ..., at}]."""
-    return agent.load_log(ctx(), pid)
+async def history(pid: str, thread: str | None = None):
+    """One chat thread (the latest unless `thread` is given):
+    [{kind: user|assistant|tool_call|tool_result|approval_required|done|job_done, ..., at}]."""
+    return await agent.load_log(ctx(), pid, thread)
+
+
+@app.get("/api/projects/{pid}/agent/threads")
+async def chat_threads(pid: str):
+    """Past chats, newest first: [{id, title, created_at, updated_at}]."""
+    from ..services import chat_store
+    return [{k: t[k] for k in ("id", "title", "created_at", "updated_at")} for t in await chat_store.threads(ctx(), pid)]
+
+
+@app.post("/api/projects/{pid}/agent/threads")
+async def chat_new_thread(pid: str):
+    from ..services import chat_store
+    t = await chat_store.new_thread(ctx(), pid)
+    return {k: t[k] for k in ("id", "title", "created_at", "updated_at")}
 
 
 @app.get("/api/agent/engine")
@@ -899,13 +923,10 @@ async def agent_engine():
 
 @app.post("/api/projects/{pid}/agent/reset")
 async def agent_reset(pid: str):
-    from ..services import claude_code_agent as cc
-    cc.reset(ctx(), pid)
-    p = agent._log_path(ctx(), pid)
-    if p.exists():
-        p.unlink()
-    agent.HISTORY.pop(pid, None)
-    return {"reset": True}
+    """'New chat': start a new thread; earlier chats stay in the history."""
+    from ..services import chat_store
+    t = await chat_store.new_thread(ctx(), pid)
+    return {"reset": True, "thread": t["id"]}
 
 
 # ------------------------------------------------------------------ tools (MCP)
@@ -917,8 +938,83 @@ async def list_tools():
 
 @app.post("/api/tools/{name}")
 async def call_tool(name: str, args: dict[str, Any], request: Request):
+    from ..services import agent_obs
+
     who = "mcp" if request.headers.get("x-cortex-actor", "mcp") != "agent" else "agent"
+    caller = await agent_obs.resolve(ctx(), request.headers, who)  # agent key, MCP session, client (#105)
     try:
-        return await orch.call_tool(ctx(), name, args, who)
+        return await orch.call_tool(ctx(), name, args, who, caller)
     except ValidationError as e:
         raise HTTPException(422, e.errors(include_url=False)) from e
+
+
+# ------------------------------------------------------------------ RL sandboxes (#80)
+class RLProposeReq(BaseModel):
+    checkpoint_id: str | None = None
+    max_sandboxes: int = 3
+    budget: dict[str, Any] | None = None
+
+
+class RLAcceptReq(BaseModel):
+    ids: list[str]
+    budget_cap: float = 0.0
+    max_cpu_hours: float | None = None
+
+
+@app.get("/api/projects/{pid}/rl/weaknesses")
+async def rl_weaknesses(pid: str, checkpoint_id: str | None = None, target: float = 0.8):
+    from ..services import rl_service
+    ws = await rl_service.weaknesses(ctx(), await orch.get_project(ctx(), pid), checkpoint_id, target)
+    return [w.model_dump(mode="json") for w in ws]
+
+
+@app.post("/api/projects/{pid}/rl/sandboxes")
+async def rl_propose(pid: str, req: RLProposeReq, request: Request):
+    from ..rl import SandboxBudget
+    from ..services import rl_service
+    budget = SandboxBudget.model_validate(req.budget) if req.budget else None
+    sbs = await rl_service.propose_sandboxes(ctx(), await orch.get_project(ctx(), pid), budget, req.checkpoint_id,
+                                             req.max_sandboxes, actor(request))
+    return [rl_service.proposal_view(s) for s in sbs]
+
+
+@app.post("/api/projects/{pid}/rl/sandboxes/accept")
+async def rl_accept(pid: str, req: RLAcceptReq, request: Request):
+    from ..services import rl_service
+    sbs = await rl_service.accept(ctx(), await orch.get_project(ctx(), pid), req.ids, req.budget_cap,
+                                  req.max_cpu_hours, actor(request))
+    return [rl_service.status_view(s) for s in sbs]
+
+
+@app.get("/api/projects/{pid}/rl/sandboxes")
+async def rl_list(pid: str):
+    from ..services import rl_service
+    return [rl_service.status_view(s) for s in await rl_service.list_sandboxes(ctx(), pid)]
+
+
+@app.get("/api/rl/sandboxes/{sid}")
+async def rl_get(sid: str):
+    from ..services import rl_service
+    return rl_service.status_view(await rl_service.get(ctx(), sid))
+
+
+@app.post("/api/rl/sandboxes/{sid}/stop")
+async def rl_stop(sid: str, request: Request):
+    from ..services import rl_service
+    return rl_service.status_view(await rl_service.stop(ctx(), sid, actor(request)))
+
+
+@app.get("/api/rl/sandboxes/{sid}/live.jpg")
+async def rl_live(sid: str):
+    from ..services import rl_service
+    sb = await rl_service.get(ctx(), sid)
+    path = ctx().local(f"projects/{sb.project_id}/rl/{sb.id}/live/live.jpg")
+    if not path.exists():
+        raise HTTPException(404, "no live frame yet")
+    return Response(path.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+# ------------------------------------------------------------------ agent observability (#105)
+from .agents import router as agents_router  # noqa: E402
+
+app.include_router(agents_router)

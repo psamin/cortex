@@ -1,6 +1,11 @@
 import { MCPServer } from "mcp-use";
+import { trackClients } from "./src/backend.js";
+import { intakeRequestState } from "./src/intake.js";
 import { registerPrompts } from "./src/prompts.js";
 import { registerRelay } from "./src/relay.js";
+import { registerResources } from "./src/resources.js";
+import { registerStages } from "./src/stages.js";
+import { registerSampling } from "./src/sampling.js";
 import { registerTools } from "./src/tools.js";
 import { registerViews } from "./src/views.js";
 
@@ -14,6 +19,14 @@ const server = new MCPServer({
   description:
     "Cortex robot-learning studio: create projects, record simulated demonstrations, analyze failures, build datasets, " +
     "propose training (human-approved) and evaluate policies in simulation.",
+  // Verifies the HMAC-signed state that intake forms (input_required) carry between rounds.
+  requestState: intakeRequestState,
+  // Branding for clients and Manufact's publish checks; files live in public/ (same mark as the studio favicon).
+  icons: [
+    { src: "icon.svg", mimeType: "image/svg+xml", sizes: ["any"] },
+    { src: "icon.png", mimeType: "image/png", sizes: ["512x512"] },
+  ],
+  websiteUrl: "https://github.com/psamin/speculativespeculativeagentaction/tree/main/mcp",
   instructions: [
     "Cortex trains robot manipulation policies (LeRobot ACT or SmolVLA) from demonstrations recorded in simulation.",
     "",
@@ -39,14 +52,28 @@ const server = new MCPServer({
     "8. cortex_improve_policy: targets the weakest measured condition, collects more demos and proposes retraining.",
     "   Retraining needs approval again (back to step 4).",
     "",
-    "Background jobs return a job_id. Poll them with cortex_get_job. Use cortex_get_next_actions when you are unsure",
+    "LONG JOBS: if your client sends a progressToken, recording, analysis, dataset, evaluation and collection tools stay",
+    "open, stream progress and return the finished result: no wait_s and no polling needed. Otherwise they return a job_id:",
+    "poll it with cortex_get_job (or cortex_get_collection_progress). Use cortex_get_next_actions when you are unsure",
     "what comes next. Report only measured simulator results; VLM failure clusters are hypotheses.",
+    "",
+    "INTAKE: never guess answers to intake questions. If the client supports forms, cortex_start_intake / cortex_update_intake",
+    "ask the human directly; otherwise relay the questions to the human and send their answers with cortex_update_intake.",
+    "",
+    "RESOURCES (read-only context, ids autocomplete): cortex://projects, cortex://projects/{project_id} (state),",
+    ".../episodes, .../intake, .../datasets/{version}/lineage, .../evaluations/{evaluation_id}, .../policy/model-card,",
+    "cortex://jobs/{job_id}. Tools are listed in golden-path order with _meta cortex/stage and cortex/tier; connect to",
+    "/mcp?toolset=core to hide the step-by-step robot and manual tools, or /mcp?project=<id> to list only that stage's tools.",
   ].join("\n"),
 });
 
+trackClients(server); // remember each connection's clientInfo for the studio's Agents view
 registerTools(server);
 registerViews(server); // MCP Apps views rendered in the agent's chat (#119)
 registerPrompts(server);
 registerRelay(server);
+registerResources(server);
+registerStages(server);
+registerSampling(server);
 
 export default server;

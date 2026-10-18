@@ -17,6 +17,7 @@ from typing import Any
 from .base import Store
 
 MIGRATIONS = Path(__file__).resolve().parents[2] / "migrations"
+_IDENT = re.compile(r"[a-z_][a-z0-9_]*")
 
 
 def pg_to_sqlite(sql: str) -> str:
@@ -78,9 +79,13 @@ class SqliteStore(Store):
         return _row(r) if r else None
 
     async def list(self, table: str, project_id: str | None = None,
-                   status: str | None = None) -> list[dict[str, Any]]:
+                   status: str | None = None, where: dict[str, str] | None = None) -> list[dict[str, Any]]:
         assert self._conn
         q, args = f"SELECT * FROM {table} WHERE 1=1", []
+        for col, val in (where or {}).items():
+            if not _IDENT.fullmatch(col):
+                raise ValueError(f"bad column {col!r}")
+            q, args = q + f" AND {col} = ?", [*args, val]
         if project_id is not None:
             q, args = q + " AND project_id = ?", [*args, project_id]
         if status is not None:

@@ -1308,6 +1308,206 @@
       "needsApproval": false
     },
     {
+      "name": "get_policy_weaknesses",
+      "mcpTools": [
+        "cortex.get_policy_weaknesses"
+      ],
+      "description": "Where the trained policy is weak, measured from its latest sim evaluation: per condition the success rate with a Wilson 95% interval and n, failure modes from sim telemetry, start-state clusters, and VLM hypotheses (unverified). Ranked by the gap that holds at the upper bound.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "a trained checkpoint; default: the latest evaluated one"
+          },
+          "target": {
+            "default": 0.8,
+            "description": "success rate a condition should reach",
+            "maximum": 1,
+            "minimum": 0,
+            "type": "number"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "propose_rl_sandboxes",
+      "mcpTools": [
+        "cortex.propose_rl_sandboxes"
+      ],
+      "description": "Propose one RL sandbox per top weakness (skill-parameter RL with CEM, which tunes the validated IK skill; its successful rollouts become targeted demos for retraining ACT). Each runs a measured pilot as a job, then reports the pilot, predicted sandbox success, predicted policy uplift, P(uplift >= delta), regression elsewhere, cost (episodes, CPU hours, $) and assumptions. Predictions are labelled estimates with their source (measured, prior or learned).",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "checkpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "max_sandboxes": {
+            "default": 3,
+            "maximum": 6,
+            "minimum": 1,
+            "type": "integer"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "SandboxBudget overrides: iterations (<=15), population, pilot_episodes, demos, heldout_episodes, max_parallel"
+          },
+          "wait_s": {
+            "default": 0,
+            "description": "wait up to this long for the pilots to finish",
+            "maximum": 300,
+            "minimum": 0,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "accept_rl_sandboxes",
+      "mcpTools": [
+        "cortex.accept_rl_sandboxes"
+      ],
+      "description": "Start sandboxes whose pilot has finished. Local CPU sandboxes cost $0 and you may accept them within budget_cap and the project's standing budget. GPU or paid sandboxes return approval_required: a human approves them in the studio.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "ids": {
+            "description": "sandbox ids from propose_rl_sandboxes (status 'ready')",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 1,
+            "type": "array"
+          },
+          "budget_cap": {
+            "default": 0.0,
+            "description": "the most you allow these sandboxes to cost, in USD. Local CPU sandboxes cost $0",
+            "minimum": 0,
+            "type": "number"
+          },
+          "max_cpu_hours": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "optional cap on estimated CPU hours"
+          }
+        },
+        "required": [
+          "project_id",
+          "ids"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "get_rl_sandbox_status",
+      "mcpTools": [
+        "cortex.get_rl_sandbox_status"
+      ],
+      "description": "Live progress of one sandbox or all of a project's: phase, CEM iteration, episodes, success with interval, elite parameters, the current randomization ranges, elapsed time, cost so far; when finished, the measured held-out result (base vs tuned on matched seeds, McNemar p) and demos.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "sandbox_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "stop_rl_sandbox",
+      "mcpTools": [
+        "cortex.stop_rl_sandbox"
+      ],
+      "description": "Stop a sandbox. A running one stops after its current CEM iteration, still evaluates what it has on held-out seeds, and reports why it stopped.",
+      "inputSchema": {
+        "properties": {
+          "sandbox_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "sandbox_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "collection_snapshot",
       "mcpTools": [],
       "description": "Live snapshot of an agent demonstration collection for the MCP App view: status, successes/attempts, model calls and spend, recent attempts and the latest sim frame.",
@@ -1427,6 +1627,197 @@
         "type": "object"
       },
       "agentCallable": false,
+      "needsApproval": false
+    },
+    {
+      "name": "get_diagnosis_inputs",
+      "mcpTools": [],
+      "description": "Bring your own model: run quality checks and measured failure analysis, then return the keyframe contact sheets, measured telemetry and fixed-taxonomy prompt for the episodes a VLM should review. Answer them with your model and call submit_failure_hypotheses with the analysis_id.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "max_targets": {
+            "default": 4,
+            "description": "episodes to review (failed evaluation rollouts first)",
+            "maximum": 6,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": false,
+      "needsApproval": false
+    },
+    {
+      "name": "submit_failure_hypotheses",
+      "mcpTools": [],
+      "description": "Store your model's failure hypotheses for an analysis from get_diagnosis_inputs. Validated against the fixed taxonomy (any invalid answer rejects the submission); stored as unverified VLM hypotheses with the route and the model you report, then failure clusters are rebuilt.",
+      "inputSchema": {
+        "$defs": {
+          "SubmittedHypothesis": {
+            "properties": {
+              "category": {
+                "description": "one of the fixed failure taxonomy categories",
+                "type": "string"
+              },
+              "confidence": {
+                "description": "the model's own confidence, 0-1 (not a probability)",
+                "maximum": 1,
+                "minimum": 0,
+                "type": "number"
+              },
+              "rationale": {
+                "maxLength": 300,
+                "minLength": 1,
+                "type": "string"
+              },
+              "frame_indices": {
+                "description": "keyframes (0-5) that show it",
+                "items": {
+                  "type": "integer"
+                },
+                "maxItems": 6,
+                "type": "array"
+              }
+            },
+            "required": [
+              "category",
+              "confidence",
+              "rationale"
+            ],
+            "type": "object"
+          },
+          "TargetAnswer": {
+            "additionalProperties": false,
+            "properties": {
+              "ref_id": {
+                "description": "target ref_id from get_diagnosis_inputs",
+                "type": "string"
+              },
+              "reply_text": {
+                "anyOf": [
+                  {
+                    "maxLength": 8000,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "the model's raw reply; parsed and validated by Cortex"
+              },
+              "hypotheses": {
+                "anyOf": [
+                  {
+                    "items": {
+                      "$ref": "#/$defs/SubmittedHypothesis"
+                    },
+                    "maxItems": 3,
+                    "minItems": 1,
+                    "type": "array"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "structured hypotheses (instead of reply_text)"
+              },
+              "error": {
+                "anyOf": [
+                  {
+                    "maxLength": 300,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "the client could not get an answer (declined, failed); recorded, never replaced by a guess"
+              }
+            },
+            "required": [
+              "ref_id"
+            ],
+            "type": "object"
+          }
+        },
+        "additionalProperties": false,
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "analysis_id": {
+            "description": "analysis_id from get_diagnosis_inputs",
+            "type": "string"
+          },
+          "route": {
+            "description": "'mcp_sampling' when the answers came from a sampling/createMessage request, 'mcp_agent' when you (the agent) looked at the contact sheets yourself",
+            "enum": [
+              "mcp_sampling",
+              "mcp_agent"
+            ],
+            "type": "string"
+          },
+          "model": {
+            "description": "the model that produced the answers, as reported by the MCP client (sampling result `model`)",
+            "maxLength": 120,
+            "minLength": 1,
+            "type": "string"
+          },
+          "client": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "MCP client name/version, if known"
+          },
+          "answers": {
+            "items": {
+              "$ref": "#/$defs/TargetAnswer"
+            },
+            "maxItems": 6,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "analysis_id",
+          "route",
+          "model",
+          "answers"
+        ],
+        "type": "object"
+      },
+      "agentCallable": false,
+      "needsApproval": false
+    },
+    {
+      "name": "get_session_link",
+      "mcpTools": [
+        "cortex.get_session_link"
+      ],
+      "description": "The Cortex studio URL where your human can watch this agent session live (every tool call, its arguments, results, images and approvals). Share it when you start working.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "agentCallable": true,
       "needsApproval": false
     }
   ]

@@ -51,10 +51,29 @@ def main() -> None:
     src = cfg["source"]
     n_max = int(cfg.get("max_episodes", 10))
     if "hub" in src:
-        meta_ds = LeRobotDataset(src["hub"], root=cfg["root"], revision=src.get("revision"), episodes=[0])
-        total = meta_ds.meta.total_episodes
-        eps = list(range(min(n_max, total)))
-        ds = LeRobotDataset(src["hub"], root=cfg["root"], revision=src.get("revision"), episodes=eps)
+        from huggingface_hub import hf_hub_download
+
+        info_path = hf_hub_download(src["hub"], "meta/info.json", repo_type="dataset", revision=src.get("revision"))
+        version = json.loads(Path(info_path).read_text()).get("codebase_version")
+        if version != "v3.0":  # most community recordings are v2.1: convert locally (video streams are copied)
+            from lerobot.scripts.convert_dataset_v21_to_v30 import convert_dataset
+
+            from huggingface_hub import snapshot_download
+
+            emit(type="progress", message=f"converting {src['hub']} from LeRobot {version} to v3.0")
+            # fetch the current revision first: left to itself the converter downloads the repo's "v2.1" tag,
+            # which can point at an early commit (jakmilller/jenga-v2's has 1 of 61 episodes)
+            snapshot_download(src["hub"], repo_type="dataset", revision=src.get("revision"), local_dir=cfg["root"])
+            convert_dataset(repo_id=src["hub"], root=cfg["root"], push_to_hub=False)
+            # load the converted copy locally: by its hub name LeRobot would re-sync it with the (v2.1) hub repo
+            total = int(json.loads((Path(cfg["root"]) / "meta" / "info.json").read_text())["total_episodes"])
+            eps = list(range(min(n_max, total)))
+            ds = LeRobotDataset("local/imported", root=cfg["root"], episodes=eps)
+        else:
+            meta_ds = LeRobotDataset(src["hub"], root=cfg["root"], revision=src.get("revision"), episodes=[0])
+            total = meta_ds.meta.total_episodes
+            eps = list(range(min(n_max, total)))
+            ds = LeRobotDataset(src["hub"], root=cfg["root"], revision=src.get("revision"), episodes=eps)
         repo, root = src["hub"], cfg["root"]
     else:
         root = src["path"]

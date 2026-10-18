@@ -5,7 +5,8 @@ import type { MCPServer } from "mcp-use";
 // developer's laptop with no tunnel and no inbound port. The local runner
 // (backend/cortex/mcp_runner.py) dials OUT to this server and long-polls:
 //
-//   POST /relay/poll    Bearer CORTEX_MCP_KEY  -> 200 {calls:[{id, tool, args, headers}]} | 204 after ~25 s
+//   POST /relay/poll    Bearer CORTEX_MCP_KEY  -> 200 {calls:[{id, tool, args, headers, path?}]} | 204 after ~25 s
+//                       (a call with `path` is a read-only GET of {api}{path}: resources, stage hints)
 //   POST /relay/result  Bearer CORTEX_MCP_KEY  <- {id, status, body}   (the backend's HTTP status + raw body)
 //
 // Plain HTTPS long-polling instead of a WebSocket: mcp-use's Hono app has no
@@ -25,6 +26,8 @@ export interface RelayCall {
   tool: string;
   args: Json;
   headers: Record<string, string>;
+  /** Read-only GET of this backend path instead of a tool call; the runner allows a few read prefixes only. */
+  path?: string;
 }
 export interface RelayResponse {
   status: number;
@@ -48,7 +51,15 @@ export function relayEnabled(): boolean {
 
 /** Queue a tool call for the runner and wait for the backend's response. */
 export function relayCall(tool: string, args: Json, headers: Record<string, string>, signal?: AbortSignal): Promise<RelayResponse> {
-  const call: RelayCall = { id: randomUUID(), tool, args, headers };
+  return dispatch({ id: randomUUID(), tool, args, headers }, signal);
+}
+
+/** Queue a read-only GET of a backend path (e.g. /projects/prj_x/state) for the runner. */
+export function relayGet(path: string, headers: Record<string, string>, signal?: AbortSignal): Promise<RelayResponse> {
+  return dispatch({ id: randomUUID(), tool: "GET", args: {}, headers, path }, signal);
+}
+
+function dispatch(call: RelayCall, signal?: AbortSignal): Promise<RelayResponse> {
   return new Promise<RelayResponse>((resolve, reject) => {
     const done = () => {
       clearTimeout(timer);

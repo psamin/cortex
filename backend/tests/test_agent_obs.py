@@ -1,0 +1,174 @@
+"""Agent observability (#105): keys, sessions, start/end call rows, images, scoping, events."""
+
+import asyncio
+import base64
+
+import httpx
+import pytest
+from fastapi.testclient import TestClient
+from starlette.requests import Request
+
+from cortex.config import Settings
+from cortex.services import agent_obs, insforge_auth
+
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    for k in ("INSFORGE_BASE_URL", "INSFORGE_API_KEY", "OPENROUTER_API_KEY"):
+        monkeypatch.delenv(k, raising=False)
+    from cortex.config import settings
+
+    settings.cache_clear()
+    from cortex.api.app import app
+
+    with TestClient(app) as c:
+        yield c
+    settings.cache_clear()
+
+
+def _ctx():
+    from cortex.api.app import ctx
+
+    return ctx()
+
+
+def agent(key=None, session="mcp-sess-1", client="claude-code/2.1.0"):
+    h = {"X-Cortex-Actor": "mcp", "X-Cortex-Agent-Session": session, "X-Cortex-Client": client}
+    if key:
+        h["X-Cortex-Agent-Key"] = key
+    return h
+
+
+def drain(q):
+    out = []
+    while not q.empty():
+        out.append(q.get_nowait())
+    return out
+
+
+def test_key_session_and_call_timeline(client):
+    k = client.post("/api/agents/keys", json={"label": "laptop claude"}).json()
+    assert k["key"].startswith("ck_") and k["status"] == "active"
+    listed = client.get("/api/agents/keys").json()
+    assert [x["id"] for x in listed] == [k["id"]] and "key" not in listed[0] and "key_hash" not in listed[0]
+
+    q = _ctx().bus.subscribe(agent_obs.channel("local"))
+    r = client.post("/api/tools/start_intake", json={"prompt": "pick up the cube"}, headers=agent(k["key"]))
+    assert r.status_code == 200, r.text
+    pid = r.json()["project_id"]
+    r = client.post("/api/tools/update_intake", json={"project_id": pid, "patch": {"task": {"pik": "x"}}},
+                    headers=agent(k["key"]))
+    assert r.status_code == 400
+
+    events = [e for e, _ in drain(q)]
+    assert events[:3] == ["session_start", "tool_start", "tool_end"] and events.count("tool_end") == 2
+
+    (s,) = client.get("/api/agents/sessions").json()
+    assert s["client"] == "claude-code" and s["client_version"] == "2.1.0" and s["live"]
+    assert s["call_count"] == 2 and s["projects"] == [pid] and s["key_id"] == k["id"]
+    calls = client.get(f"/api/agents/sessions/{s['id']}/calls").json()
+    assert [(c["tool"], c["status"]) for c in calls] == [("start_intake", "ok"), ("update_intake", "error")]
+    assert all(isinstance(c["duration_ms"], int) for c in calls) and "pik" in calls[1]["error"]
+    # the services' own audits are folded into the call row, not extra rows
+    assert {d["tool"] for d in calls[0]["domain"]} >= {"create_project"}
+    audit = client.get(f"/api/projects/{pid}/audit").json()
+    assert sum(1 for a in audit if a["tool"] in ("start_intake", "create_project")) == 1
+
+    link = client.post("/api/tools/get_session_link", json={}, headers=agent(k["key"])).json()
+    assert link["url"].endswith(f"/studio/agents?session={s['id']}")
+
+
+def test_images_are_stored_and_approval_is_flagged(client, monkeypatch):
+    from cortex.services import agent_orchestrator as orch
+    from cortex.services.training_service import ApprovalRequired
+
+    jpg = b"\xff\xd8\xff\xe0fake-jpeg"
+
+    async def snap(ctx, a, actor):
+        return {"summary": "frame", "ref_ids": [], "image_b64": base64.b64encode(jpg).decode()}
+
+    async def gated(ctx, a, actor):
+        raise ApprovalRequired("approve in the studio")
+
+    monkeypatch.setitem(orch.TOOLS, "t_snap", orch.Tool("t_snap", "", orch.NoArgs, snap))
+    monkeypatch.setitem(orch.TOOLS, "t_gated", orch.Tool("t_gated", "", orch.NoArgs, gated))
+    q = _ctx().bus.subscribe(agent_obs.channel("local"))
+    assert client.post("/api/tools/t_snap", json={}, headers=agent()).status_code == 200
+    r = client.post("/api/tools/t_gated", json={}, headers=agent())
+    assert r.status_code == 403 and r.json()["approval_required"]
+
+    (s,) = client.get("/api/agents/sessions").json()
+    snap_call, gated_call = client.get(f"/api/agents/sessions/{s['id']}/calls").json()
+    assert snap_call["images"] and "image_b64" not in snap_call["result_preview"]
+    assert asyncio.run(_ctx().blobs.get_bytes(snap_call["images"][0])) == jpg
+    assert snap_call["image_urls"][0].endswith(snap_call["images"][0])
+    assert gated_call["status"] == "approval_required"
+    assert "approval_required" in [e for e, _ in drain(q)]
+
+
+def test_keys_are_scoped_and_revocable(client):
+    ctx = _ctx()
+    other = asyncio.run(agent_obs.create_key(ctx, "user_2", "theirs"))
+    r = client.post("/api/tools/get_session_link", json={}, headers=agent(other["key"], session="s2"))
+    assert r.status_code == 200
+    assert client.get("/api/agents/sessions").json() == []  # user_2's session is not the local owner's
+    sid = r.json()["session_id"]
+    assert client.get(f"/api/agents/sessions/{sid}/calls").status_code == 404
+    assert client.delete(f"/api/agents/keys/{other['id']}").status_code == 404  # not yours to revoke
+
+    mine = client.post("/api/agents/keys", json={}).json()
+    assert client.delete(f"/api/agents/keys/{mine['id']}").json()["status"] == "revoked"
+    r = client.post("/api/tools/get_session_link", json={}, headers=agent(mine["key"]))
+    assert r.status_code == 403 and r.json()["code"] == "agent_key_invalid" and not r.json()["approval_required"]
+    r = client.post("/api/tools/get_session_link", json={}, headers=agent("ck_made_up"))
+    assert r.status_code == 403
+
+
+def test_agents_cannot_manage_keys_approve_or_drive_hardware(client):
+    k = client.post("/api/agents/keys", json={}).json()
+    assert client.post("/api/agents/keys", json={}, headers=agent(k["key"])).status_code == 403
+    assert client.get("/api/agents/sessions", headers={"X-Cortex-Actor": "mcp"}).status_code == 403
+    assert client.post("/api/hardware/disarm", headers=agent(k["key"])).status_code in (403, 409)
+
+    from cortex.api.app import actor
+
+    def req(h):
+        return Request({"type": "http", "headers": [(a.lower().encode(), b.encode()) for a, b in h.items()]})
+    assert actor(req({})) == "gui"
+    assert actor(req({"X-Cortex-Agent-Key": k["key"]})) == "mcp"  # so training approval treats it as an agent
+    assert actor(req({"X-Cortex-Agent-Session": "x", "X-Cortex-Actor": "gui"})) == "mcp"
+
+
+def test_idle_sessions_emit_session_idle(client):
+    client.post("/api/tools/get_session_link", json={}, headers=agent())
+    q = _ctx().bus.subscribe(agent_obs.channel("local"))
+    assert asyncio.run(agent_obs.mark_idle(_ctx(), idle_after_s=0)) == 1
+    assert [e for e, _ in drain(q)] == ["session_idle"]
+    (s,) = client.get("/api/agents/sessions").json()
+    assert s["status"] == "idle" and not s["live"]
+
+
+def test_me_reports_local_mode(client):
+    me = client.get("/api/agents/me").json()
+    assert me["mode"] == "local" and me["user"]["id"] == "local" and "single user" in me["note"]
+
+
+def test_insforge_auth_sign_in_and_verify():
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.url.path == "/api/auth/sessions" and req.method == "POST":
+            return httpx.Response(200, json={"user": {"id": "u1", "email": "a@b.c"}, "accessToken": "jwt1"})
+        if req.url.path == "/api/auth/sessions/current":
+            ok = req.headers.get("authorization") == "Bearer jwt2"
+            return httpx.Response(200 if ok else 401, json={"user": {"id": "u1", "email": "a@b.c"}} if ok else {})
+        return httpx.Response(404)
+
+    s = Settings(insforge_base_url="https://x.insforge.app", insforge_api_key="ik_x")
+    t = httpx.MockTransport(handler)
+    out = asyncio.run(insforge_auth.sign_in(s, "a@b.c", "pw", transport=t))
+    assert out["access_token"] == "jwt1" and out["user"]["id"] == "u1"
+    assert asyncio.run(insforge_auth.current_user(s, "jwt2", transport=t))["id"] == "u1"
+    with pytest.raises(insforge_auth.SignInRequired):
+        asyncio.run(insforge_auth.current_user(s, "bad", transport=t))
+    with pytest.raises(insforge_auth.SignInRequired):
+        asyncio.run(insforge_auth.current_user(s, None, transport=t))

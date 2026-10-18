@@ -823,13 +823,149 @@ TOOLS.update({t.name: t for t in [
          "real setup you described.", IntakeArgs.Frame, t_capture_frame),
 ]})
 
+# ------------------------------------------------------------------ RL sandboxes (#80)
+
+class RLArgs:
+    class Weaknesses(BaseModel):
+        project_id: str
+        checkpoint_id: str | None = Field(None, description="a trained checkpoint; default: the latest evaluated one")
+        target: float = Field(0.8, ge=0, le=1, description="success rate a condition should reach")
+
+    class Propose(BaseModel):
+        project_id: str
+        checkpoint_id: str | None = None
+        max_sandboxes: int = Field(3, ge=1, le=6)
+        budget: dict[str, Any] | None = Field(None, description="SandboxBudget overrides: iterations (<=15), "
+                                              "population, pilot_episodes, demos, heldout_episodes, max_parallel")
+        wait_s: int = Field(0, ge=0, le=300, description="wait up to this long for the pilots to finish")
+
+    class Accept(BaseModel):
+        project_id: str
+        ids: list[str] = Field(min_length=1, description="sandbox ids from propose_rl_sandboxes (status 'ready')")
+        budget_cap: float = Field(0.0, ge=0, description="the most you allow these sandboxes to cost, in USD. Local "
+                                                         "CPU sandboxes cost $0")
+        max_cpu_hours: float | None = Field(None, gt=0, description="optional cap on estimated CPU hours")
+
+    class Status(BaseModel):
+        project_id: str | None = None
+        sandbox_id: str | None = None
+
+    class Stop(BaseModel):
+        sandbox_id: str
+
+
+async def t_rl_weaknesses(ctx, a, actor):
+    from . import rl_service
+
+    ws = await rl_service.weaknesses(ctx, await get_project(ctx, a.project_id), a.checkpoint_id, a.target)
+    top = ", ".join(f"{w.key} {w.success_rate:.0%} (CI {w.ci95[0]:.0%}-{w.ci95[1]:.0%}, n={w.n})" for w in ws[:3])
+    return {"summary": f"{len(ws)} weak conditions (measured in sim): {top or 'none below target'}",
+            "ref_ids": [a.project_id], "weaknesses": [w.model_dump(mode="json") for w in ws]}
+
+
+async def t_rl_propose(ctx, a, actor):
+    from ..rl import SandboxBudget
+    from . import rl_service
+
+    p = await get_project(ctx, a.project_id)
+    budget = SandboxBudget.model_validate(a.budget) if a.budget else None
+    sbs = await rl_service.propose_sandboxes(ctx, p, budget, a.checkpoint_id, a.max_sandboxes, actor)
+    for sb in sbs:
+        if a.wait_s and sb.job_id:
+            await _wait(ctx, sb.job_id, a.wait_s)
+    views = [rl_service.proposal_view(await rl_service.get(ctx, sb.id)) for sb in sbs]
+    ready = sum(v["status"] == "ready" for v in views)
+    return {"summary": f"{len(views)} sandboxes proposed, {ready} with a finished pilot. Estimates are labelled; "
+                       "accept 'ready' ones with accept_rl_sandboxes, or poll get_rl_sandbox_status.",
+            "ref_ids": [v["id"] for v in views], "sandboxes": views}
+
+
+async def t_rl_accept(ctx, a, actor):
+    from . import rl_service
+
+    sbs = await rl_service.accept(ctx, await get_project(ctx, a.project_id), a.ids, a.budget_cap, a.max_cpu_hours,
+                                  actor)
+    return {"summary": f"{len(sbs)} sandboxes running on local CPU; poll get_rl_sandbox_status",
+            "ref_ids": [s.id for s in sbs], "sandboxes": [rl_service.status_view(s) for s in sbs]}
+
+
+async def t_rl_status(ctx, a, actor):
+    from . import rl_service
+
+    if a.sandbox_id:
+        sbs = [await rl_service.get(ctx, a.sandbox_id)]
+    elif a.project_id:
+        sbs = await rl_service.list_sandboxes(ctx, a.project_id)
+    else:
+        raise ValueError("give project_id or sandbox_id")
+    views = [rl_service.status_view(s) for s in sbs]
+    return {"summary": "; ".join(f"{v['id']} {v['weakness_id']}: {v['status']}"
+                                 + (f" ({v['phase']}, iter {v['iteration']})" if v["phase"] else "") for v in views)
+            or "no sandboxes", "ref_ids": [v["id"] for v in views], "sandboxes": views}
+
+
+async def t_rl_stop(ctx, a, actor):
+    from . import rl_service
+
+    sb = await rl_service.stop(ctx, a.sandbox_id, actor)
+    return {"summary": f"{sb.id}: {sb.status} ({sb.reason})", "ref_ids": [sb.id],
+            "sandbox": rl_service.status_view(sb)}
+
+
+TOOLS.update({t.name: t for t in [
+    Tool("get_policy_weaknesses", "Where the trained policy is weak, measured from its latest sim evaluation: per "
+         "condition the success rate with a Wilson 95% interval and n, failure modes from sim telemetry, start-state "
+         "clusters, and VLM hypotheses (unverified). Ranked by the gap that holds at the upper bound.",
+         RLArgs.Weaknesses, t_rl_weaknesses),
+    Tool("propose_rl_sandboxes", "Propose one RL sandbox per top weakness (skill-parameter RL with CEM, which tunes "
+         "the validated IK skill; its successful rollouts become targeted demos for retraining ACT). Each runs a "
+         "measured pilot as a job, then reports the pilot, predicted sandbox success, predicted policy uplift, "
+         "P(uplift >= delta), regression elsewhere, cost (episodes, CPU hours, $) and assumptions. Predictions are "
+         "labelled estimates with their source (measured, prior or learned).", RLArgs.Propose, t_rl_propose),
+    Tool("accept_rl_sandboxes", "Start sandboxes whose pilot has finished. Local CPU sandboxes cost $0 and you may "
+         "accept them within budget_cap and the project's standing budget. GPU or paid sandboxes return "
+         "approval_required: a human approves them in the studio.", RLArgs.Accept, t_rl_accept),
+    Tool("get_rl_sandbox_status", "Live progress of one sandbox or all of a project's: phase, CEM iteration, "
+         "episodes, success with interval, elite parameters, the current randomization ranges, elapsed time, cost so "
+         "far; when finished, the measured held-out result (base vs tuned on matched seeds, McNemar p) and demos.",
+         RLArgs.Status, t_rl_status),
+    Tool("stop_rl_sandbox", "Stop a sandbox. A running one stops after its current CEM iteration, still evaluates "
+         "what it has on held-out seeds, and reports why it stopped.", RLArgs.Stop, t_rl_stop),
+]})
+
 # MCP Apps views (#119): snapshots for in-chat views and the human-only approval path.
 from . import mcp_views  # noqa: E402
 
 mcp_views.register(TOOLS, Tool)
 
+# Failure diagnosis by the MCP client's own model. Not for the studio agent: it has its own model route.
+from . import external_diagnosis  # noqa: E402
+
+TOOLS.update({n: Tool(n, d, a, f, agent_callable=False) for n, d, a, f in external_diagnosis.TOOLS})
+
 # Tools that start work the agent should not start without a human click.
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
+
+
+# ------------------------------------------------------------------ agent observability (#105)
+class NoArgs(BaseModel):
+    pass
+
+
+async def t_session_link(ctx, a, actor):
+    from .agent_obs import session_link
+
+    url, sid = session_link(ctx)
+    what = f"session {sid}" if sid else "your agent sessions (this call carried no MCP session id)"
+    return {"summary": f"Watch {what} live in the Cortex studio: {url}", "ref_ids": [sid] if sid else [],
+            "url": url, "session_id": sid}
+
+
+TOOLS.update({t.name: t for t in [
+    Tool("get_session_link", "The Cortex studio URL where your human can watch this agent session live (every tool "
+         "call, its arguments, results, images and approvals). Share it when you start working.", NoArgs,
+         t_session_link),
+]})
 
 
 class NotAgentCallable(PermissionError):
@@ -839,21 +975,16 @@ class NotAgentCallable(PermissionError):
     approval_required = False
 
 
-async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str) -> dict[str, Any]:
+async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str, caller: Any = None) -> dict[str, Any]:
+    """Every call writes a start row and an end row (agent_obs.observe); `caller` is the agent session, if any."""
+    from . import agent_obs
+
     tool = TOOLS.get(name)
     if tool is None:
         raise NotFound(f"unknown tool {name}")
-    pid = raw_args.get("project_id")
     if actor == "agent" and not tool.agent_callable:
-        await ctx.audit(actor, name, pid, raw_args, "refused", "not callable by the studio agent")
+        await ctx.audit(actor, name, raw_args.get("project_id"), raw_args, "refused", "not callable by the studio agent")
         raise NotAgentCallable(f"{name} is not available to the studio agent; a human runs it from the studio")
-    args = tool.args.model_validate(raw_args)
-    try:
-        result = await tool.fn(ctx, args, actor)
-    except Exception as e:
-        await ctx.audit(actor, name, pid, raw_args, "error", f"{type(e).__name__}: {e}"[:300])
-        raise
-    if name in ("get_project_state", "list_episodes", "get_failure_clusters", "get_next_actions", "get_job",
-                "compare_experiments", "get_intake_status", "capture_frame"):
-        await ctx.audit(actor, name, pid, raw_args, "ok", result.get("summary", "")[:300])
-    return result
+    # validated inside observe, so an agent's invalid arguments show up in its timeline too
+    return await agent_obs.observe(ctx, caller, name, raw_args, actor,
+                                   lambda: tool.fn(ctx, tool.args.model_validate(raw_args), actor))

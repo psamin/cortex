@@ -49,11 +49,11 @@ const COLUMNS: { title: string; solid: boolean; items: string[] }[] = [
   },
 ];
 
-/** FIG.05: the stack, and the line between measured and labelled. */
+/** the stack, and the line between measured and labelled. */
 export function BuiltOn() {
   return (
     <section id="stack" aria-labelledby="stack-title" className="kn-gutter border-t border-line py-24 lg:py-32">
-      <SectionHead titleId="stack-title" fig="FIG.05" label="Built on" first="Open tools underneath." second="Nothing hidden on top." />
+      <SectionHead titleId="stack-title" label="Built on" first="Open tools underneath." second="Nothing hidden on top." />
 
       <dl className="mt-14 border-t border-ink">
         {STACK.map((s) => (

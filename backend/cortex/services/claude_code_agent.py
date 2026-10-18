@@ -14,7 +14,6 @@ import asyncio
 import json
 import shutil
 from collections.abc import AsyncIterator
-from pathlib import Path
 from typing import Any
 
 from ..context import Ctx
@@ -22,7 +21,6 @@ from . import agent_orchestrator as orch
 
 MCP_URL = "http://localhost:3000/mcp"
 MAX_TURNS = 40
-SESSIONS: dict[str, str] = {}  # project id -> Claude Code session id (also persisted on disk)
 
 SYSTEM = """You are the agent inside Cortex, a robot-learning studio. The user talks to you in the Cortex app;
 you act through the cortex MCP tools only. Current project: {pid} ("{name}": {goal}). Always pass
@@ -32,6 +30,8 @@ happened and what the evidence shows. No JSON, no ids unless the user asks, no m
 Rules:
 - Only report numbers that tools returned. Simulator results are measured; VLM/agent diagnoses are hypotheses.
 - Training on the GPU cluster needs the human's approval in the app: propose it, then tell the user to approve.
+- For work with several steps, keep a short TodoWrite checklist (at most 6 items, plain words) and update it as
+  steps finish: the user sees it live.
 - Long jobs (collection, analysis, datasets, evaluation) return a job id. Start the job, then END YOUR TURN
   with one sentence saying it is running. Do NOT poll in a loop: the app shows a live progress card and posts
   the result in the chat when it finishes. Check progress only if the user asks.
@@ -55,26 +55,6 @@ async def mcp_up() -> bool:
         return r.status_code < 500
     except Exception:
         return False
-
-
-def _session_file(ctx: Ctx, pid: str) -> Path:
-    return ctx.data_dir / "agent_sessions" / f"{pid}.json"
-
-
-def _load_session(ctx: Ctx, pid: str) -> str | None:
-    if pid in SESSIONS:
-        return SESSIONS[pid]
-    f = _session_file(ctx, pid)
-    if f.exists():
-        SESSIONS[pid] = json.loads(f.read_text()).get("session_id")
-    return SESSIONS.get(pid)
-
-
-def _save_session(ctx: Ctx, pid: str, sid: str) -> None:
-    SESSIONS[pid] = sid
-    f = _session_file(ctx, pid)
-    f.parent.mkdir(parents=True, exist_ok=True)
-    f.write_text(json.dumps({"session_id": sid}))
 
 
 def _short_tool(name: str) -> str:
@@ -139,7 +119,9 @@ def _summarize_result(content: Any) -> tuple[str, list[str], bool]:
     return summary[:240], refs, "APPROVAL REQUIRED" in text
 
 
-async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
+async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) -> AsyncIterator[str]:
+    from . import chat_store
+
     project = await orch.get_project(ctx, pid)
     workdir = ctx.data_dir / "agent_sessions" / pid
     workdir.mkdir(parents=True, exist_ok=True)
@@ -147,11 +129,12 @@ async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
     mcp_cfg.write_text(json.dumps({"mcpServers": {"cortex": {"type": "http", "url": MCP_URL}}}))
     cmd = ["claude", "-p", message, "--output-format", "stream-json", "--verbose",
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
-           "--allowedTools", "mcp__cortex__*", "--max-turns", str(MAX_TURNS),
+           "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
            "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal)]
     if ctx.settings.claude_code_model:
         cmd += ["--model", ctx.settings.claude_code_model]
-    if sid := _load_session(ctx, pid):
+    thread = await chat_store.current(ctx, pid, tid)  # each chat thread is its own Claude Code session
+    if sid := thread.get("session_id"):
         cmd += ["--resume", sid]
     yield sse("status", {"state": "thinking", "engine": "claude-code"})
     proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(workdir), stdout=asyncio.subprocess.PIPE,
@@ -167,13 +150,18 @@ async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
                 continue
             t = ev.get("type")
             if t == "system" and ev.get("subtype") == "init":
-                _save_session(ctx, pid, ev["session_id"])
+                await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
                 yield sse("status", {"state": "thinking", "engine": "claude-code", "model": ev.get("model")})
             elif t == "assistant":
                 for block in ev.get("message", {}).get("content", []):
                     if block.get("type") == "text" and block.get("text"):
                         yield sse("text", {"delta": block["text"]})
                     elif block.get("type") == "tool_use":
+                        if block.get("name") == "TodoWrite":  # Claude's own checklist: shown live as a task list
+                            todos = (block.get("input") or {}).get("todos") or []
+                            yield sse("todos", {"items": [{"text": t.get("content", ""), "status": t.get("status", "pending"),
+                                                           "active": t.get("activeForm")} for t in todos]})
+                            continue
                         if not block.get("name", "").startswith("mcp__cortex__"):
                             continue  # Claude Code internals (e.g. ToolSearch) are not shown in the chat
                         name = _short_tool(block.get("name", ""))
@@ -192,7 +180,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
             elif t == "result":
                 result = ev
                 if ev.get("session_id"):
-                    _save_session(ctx, pid, ev["session_id"])
+                    await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
         await proc.wait()
         if proc.returncode and not result:
             err = (await proc.stderr.read()).decode(errors="replace")[-400:] if proc.stderr else ""
@@ -203,10 +191,3 @@ async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
     yield sse("done", {"engine": "claude-code", "turns": result.get("num_turns"),
                        "cost_usd": result.get("total_cost_usd"), "duration_ms": result.get("duration_ms"),
                        "is_error": result.get("is_error")})
-
-
-def reset(ctx: Ctx, pid: str) -> None:
-    SESSIONS.pop(pid, None)
-    f = _session_file(ctx, pid)
-    if f.exists():
-        f.unlink()

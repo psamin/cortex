@@ -11,6 +11,7 @@ Endpoints, from InsForge docs/sdks/rest/{database,storage,ai}.mdx:
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -50,18 +51,29 @@ class InsForgeStore(Store):
         self.c = _Client(base_url, api_key, transport)
 
     async def init(self) -> None:
-        applied = set()
+        applied, versions = set(), []
         try:
             hist = (await self.c.req("GET", "/api/database/migrations")).json()
             rows = hist if isinstance(hist, list) else hist.get("migrations", hist.get("data", []))
             applied = {str(m.get("name")) for m in rows if isinstance(m, dict)}
+            versions = [int(str(m.get("version"))) for m in rows
+                        if isinstance(m, dict) and str(m.get("version", "")).isdigit()]
         except InsForgeError as e:
             log.warning("could not read migration history: %s", e)
         for f in sorted(MIGRATIONS.glob("*.sql")):
             name = migration_name(f)
             if name in applied:
                 continue
-            body = {"version": migration_version(f), "name": name, "sql": f.read_text()}
+            # Postgres-only: make column additions idempotent, so a schema applied earlier under another
+            # migration name (a branch renumbered before merging) doesn't fail ("column already exists").
+            sql = re.sub(r"\bADD COLUMN (?!IF NOT EXISTS)", "ADD COLUMN IF NOT EXISTS ", f.read_text(), flags=re.I)
+            body = {"version": migration_version(f), "name": name, "sql": sql}
+            if versions and int(body["version"]) <= max(versions):
+                # Branches merged out of order (e.g. another branch's 005 already applied): InsForge orders
+                # by version but identifies by name, so apply this one next rather than skip it.
+                body["version"] = str(max(versions) + 1)
+                log.warning("applying migration %s out of order as version %s", name, body["version"])
+            versions.append(int(body["version"]))
             try:
                 await self.c.req("POST", "/api/database/migrations", json=body)
                 log.info("applied migration %s", name)
@@ -86,8 +98,10 @@ class InsForgeStore(Store):
         return rows[0] if rows else None
 
     async def list(self, table: str, project_id: str | None = None,
-                   status: str | None = None) -> list[dict[str, Any]]:
+                   status: str | None = None, where: dict[str, str] | None = None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"order": "created_at.asc,id.asc", "limit": PAGE}
+        for col, val in (where or {}).items():
+            params[col] = f"eq.{val}"
         if project_id is not None:
             params["project_id"] = f"eq.{project_id}"
         if status is not None:

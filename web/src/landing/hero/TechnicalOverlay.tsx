@@ -33,26 +33,6 @@ export function TechnicalOverlay() {
         </div>
       ))}
 
-      {/* Status block */}
-      <div className="absolute right-[4.5%] top-[17%] hidden kn-mono text-[10px] uppercase leading-[1.9] tracking-[0.12em] text-ink-3 lg:block">
-        <div className="flex items-center gap-3 text-ink">
-          <span className="h-px w-8 bg-ink" />
-          <span>FIG.01</span>
-          <span className="text-ink-3">Illustrative 6-axis arm</span>
-        </div>
-        <div className="mt-2 pl-11">Kinematic control</div>
-        <div className="flex items-center gap-2 pl-11 text-ink">
-          <span className="relative inline-flex h-1.5 w-1.5">
-            <span className="absolute inset-0 animate-ping rounded-full bg-ink/40 motion-reduce:hidden" />
-            <span className="relative h-1.5 w-1.5 rounded-full bg-ink" />
-          </span>
-          <span ref={(el) => void (o.status = el)} data-testid="robot-state">
-            Initializing
-          </span>
-        </div>
-        <div className="pl-11 tabular-nums" ref={(el) => void (o.ik = el)} data-testid="robot-ik" />
-      </div>
-
       {/* Footer row: affordance hint + the one optional action. */}
       <div className="absolute inset-x-6 bottom-[4.5%] flex items-center justify-between gap-6 kn-mono text-[10px] uppercase tracking-[0.16em] text-ink-3 lg:left-[52%] lg:right-[4.5%]">
         <span className="hidden xl:inline">Move the cursor here to command the end effector</span>

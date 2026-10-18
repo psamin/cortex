@@ -17,6 +17,7 @@
     "index.ts",
     "mcp-env.d.ts",
     "src/**/*",
+    "evals/**/*.ts",
     "views/**/*",
     "server.ts",
     ".mcp-use/**/*.d.ts"

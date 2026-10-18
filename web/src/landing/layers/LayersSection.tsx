@@ -39,13 +39,12 @@ function Heading() {
   return (
     <>
       <div className="kn-label kn-label-rule">
-        <span className="text-ink">FIG.02</span>
-        <span>How it works</span>
+        <span className="text-ink">How it works</span>
       </div>
       <h2 id="platform-title" className="kn-display mt-6 text-[clamp(2.2rem,3.5vw,3.5rem)] text-ink">
         Seven layers,
         <br />
-        <span className="kn-second">one training loop.</span>
+        <span className="kn-second">all run by the agent.</span>
       </h2>
     </>
   );
@@ -63,7 +62,7 @@ function Tag({ children, on }: { children: string; on?: boolean }) {
   );
 }
 
-/** FIG.02: the scroll-driven exploded stack. Section id stays "platform" for the hero's Explore link. */
+/** The scroll-driven exploded stack. Section id stays "platform" for the hero's Explore link. */
 export function LayersSection() {
   const mode = useMode();
   return (
@@ -159,8 +158,8 @@ function Pinned() {
               </div>
             ) : (
               <p className="kn-sans text-[15px] leading-[1.6] text-ink-3">
-                Each layer is one step your agent runs through Cortex, from describing any environment to deploying the
-                policy on the arm. Keep scrolling to take the loop apart.
+                Each layer is a step the agent runs on its own, from describing the robot to putting the policy on the
+                line. Keep scrolling to take the loop apart.
               </p>
             )}
           </div>
@@ -230,7 +229,7 @@ function MobileStack() {
     <div className="px-6 py-20 sm:px-10">
       <Heading />
       <p className="mt-5 max-w-[30rem] kn-sans text-[15px] leading-[1.6] text-ink-2">
-        Each layer is one step your agent runs through Cortex, from describing any environment to deploying the policy on the arm.
+        Each layer is a step the agent runs on its own, from describing the robot to putting the policy on the line.
       </p>
       <ol className="mt-10">
         {STEPS.map((s, i) => (

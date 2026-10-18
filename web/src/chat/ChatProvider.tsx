@@ -18,6 +18,11 @@ interface ChatState {
   send: (text: string) => void;
   stop: () => void;
   reset: () => Promise<void>;
+  /** the open chat thread (null = the backend's latest) */
+  threadId: string | null;
+  /** start an empty thread; past chats stay in History */
+  newChat: () => Promise<void>;
+  openThread: (id: string) => void;
   reload: () => void;
   /** local rows (e.g. a demo upload) that live only in this tab until the job's job_done line lands */
   addImport: (item: Omit<ImportItem, "id" | "kind">) => number;
@@ -80,19 +85,47 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   const queue = useRef<string[]>([]);
   const busyRef = useRef(false);
 
+  // the open thread survives reloads, per project
+  const storeKey = `cortex.thread.${pid}`;
+  const [threadId, setThreadIdState] = useState<string | null>(() => {
+    try {
+      return localStorage.getItem(storeKey);
+    } catch {
+      return null;
+    }
+  });
+  const setThreadId = useCallback(
+    (id: string | null) => {
+      setThreadIdState(id);
+      try {
+        if (id) localStorage.setItem(storeKey, id);
+        else localStorage.removeItem(storeKey);
+      } catch {
+        /* storage unavailable */
+      }
+    },
+    [storeKey],
+  );
+  const threadRef = useRef(threadId);
+  threadRef.current = threadId;
+
   const load = useCallback(() => {
     setLoading(true);
     setLoadError(null);
     api
-      .agentHistory(pid)
+      .agentHistory(pid, threadRef.current)
       .then((rows) => setItems(historyToEvents(rows).reduce(applyEvent, [] as ChatItem[])))
       .catch((e) => {
         // a project with no chat yet may 404 on older backends; treat as empty
-        if (e instanceof ApiError && e.status === 404) setItems([]);
+        if (e instanceof ApiError && e.status === 404) {
+          setItems([]);
+          if (threadRef.current) setThreadId(null); // a remembered thread that no longer exists
+        }
         else setLoadError(e);
       })
       .finally(() => setLoading(false));
-  }, [pid]);
+    // reads threadRef so a `thread` event mid-stream never triggers a reload
+  }, [pid, setThreadId]);
 
   useEffect(() => {
     load();
@@ -116,7 +149,13 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
       const ctrl = new AbortController();
       abort.current = ctrl;
       try {
-        for await (const { event, data } of streamAgent(pid, text, ctrl.signal)) {
+        for await (const { event, data } of streamAgent(pid, text, ctrl.signal, threadRef.current)) {
+          if (event === "thread" && typeof data.id === "string") {
+            // the backend says which thread this turn belongs to (a new one on the first message)
+            threadRef.current = data.id;
+            setThreadId(data.id);
+            continue;
+          }
           const ev = toEvent(event, data);
           if (!ev) continue;
           if (ev.type === "status") {
@@ -142,6 +181,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         setBusy(false);
         setStatus(null);
         setTurnStartedAt(null);
+        qc.invalidateQueries({ queryKey: ["agent-threads", pid] });
         const next = queue.current.shift();
         if (next) void run(next);
       }
@@ -164,11 +204,26 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     abort.current?.abort();
   }, []);
 
-  const reset = useCallback(async () => {
+  const newChat = useCallback(async () => {
     stop();
-    await api.resetAgent(pid);
+    const t = await api.newThread(pid);
+    threadRef.current = t.id;
+    setThreadId(t.id);
     setItems([]);
-  }, [pid, stop]);
+    qc.invalidateQueries({ queryKey: ["agent-threads", pid] });
+  }, [pid, stop, setThreadId, qc]);
+  const reset = newChat;
+
+  const openThread = useCallback(
+    (id: string) => {
+      if (id === threadRef.current) return;
+      stop();
+      threadRef.current = id;
+      setThreadId(id);
+      load();
+    },
+    [stop, setThreadId, load],
+  );
 
   const addImport = useCallback((item: Omit<ImportItem, "id" | "kind">) => {
     const id = newItemId();
@@ -180,7 +235,7 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
   }, []);
 
   return (
-    <Ctx.Provider value={{ items, loading, loadError, busy, status, turnStartedAt, resultTick, send, stop, reset, reload: load, addImport, patchImport }}>
+    <Ctx.Provider value={{ items, loading, loadError, busy, status, turnStartedAt, resultTick, send, stop, reset, reload: load, addImport, patchImport, threadId, newChat, openThread }}>
       {children}
     </Ctx.Provider>
   );

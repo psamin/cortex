@@ -10,7 +10,8 @@ TABLES = (
     "projects", "robot_configs", "episodes", "episode_artifacts", "dataset_versions",
     "dataset_episode_links", "analyses", "failure_clusters", "recommendations",
     "training_jobs", "checkpoints", "evaluation_runs", "simulation_branches",
-    "tool_audit_logs", "autopilot_runs", "agent_collections", "agent_attempts",
+    "tool_audit_logs", "autopilot_runs", "agent_collections", "agent_attempts", "rl_sandboxes", "rl_rounds",
+    "agent_keys", "agent_sessions",
 )
 
 M = TypeVar("M", bound=BaseModel)
@@ -24,8 +25,8 @@ class Store(Protocol):
         """Upsert by id. Row keys: id, project_id, status, data (dict), created_at."""
     async def get(self, table: str, id: str) -> dict[str, Any] | None: ...
     async def list(self, table: str, project_id: str | None = None,
-                   status: str | None = None) -> list[dict[str, Any]]:
-        """Rows ordered by created_at ascending."""
+                   status: str | None = None, where: dict[str, str] | None = None) -> list[dict[str, Any]]:
+        """Rows ordered by created_at ascending. `where`: equality filters on extra columns."""
 
 
 class BlobStore(Protocol):

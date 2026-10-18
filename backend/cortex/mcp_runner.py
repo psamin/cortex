@@ -35,6 +35,8 @@ TOOL_TIMEOUT_S = 960.0  # backend wait_s tops out at 900 s
 # only these headers from the MCP server reach the backend; never Authorization or Host
 FORWARD_PREFIXES = ("x-cortex-",)
 FORWARD_EXACT = {"content-type", "accept"}
+# read-only GETs the hosted server may relay (MCP resources, stage hints); nothing that writes
+READ_PREFIXES = ("/projects", "/evaluations", "/jobs")
 
 
 class RunnerSettings(BaseSettings):
@@ -54,6 +56,16 @@ def server_base(url: str) -> str:
     """Accept the server's root or its /mcp endpoint URL."""
     url = url.rstrip("/")
     return url[: -len("/mcp")] if url.endswith("/mcp") else url
+
+
+def read_path_ok(path: Any) -> bool:
+    """A relayed GET may only read: a plain path under READ_PREFIXES, no traversal, no other host."""
+    if not isinstance(path, str) or not path.startswith("/") or path.startswith("//"):
+        return False
+    route = path.split("?", 1)[0]
+    if ".." in route or "\\" in route or "%" in route:
+        return False
+    return any(route == p or route.startswith(p + "/") for p in READ_PREFIXES)
 
 
 def forward_headers(headers: Any) -> dict[str, str]:
@@ -98,15 +110,25 @@ class Runner:
 
     async def handle(self, call: dict[str, Any]) -> None:
         """Forward one call to the local backend and post the result back."""
-        tool, args = call["tool"], call.get("args") or {}
+        tool, args, path = call["tool"], call.get("args") or {}, call.get("path")
         try:
-            r = await self.client.post(f"{self.api}/tools/{quote(tool, safe='')}", json=args,
-                                       headers=forward_headers(call.get("headers")), timeout=TOOL_TIMEOUT_S)
-            result = {"id": call["id"], "status": r.status_code, "body": r.text}
+            if path is not None:
+                if not read_path_ok(path):
+                    result = {"id": call["id"], "status": 403,
+                              "body": json.dumps({"detail": f"the runner only relays reads under {READ_PREFIXES}"})}
+                else:
+                    r = await self.client.get(f"{self.api}{path}", headers=forward_headers(call.get("headers")),
+                                              timeout=60.0)
+                    result = {"id": call["id"], "status": r.status_code, "body": r.text}
+                tool = f"GET {path}"
+            else:
+                r = await self.client.post(f"{self.api}/tools/{quote(tool, safe='')}", json=args,
+                                           headers=forward_headers(call.get("headers")), timeout=TOOL_TIMEOUT_S)
+                result = {"id": call["id"], "status": r.status_code, "body": r.text}
         except httpx.HTTPError as e:
             detail = f"the Cortex runner could not reach the backend at {self.api} ({type(e).__name__}: {e})"
             result = {"id": call["id"], "status": 502, "body": json.dumps({"detail": detail})}
-        log.info("cortex.%s -> %s", tool, result["status"])
+        log.info("%s -> %s", tool if path is not None else f"cortex.{tool}", result["status"])
         try:
             await self.client.post(f"{self.server}/relay/result", json=result, headers=self.auth, timeout=30.0)
         except httpx.HTTPError as e:

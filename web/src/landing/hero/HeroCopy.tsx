@@ -8,8 +8,7 @@ export function HeroCopy() {
     <div className="flex h-full flex-col px-6 pb-4 pt-24 sm:px-10 sm:pt-28 lg:justify-center lg:pb-16 lg:pl-[clamp(2.5rem,5.5vw,6rem)] lg:pr-0 lg:pt-24">
       <div className="reveal flex items-center gap-3 kn-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-3" style={{ animationDelay: "80ms" }}>
         <span className="h-px w-9 bg-ink" />
-        <span className="text-ink">FIG.00</span>
-        <span>MCP server for agent-trained robots</span>
+        <span className="text-ink">Built for agents · MCP server</span>
       </div>
 
       <h1
@@ -17,9 +16,9 @@ export function HeroCopy() {
         className="reveal mt-5 kn-serif sm:mt-7 text-[clamp(2.6rem,5.4vw,5.1rem)] font-light leading-[1.02] tracking-[-0.022em] text-ink"
         style={{ animationDelay: "160ms" }}
       >
-        Let your agents
+        Agents train robots.
         <br />
-        <span className="text-ink-3">train a robot.</span>
+        <span className="text-ink-3">No human in the loop.</span>
       </h1>
 
       <p

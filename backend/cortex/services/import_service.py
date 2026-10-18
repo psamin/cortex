@@ -15,6 +15,7 @@ import json
 import shutil
 import tarfile
 import zipfile
+import logging
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -24,6 +25,8 @@ from ..models import (
 )
 from .jobs import Job
 from .recording_service import list_episodes, quality_for
+
+log = logging.getLogger(__name__)
 
 
 MAX_UPLOAD_BYTES = 2 * 1024 ** 3
@@ -104,8 +107,13 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
                                      "cameras": res["cameras"], "task": r.get("task") or None,
                                      "note": "success not judged by the simulator; condition unknown"})
             ep.quality = quality_for(ctx, ep, None)
-            for kind in ("episode", "front", "thumb"):
-                await ctx.publish_file(ep.artifacts[kind])
+            for kind in ("front", "thumb", "episode"):
+                try:
+                    await ctx.publish_file(ep.artifacts[kind])
+                except Exception as e:  # long episodes' npz can exceed InsForge's REST upload cap (413; S3 path: #81)
+                    if kind != "episode" or not ("413" in str(e) or "upload cap" in str(e)):
+                        raise
+                    log.warning("kept %s on this machine only: %s", ep.artifacts[kind], str(e)[:120])
             await ctx.repo.save("episodes", ep)
             ds.links.append(DatasetEpisodeLink(episode_id=ep.id, split="train",
                                                lerobot_episode_index=r["source_episode_index"]))

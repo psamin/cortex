@@ -15,6 +15,11 @@ Two planning modes:
   privileged  observations also include simulator ground-truth object poses.
           Always labelled "privileged-state planning".
 
+The tools are generic over the task object: on the upstream tabletop it is the red cube and the
+box; on an intake scene (``SceneEnv``) it is the scene's pick object and its named place zones.
+Short objects are grasped from above, tall ones from the side (``sim/grasp.py``), reusing the
+verified offsets and IK helpers of ``sim/pick_place_skill.py``.
+
 Task success is always judged by the simulator (ground truth), never by the model.
 """
 
@@ -31,7 +36,9 @@ import numpy as np
 from PIL import Image, ImageDraw
 from pydantic import BaseModel, Field, ValidationError
 
-from .expert import ARM, solve_ik
+from .expert import ARM, approach_error_deg, solve_ik
+from .grasp import approaches, grasp_height, grasp_mode
+from .pick_place_skill import LIFT, PickPlaceSkill
 from .so101 import PickPlaceEnv
 
 PLAN_CAM, PLAN_PX = "top", 480
@@ -43,7 +50,91 @@ CUBE_Z, CARRY_Z, RELEASE_Z, RETREAT_Z = 0.015, 0.075, 0.055, 0.072
 MAX_REACH_ERR = 0.012
 MOTION_TIMEOUT_STEPS = 150
 EPISODE_MAX_STEPS = 900  # 30 s of sim time
+SIDE_EPISODE_MAX_STEPS = 2400  # 80 s: side grasps move slowly along straight lines near the object
 ARM_DEG_PER_STEP, GRIP_PER_STEP = 4.0, 8.0
+CONTACT_DEG_PER_STEP = 2.0  # straight-line moves with an approach axis (side grasps), as in the skill
+LINE_STEP_M = 0.01  # waypoint spacing of straight-line moves
+LINE_AXIS_TOL_DEG = 5.0  # straight lines only when the gripper already points along the axis; else a joint move
+MAX_AXIS_ERR_DEG = 10.0  # an approach-axis IK solution must point within this of the wanted axis
+HOME_TOL_DEG = 2.0
+# Side grasps, in the physical gripper-site frame. Measured on the scripted skill's verified small-bottle runs
+# (#94, seeds 1 and 4): with the object centred in the open jaws (OPEN_GAP_OFFSET) the site sits 2.0 cm past the
+# object's centre along the approach and in line with it; the slide to the fixed pad (SLIDE_DEPTH, pad_z) moves
+# it 8 mm sideways along the jaws' closing axis.
+SIDE_TIP_PAST_CENTRE, SIDE_SLIDE_LATERAL = 0.020, 0.008
+SIDE_XY_MARGIN = 0.04
+HUE_TOL_DEG, MIN_SAT, MIN_VAL = 35.0, 20, 20  # object-colour segmentation (OpenCV HSV: S, V in 0-255)
+
+
+@dataclass(frozen=True)
+class TaskObject:
+    """The object the tools pick: its name, size and colour come from the scene (or the upstream red cube)."""
+
+    name: str
+    height: float
+    shape: str
+    width: float
+    rgba: tuple[float, ...] | None  # None: the upstream cube, segmented by saturation
+
+    @property
+    def mode(self) -> str:
+        return grasp_mode(self.height)
+
+    @property
+    def grasp_z(self) -> float:
+        return grasp_height(self.height)
+
+    @property
+    def label(self) -> str:
+        return self.name.replace("_", " ")
+
+    def describe(self) -> str:
+        dims = (f"{self.width * 100:.1f} cm wide" if self.shape == "sphere"
+                else f"{self.height * 100:.1f} cm tall, {self.width * 100:.1f} cm wide")
+        return f"the {self.label} ({self.shape}, {dims}; {self.mode} grasp)"
+
+
+def task_object(env: PickPlaceEnv) -> TaskObject:
+    info = getattr(env, "info", None)
+    if info is None:
+        return TaskObject("red_cube", 0.03, "box", 0.03, None)
+    m = env.world.model
+    g = min(env.obj_geoms)  # type: ignore[attr-defined]
+    size = m.geom_size[g]
+    shape = env.shape  # type: ignore[attr-defined]
+    width = float(2 * min(size[:2]) if shape == "box" else 2 * size[0])
+    return TaskObject(env.pick, float(env.obj_h), shape, width,  # type: ignore[attr-defined]
+                      tuple(float(c) for c in m.geom_rgba[g]))
+
+
+def color_mask(hsv: np.ndarray, rgba: tuple[float, ...]) -> np.ndarray:
+    """Pixels whose hue is near the object's colour. Hue survives the lighting scale (dim/normal), and
+    a minimum saturation keeps out the near-white table. Achromatic objects fall back to brightness."""
+    import cv2
+
+    ref = cv2.cvtColor(np.uint8([[[round(c * 255) for c in rgba[:3]]]]), cv2.COLOR_RGB2HSV)[0, 0].astype(int)
+    if ref[1] < 40:  # grey/white/black object: no usable hue; match value instead
+        return ((np.abs(hsv[..., 2].astype(int) - ref[2]) < 40) & (hsv[..., 1] < 60)).astype(np.uint8)
+    dh = np.abs(hsv[..., 0].astype(int) - ref[0])
+    dh = np.minimum(dh, 180 - dh) * 2.0  # OpenCV hue is 0-179 (2 degrees per unit)
+    return ((dh < HUE_TOL_DEG) & (hsv[..., 1] > MIN_SAT) & (hsv[..., 2] > MIN_VAL)).astype(np.uint8)
+
+
+def _norm_name(s: str) -> str:
+    return s.strip().lower().replace(" ", "_").replace("-", "_")
+
+
+def _key(xyz: np.ndarray) -> tuple[float, ...]:
+    return tuple(round(float(v), 3) for v in np.round(np.asarray(xyz, dtype=np.float64), 4))
+
+
+def _unit(v: list[float] | np.ndarray) -> np.ndarray:
+    a = np.asarray(v, dtype=np.float64)
+    n = float(np.linalg.norm(a))
+    if n < 0.5 or n > 1.5:
+        raise ToolError("bad_approach", "approach must be a unit vector (use the one propose_grasp returns)",
+                        approach=[round(float(x), 4) for x in a])
+    return a / n
 
 
 class ToolError(Exception):
@@ -64,6 +155,10 @@ class Pose(BaseModel):
     y: float = Field(..., description="metres, +y to the robot's left")
     z: float = Field(..., description="metres above the table surface")
     yaw_deg: float | None = Field(None, ge=-180, le=180, description="gripper yaw about vertical; null = keep")
+    approach: list[float] | None = Field(None, min_length=3, max_length=3,
+                                         description="gripper approach axis (unit vector, base frame) for side "
+                                                     "grasps; null = straight down (top grasp). Use the value "
+                                                     "propose_grasp returns.")
 
 
 class ObserveArgs(BaseModel):
@@ -71,7 +166,7 @@ class ObserveArgs(BaseModel):
 
 
 class ProposeGraspArgs(BaseModel):
-    object_id: Literal["red_cube"] = "red_cube"
+    object_id: str | None = Field(None, max_length=64, description="the task object (default: the object to pick)")
     image_point: ImagePoint | None = Field(None, description="where the object is in the latest overhead image "
                                                              "(required in camera mode)")
 
@@ -86,6 +181,7 @@ class GripperArgs(BaseModel):
 
 
 class PlaceArgs(BaseModel):
+    zone: str | None = Field(None, max_length=64, description="a named place zone from the task")
     image_point: ImagePoint | None = Field(None, description="center of the placement target in the overhead image")
     target: Pose | None = Field(None, description="explicit placement point instead of an image point")
 
@@ -127,6 +223,35 @@ class ManipulationSession:
         self.last_overhead: np.ndarray | None = None
         self.holding = False
         self.counters = {"tool_calls": 0, "tool_errors": 0, "grasp_failures": 0}
+        self.obj: TaskObject | None = None
+        self.max_steps = EPISODE_MAX_STEPS
+        self._q_hint: dict[tuple[float, ...], np.ndarray] = {}  # IK solutions of the poses propose_grasp returned
+        self._skill: PickPlaceSkill | None = None
+        self._last_ik_err = 0.0
+        self._last_axis: tuple[np.ndarray, np.ndarray] | None = None  # (arm joints, approach axis) of the last move
+        if env.world is not None:
+            self._bind_object()
+
+    def _bind_object(self) -> None:
+        self.obj = task_object(self.env)
+        self.max_steps = EPISODE_MAX_STEPS if self.obj.mode == "top" else SIDE_EPISODE_MAX_STEPS
+        self._skill = PickPlaceSkill(self.env, height=self.obj.height, grasp_width=self.obj.width)
+
+    # ---------------- task description (object and zones), for prompts and tool descriptions
+    def zones(self) -> dict[str, tuple[tuple[float, float], tuple[float, float]] | None]:
+        info = getattr(self.env, "info", None)
+        if info is None:
+            return {"box": None}  # the upstream box: its position is only known from the image or ground truth
+        return dict(info.zones)
+
+    def target_zone(self) -> str:
+        return getattr(self.env, "target_name", None) or next(iter(self.zones()), "box")
+
+    def task_context(self) -> dict[str, Any]:
+        assert self.obj is not None
+        return {"object": self.obj.name, "object_text": self.obj.describe(), "grasp_mode": self.obj.mode,
+                "zones": list(self.zones()), "target_zone": self.target_zone(),
+                "scene": "intake" if getattr(self.env, "info", None) is not None else "tabletop"}
 
     # ---------------- episode boundary (owned by the collector, not the planner)
     def reset_environment(self, seed: int, variation) -> dict[str, Any]:
@@ -135,13 +260,17 @@ class ManipulationSession:
         self.rec = Recorder()
         self.holding = False
         self.last_overhead = None
+        self._q_hint = {}
+        self._last_axis = None
+        self._bind_object()
         return {"seed": seed}
 
     # ---------------- low level: drive joint targets, record every step
     def _step(self, target: np.ndarray) -> None:
         assert self.obs is not None
-        if len(self.rec) >= EPISODE_MAX_STEPS:
-            raise ToolError("episode_time_limit", f"episode exceeded {EPISODE_MAX_STEPS} steps (30 s)")
+        if len(self.rec) >= self.max_steps:
+            raise ToolError("episode_time_limit", f"episode exceeded {self.max_steps} steps "
+                                                  f"({self.max_steps // 30} s)")
         action = target.astype(np.float32)
         self.rec.front.append(self.obs["pixels"]["front"])
         self.rec.wrist.append(self.obs["pixels"]["wrist"])
@@ -155,16 +284,19 @@ class ManipulationSession:
             if self.on_frame:
                 self.on_frame(frame)
 
-    def _drive(self, q_target: np.ndarray, timeout: int = MOTION_TIMEOUT_STEPS, settle: int = 3) -> int:
+    def _drive(self, q_target: np.ndarray, timeout: int = MOTION_TIMEOUT_STEPS, settle: int = 3,
+               rate: float = ARM_DEG_PER_STEP, measured: bool = False) -> int:
         steps, held = 0, 0
         while steps < timeout:
             delta = q_target - self.cmd
-            step = np.clip(delta, -ARM_DEG_PER_STEP, ARM_DEG_PER_STEP)
+            step = np.clip(delta, -rate, rate)
             step[5] = np.clip(delta[5], -GRIP_PER_STEP, GRIP_PER_STEP)
             self.cmd = self.cmd + step
             self._step(self.cmd)
             steps += 1
-            if np.abs(q_target - self.cmd).max() < 0.5:
+            arrived = not measured or np.abs(np.asarray(self.env.world.joint_state())[:ARM]
+                                             - q_target[:ARM]).max() < 0.7
+            if np.abs(q_target - self.cmd).max() < 0.5 and arrived:
                 held += 1
                 if held >= settle:
                     return steps
@@ -183,7 +315,11 @@ class ManipulationSession:
         f = (PLAN_PX / 2) / np.tan(np.deg2rad(m.cam_fovy[cam]) / 2)
         return d.cam_xpos[cam].copy(), d.cam_xmat[cam].reshape(3, 3).copy(), f
 
-    def pixel_to_table(self, u: float, v: float, z: float = CUBE_Z) -> np.ndarray:
+    def pixel_to_table(self, u: float, v: float, z: float | None = None) -> np.ndarray:
+        """Back-project an overhead pixel onto the horizontal plane at height z (default: the task object's
+        grasp height, which is CUBE_Z for the cube)."""
+        if z is None:
+            z = self.obj.grasp_z if self.obj is not None else CUBE_Z
         p, R, f = self._camera(PLAN_CAM)
         d = R @ np.array([(u - PLAN_PX / 2) / f, -(v - PLAN_PX / 2) / f, -1.0])
         if abs(d[2]) < 1e-6:
@@ -203,18 +339,25 @@ class ManipulationSession:
         self._plan_renderer.update_scene(self.env.world.data, camera=cam)
         return self._plan_renderer.render().copy()
 
-    def refine_blob(self, img: np.ndarray, u: float, v: float, radius: int = 45) -> dict[str, Any]:
+    def refine_blob(self, img: np.ndarray, u: float, v: float, radius: int = 45,
+                    rgba: tuple[float, ...] | None = None) -> dict[str, Any]:
         """Camera-only refinement: segment the color region under the point and
-        return its centroid and in-plane orientation (image evidence only)."""
+        return its centroid and in-plane orientation (image evidence only).
+
+        With ``rgba`` (the object's colour from the scene) pixels are kept by hue distance to that colour;
+        without it (the upstream red cube) by high saturation."""
         import cv2
 
         h, w = img.shape[:2]
         u0, v0 = int(round(u)), int(round(v))
         x0, x1, y0, y1 = max(0, u0 - radius), min(w, u0 + radius), max(0, v0 - radius), min(h, v0 + radius)
         hsv = cv2.cvtColor(np.ascontiguousarray(img[y0:y1, x0:x1]), cv2.COLOR_RGB2HSV)
-        # Saturated (colored) regions against the low-saturation tabletop; saturation is
-        # invariant to the lighting scale, so this works in dim and bright scenes alike.
-        mask = ((hsv[..., 1] > 115) & (hsv[..., 2] > 20)).astype(np.uint8)
+        if rgba is None:
+            # Saturated (colored) regions against the low-saturation tabletop; saturation is
+            # invariant to the lighting scale, so this works in dim and bright scenes alike.
+            mask = ((hsv[..., 1] > 115) & (hsv[..., 2] > 20)).astype(np.uint8)
+        else:
+            mask = color_mask(hsv, rgba)
         n, labels, stats, _ = cv2.connectedComponentsWithStats(mask)
         best, best_d = 0, np.inf
         for lab in range(1, n):
@@ -234,8 +377,13 @@ class ManipulationSession:
 
     # ---------------- validation
     def _validate_pose(self, p: Pose, allow_low: bool = False) -> None:
+        side = self.obj is not None and self.obj.mode == "side"
         for axis in ("x", "y", "z"):
             lo, hi = WORKSPACE[axis]
+            if axis == "z":
+                hi = self._z_max()
+            elif side:  # side grasps hold the gripper tip past the object's centre, along the approach
+                lo, hi = lo - SIDE_XY_MARGIN, hi + SIDE_XY_MARGIN
             val = getattr(p, axis)
             if not lo <= val <= hi:
                 raise ToolError("outside_workspace", f"{axis}={val:.3f} m outside [{lo}, {hi}]",
@@ -243,7 +391,13 @@ class ManipulationSession:
         if p.z < 0.008 and not allow_low:
             raise ToolError("table_collision", "target is below the 8 mm table clearance", z=p.z)
 
+    def _z_max(self) -> float:
+        """Tall objects need room above them (the side-grasp transit waypoint); the cube keeps 0.20 m."""
+        return max(WORKSPACE["z"][1], (self.obj.height if self.obj else 0.0) + 0.12)
+
     def _ik(self, p: Pose) -> np.ndarray:
+        if p.approach is not None:
+            return self._ik_axis(np.array([p.x, p.y, p.z]), _unit(p.approach))
         yaw = np.deg2rad(p.yaw_deg) if p.yaw_deg is not None else None
         target = np.array([p.x, p.y, p.z])
         q, err = solve_ik(self.env, target, self.cmd, yaw)
@@ -265,21 +419,25 @@ class ManipulationSession:
         if err > MAX_REACH_ERR:
             raise ToolError("unreachable", f"IK residual {err * 1000:.0f} mm exceeds {MAX_REACH_ERR * 1000:.0f} mm",
                             residual_m=round(err, 4))
+        return self._check_limits(q)
+
+    def _check_limits(self, q: np.ndarray) -> np.ndarray:
         w = self.env.world
         lo, hi = np.rad2deg(w.lo[:ARM]), np.rad2deg(w.hi[:ARM])
         if np.any(q < lo - 1e-3) or np.any(q > hi + 1e-3):
             raise ToolError("joint_limit", "solution violates joint limits", q=q.round(1).tolist())
         return q
 
-    def _check_path_collisions(self, q_target_deg: np.ndarray) -> None:
+    def _check_path_collisions(self, q_target_deg: np.ndarray, start_deg: np.ndarray | None = None) -> None:
         """Kinematic sweep: arm geoms must not penetrate the table or box walls."""
         w = self.env.world
         m = w.model
         d = mujoco.MjData(m)
         d.qpos[:] = w.data.qpos
-        arm_bodies = set(range(m.nbody)) - {0, w.box_body, *w.cube_bodies}
+        free = {int(m.jnt_bodyid[j]) for j in range(m.njnt) if m.jnt_type[j] == mujoco.mjtJoint.mjJNT_FREE}
+        arm_bodies = set(range(m.nbody)) - {0, w.box_body, *w.cube_bodies} - free  # objects are not the arm
         statics = {g for g in range(m.ngeom) if m.geom_bodyid[g] in (0, w.box_body)}
-        start = self.cmd[:ARM].copy()
+        start = (self.cmd[:ARM] if start_deg is None else np.asarray(start_deg)[:ARM]).copy()
         for s in np.linspace(0, 1, 6)[1:]:
             q = start + s * (q_target_deg[:ARM] - start)
             d.qpos[w.qadr[:ARM]] = np.deg2rad(q)
@@ -291,6 +449,90 @@ class ManipulationSession:
                     other = next(g for g in pair if g in statics)
                     raise ToolError("collision", f"path collides with {m.geom(other).name or 'box/table'} "
                                     f"at {s:.0%} of the motion", fraction=round(float(s), 2))
+
+    def _fk(self, q: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        w = self.env.world
+        d = mujoco.MjData(w.model)
+        d.qpos[:] = w.data.qpos
+        d.qpos[w.qadr[:ARM]] = np.deg2rad(q[:ARM])
+        mujoco.mj_kinematics(w.model, d)
+        return d.site_xpos[self.env.site].copy(), d.site_xmat[self.env.site].reshape(3, 3).copy()
+
+    def _ik_axis(self, xyz: np.ndarray, axis: np.ndarray, seed: np.ndarray | None = None,
+                 tol: float = MAX_REACH_ERR, use_hint: bool = True) -> np.ndarray:
+        """IK with the gripper's approach axis along ``axis`` (side grasps) and the deterministic jaw roll.
+
+        ``solve_ik`` measures its residual before it sets the jaw roll, and the roll moves the gripper site
+        sideways by up to ~2.5 cm, so the target is corrected (fixed-point, as the skill's ``_ik_obj``) until
+        the site lands on ``xyz`` *with* that roll. The residual checked is the physical one.
+        Seeds: a solution propose_grasp already computed for this pose, the given seed, the current joints,
+        then the skill's elbow-up/down seeds."""
+        assert self._skill is not None
+        hint = self._q_hint.get(_key(xyz)) if use_hint else None
+        for s, only in ((hint, True), (seed, True), (self.cmd, True), (None, False)):
+            if only and s is None:
+                continue
+            tgt, q = np.asarray(xyz, dtype=np.float64).copy(), None if s is None else np.asarray(s, np.float64)
+            for i in range(5):
+                _, q = self._skill._ik(tgt, axis, q, only_seed=only or i > 0)
+                if q is None:
+                    break
+                miss = xyz - self._fk(q)[0]
+                if np.linalg.norm(miss) < 1e-3:
+                    break
+                tgt = tgt + miss
+            if q is None:
+                continue
+            e = float(np.linalg.norm(xyz - self._fk(q)[0]))
+            if e <= tol and approach_error_deg(self.env, q, axis) <= MAX_AXIS_ERR_DEG:
+                self._last_ik_err = e
+                return self._check_limits(q)
+        raise ToolError("unreachable", f"no IK solution within {tol * 1000:.0f} mm with the gripper along the "
+                        f"approach axis {np.round(axis, 3).tolist()}", approach=np.round(axis, 3).tolist())
+
+    def _line_plan(self, goal: np.ndarray, axis: np.ndarray) -> list[np.ndarray]:
+        """Joint waypoints for a straight-line move of the gripper tip, with the approach axis held. Every
+        waypoint is solved and every segment swept for collisions before the arm moves."""
+        start = self.ee_pos()
+        n = max(2, int(np.ceil(np.linalg.norm(goal - start) / LINE_STEP_M)))
+        qs, prev = [], self.cmd[:ARM].copy()
+        for t in np.linspace(0, 1, n + 1)[1:]:
+            q = self._ik_axis(start + (goal - start) * t, axis, seed=prev, tol=MAX_REACH_ERR if t == 1 else 0.02,
+                              use_hint=False)  # stay on the continuous IK branch along the line
+            self._check_path_collisions(q, start_deg=prev)
+            qs.append(q)
+            prev = q
+        return qs
+
+    def _move_axis(self, goal: np.ndarray, axis: np.ndarray, grip: float | None = None) -> int:
+        """Side-grasp motion: a straight line when the gripper already points along the axis (approach,
+        slide, lift, lower, retreat), otherwise a validated joint move (transit, carry). Slow, like the skill."""
+        grip = self.cmd[5] if grip is None else grip
+        last = self._last_axis  # the axis of the previous side-grasp move, if the arm has not moved since
+        aligned = (last is not None and np.allclose(last[0], self.cmd[:ARM], atol=0.5)
+                   and float(np.rad2deg(np.arccos(np.clip(last[1] @ axis, -1, 1)))) < LINE_AXIS_TOL_DEG)
+        if aligned and np.linalg.norm(goal - self.ee_pos()) < 0.15:
+            qs = self._line_plan(goal, axis)
+            steps = 0
+            for i, q in enumerate(qs):
+                steps += self._drive(np.r_[q, grip], rate=CONTACT_DEG_PER_STEP,
+                                     settle=3 if i == len(qs) - 1 else 1, measured=True)
+        else:
+            q = self._ik_axis(goal, axis)
+            target = np.r_[q, grip]
+            self._check_path_collisions(target)
+            steps = self._drive(target, rate=CONTACT_DEG_PER_STEP if self.holding else ARM_DEG_PER_STEP, timeout=240)
+        self._last_axis = (self.cmd[:ARM].copy(), axis.copy())
+        return steps
+
+    def _resolve_object(self, object_id: str | None) -> dict[str, Any]:
+        assert self.obj is not None
+        if object_id is None or _norm_name(object_id) == self.obj.name:
+            return {}
+        if _norm_name(object_id) == "red_cube":  # the legacy default some clients still send; said so, not hidden
+            return {"note": f"object_id 'red_cube' is the legacy default; the task object is '{self.obj.name}'"}
+        raise ToolError("unknown_object", f"no graspable object '{object_id}'; the task object is '{self.obj.name}'",
+                        objects=[self.obj.name])
 
     # ================================================================= TOOLS
     def observe_scene(self, a: ObserveArgs) -> tuple[dict[str, Any], np.ndarray]:
@@ -304,8 +546,14 @@ class ManipulationSession:
                                "note": "overhead image: +x (forward) points up the image, +y (robot left) points left"}
         if self.mode == "privileged":
             c, b = self.env.cube_pos(), self.env.box_pos()
-            out["privileged_ground_truth"] = {"red_cube_xyz": c.round(4).tolist(), "box_xyz": b.round(4).tolist(),
-                                              "cube_yaw_deg": round(float(np.rad2deg(self.env.cube_yaw())), 1)}
+            if getattr(self.env, "info", None) is None:
+                out["privileged_ground_truth"] = {"red_cube_xyz": c.round(4).tolist(), "box_xyz": b.round(4).tolist(),
+                                                  "cube_yaw_deg": round(float(np.rad2deg(self.env.cube_yaw())), 1)}
+            else:
+                assert self.obj is not None
+                zones = {n: [round(float(v), 4) for v in (self._zone_xy(n, privileged=True))] for n in self.zones()}
+                out["privileged_ground_truth"] = {f"{self.obj.name}_xyz": c.round(4).tolist(),
+                                                  "zones_xy": zones, "target_zone": self.target_zone()}
         return out, img
 
     def get_robot_state(self, a: Empty) -> dict[str, Any]:
@@ -313,9 +561,11 @@ class ManipulationSession:
         return {"joints_deg": np.round(self.obs["agent_pos"], 1).tolist(),  # type: ignore[index]
                 "gripper_opening_0_100": round(self.gripper_opening(), 1),
                 "end_effector_xyz": ee.round(4).tolist(), "holding_object": self.holding,
-                "steps_used": len(self.rec), "steps_limit": EPISODE_MAX_STEPS}
+                "steps_used": len(self.rec), "steps_limit": self.max_steps}
 
     def propose_grasp(self, a: ProposeGraspArgs) -> dict[str, Any]:
+        assert self.obj is not None
+        note = self._resolve_object(a.object_id)
         if self.mode == "privileged" and a.image_point is None:
             c = self.env.cube_pos()
             yaw = float(np.rad2deg(self.env.cube_yaw()))
@@ -326,15 +576,22 @@ class ManipulationSession:
                 raise ToolError("image_point_required", "camera mode: point at the object in the overhead image")
             if self.last_overhead is None:
                 raise ToolError("no_observation", "call observe_scene(camera='overhead') first")
-            blob = self.refine_blob(self.last_overhead, a.image_point.u, a.image_point.v)
-            c = self.pixel_to_table(blob["u"], blob["v"], CUBE_Z)
+            blob = self.refine_blob(self.last_overhead, a.image_point.u, a.image_point.v, rgba=self.obj.rgba)
+            c = self.pixel_to_table(blob["u"], blob["v"], self.obj.grasp_z)
             # minAreaRect angle is in image axes; image right = -y, image up = +x in the robot frame.
             yaw = -float(blob.get("rect_deg", 0.0)) % 90.0
             source = "camera_backprojection"
             evidence = {"model_point": [a.image_point.u, a.image_point.v], "refined_point": [blob["u"], blob["v"]],
-                        "refined": blob["refined"], "blob_pixels": blob["pixels"]}
-        grasp = Pose(x=float(c[0]), y=float(c[1]), z=0.012, yaw_deg=yaw)
-        pre = Pose(x=float(c[0]), y=float(c[1]), z=0.055, yaw_deg=yaw)
+                        "refined": blob["refined"], "blob_pixels": blob["pixels"],
+                        "segmentation": "object colour (hue)" if self.obj.rgba is not None else "saturation"}
+        head = {"object_id": self.obj.name, "source": source, "estimated_xyz": c.round(4).tolist(),
+                "grasp_mode": self.obj.mode, **note}
+        tail = {"evidence": evidence} if evidence else {}
+        if self.obj.mode == "side":
+            return {**head, **self._side_grasp(np.r_[c[:2], self.obj.grasp_z]), **tail}
+        gz = self.obj.grasp_z - 0.003  # 0.012 for the cube
+        grasp = Pose(x=float(c[0]), y=float(c[1]), z=gz, yaw_deg=yaw)
+        pre = Pose(x=float(c[0]), y=float(c[1]), z=gz + 0.043, yaw_deg=yaw)
         reachable = True
         detail = None
         try:
@@ -343,16 +600,66 @@ class ManipulationSession:
             self._ik(pre)
         except ToolError as e:
             reachable, detail = False, e.message
-        return {"object_id": a.object_id, "source": source, "estimated_xyz": c.round(4).tolist(),
-                "pregrasp": pre.model_dump(), "grasp": grasp.model_dump(), "reachable": reachable,
-                "unreachable_reason": detail, **({"evidence": evidence} if evidence else {})}
+        return {**head, "pregrasp": pre.model_dump(exclude_none=True), "grasp": grasp.model_dump(exclude_none=True),
+                "reachable": reachable, "unreachable_reason": detail, **tail}
+
+    def _side_grasp(self, g: np.ndarray) -> dict[str, Any]:
+        """The skill's verified side grasp: transit above and behind, pre-grasp 6 cm back along the approach,
+        the object centred in the open jaws, then a slide toward the fixed pad. Each pose is solved with the
+        approach axis and the deterministic jaw roll (physical site position); the solutions seed the moves."""
+        assert self.obj is not None
+        try:
+            self._validate_pose(Pose(x=float(g[0]), y=float(g[1]), z=float(g[2])))
+        except ToolError as e:
+            return {"reachable": False, "unreachable_reason": e.message}
+        for axis in approaches(g[:2], "side"):
+            try:
+                open_gap = g + axis * SIDE_TIP_PAST_CENTRE
+                q2 = self._ik_axis(open_gap, axis, use_hint=False)
+                lateral = self._fk(q2)[1][:, 2]  # site z: the jaws' closing direction with the fixed roll
+                slide = open_gap + lateral * SIDE_SLIDE_LATERAL
+                q3 = self._ik_axis(slide, axis, seed=q2, use_hint=False)
+                pre = open_gap - axis * 0.06
+                q1 = self._ik_axis(pre, axis, seed=q2, use_hint=False)
+                transit = pre + np.array([0, 0, 0.10]) - axis * 0.04
+                q4 = self._ik_axis(transit, axis, seed=q2, tol=0.01, use_hint=False)
+                lift = slide + np.array([0, 0, LIFT])
+                q5 = self._ik_axis(lift, axis, seed=q3, tol=0.01, use_hint=False)
+            except ToolError:
+                continue
+            poses = {"transit": (transit, q4), "pregrasp": (pre, q1), "grasp": (open_gap, q2), "slide": (slide, q3),
+                     "lift": (lift, q5)}
+            try:
+                for xyz, q in poses.values():
+                    self._validate_pose(Pose(x=float(xyz[0]), y=float(xyz[1]), z=float(xyz[2])))
+                    self._check_limits(q)
+            except ToolError as e:
+                return {"reachable": False, "unreachable_reason": e.message}
+            ax = [round(float(v), 4) for v in axis]
+            out: dict[str, Any] = {}
+            for name, (xyz, q) in poses.items():
+                self._q_hint[_key(xyz)] = q  # the agent sends the rounded pose back; same key
+                out[name] = {"x": round(float(xyz[0]), 4), "y": round(float(xyz[1]), 4), "z": round(float(xyz[2]), 4),
+                             "approach": ax}
+            return {"approach": ax, "wrist_roll_deg": round(float(q2[4]), 1),
+                    "approach_pitch_deg": round(float(np.rad2deg(np.arcsin(-axis[2]))), 1), **out,
+                    "sequence": ["set_gripper(open)", "move_end_effector(transit)", "move_end_effector(pregrasp)",
+                                 "move_end_effector(grasp)", "move_end_effector(slide)", "set_gripper(closed)",
+                                 "verify_grasp", "move_end_effector(lift)"],
+                    "reachable": True, "unreachable_reason": None}
+        return {"reachable": False, "unreachable_reason": "no reachable side grasp for this object position "
+                "(tried approach tilts 0, 20 and 40 degrees)"}
 
     def move_end_effector(self, a: MoveArgs) -> dict[str, Any]:
         self._validate_pose(a.target)
-        q = self._ik(a.target)
-        target = np.r_[q, self.cmd[5]]
-        self._check_path_collisions(target)
-        steps = self._drive(target)
+        if a.target.approach is not None:
+            goal = np.array([a.target.x, a.target.y, a.target.z])
+            steps = self._move_axis(goal, _unit(a.target.approach))
+        else:
+            q = self._ik(a.target)
+            target = np.r_[q, self.cmd[5]]
+            self._check_path_collisions(target)
+            steps = self._drive(target)
         ee = self.ee_pos()
         return {"reached_xyz": ee.round(4).tolist(),
                 "error_m": round(float(np.linalg.norm(ee - [a.target.x, a.target.y, a.target.z])), 4),
@@ -378,13 +685,33 @@ class ManipulationSession:
                "holding_object": self.holding,
                "basis": "proprioception: a closed gripper that stalls open is holding something"}
         if self.mode == "privileged":
-            out["privileged_cube_height_m"] = round(float(self.env.cube_pos()[2]), 4)
+            key = "privileged_cube_height_m" if getattr(self.env, "info", None) is None else "privileged_object_z_m"
+            out[key] = round(float(self.env.cube_pos()[2]), 4)
         return out, self._render("wrist")
 
+    def _zone_xy(self, zone: str, privileged: bool) -> tuple[float, float]:
+        zones = self.zones()
+        name = next((z for z in zones if _norm_name(z) == _norm_name(zone)), None)
+        if name is None:
+            raise ToolError("unknown_zone", f"no place zone '{zone}'", zones=list(zones))
+        if zones[name] is None:  # the upstream box: no task-spec geometry, its pose is world state
+            if not privileged:
+                raise ToolError("image_point_required", "camera mode: point at the box in the overhead image")
+            return float(self.env.box_pos()[0]), float(self.env.box_pos()[1])
+        if privileged and name == self.target_zone():
+            return float(self.env.box_pos()[0]), float(self.env.box_pos()[1])  # includes any start-state offset
+        (cx, cy), _ = zones[name]  # type: ignore[misc]
+        return float(cx), float(cy)
+
     def place_object(self, a: PlaceArgs) -> dict[str, Any]:
+        assert self.obj is not None
         if not self.holding:
             raise ToolError("not_holding", "verify_grasp reports no object in the gripper")
-        if a.target is not None:
+        if a.zone is not None:
+            x, y = self._zone_xy(a.zone, privileged=self.mode == "privileged")
+            source = ("privileged_ground_truth" if self.mode == "privileged" else
+                      "task_spec_zone (nominal centre from the intake, not observed)")
+        elif a.target is not None:
             x, y = a.target.x, a.target.y
             source = "explicit_pose"
         elif a.image_point is not None:
@@ -400,34 +727,92 @@ class ManipulationSession:
             x, y = (float(v) for v in self.env.box_pos()[:2])
             source = "privileged_ground_truth"
         else:
-            raise ToolError("target_required", "give image_point (camera mode) or target")
+            raise ToolError("target_required", "give zone, image_point (camera mode) or target")
+        if self.obj.mode == "side":
+            return {**self._place_side(np.array([x, y])), "source": source, "grasp_mode": "side"}
+        h = self.obj.height
+        carry = max(self.obj.grasp_z - 0.003 + LIFT, CARRY_Z)  # 0.075 for the cube
+        release = h + 0.025  # 0.055 for the cube
         steps = 0
-        for z in (CARRY_Z, RELEASE_Z):
+        for z in (carry, release):
             steps += self.move_end_effector(MoveArgs(target=Pose(x=x, y=y, z=z)))["steps"]
         steps += self.set_gripper(GripperArgs(state="open"))["steps"]
         self.holding = False
         out: dict[str, Any] = {"placed_at_xy": [round(float(x), 4), round(float(y), 4)], "source": source}
         try:  # the object is already released; a failed retreat is a warning, not a failed placement
-            steps += self.move_end_effector(MoveArgs(target=Pose(x=x, y=y, z=RETREAT_Z)))["steps"]
+            steps += self.move_end_effector(MoveArgs(target=Pose(x=x, y=y, z=max(RETREAT_Z, release + 0.017))))[
+                "steps"]
         except ToolError as e:
             out["retreat_warning"] = e.message
         return {**out, "steps": steps}
 
+    def _place_side(self, r: np.ndarray) -> dict[str, Any]:
+        """The skill's side placement: carry at grasp height + LIFT, lower the gripper site to 6 mm above the
+        grasp height (the object then stands on the table), open, back off along the approach."""
+        assert self.obj is not None
+        gz = self.obj.grasp_z
+        rz = gz + 0.006
+        carry, low = np.r_[r, gz + LIFT], np.r_[r, rz]
+        for p in (carry, low):
+            self._validate_pose(Pose(x=float(p[0]), y=float(p[1]), z=float(p[2])))
+        axis = None
+        for ax in approaches(r, "side"):
+            try:
+                self._ik_axis(carry, ax, tol=0.01, use_hint=False)
+                self._ik_axis(low, ax, tol=0.006, use_hint=False)
+            except ToolError:
+                continue
+            axis = ax
+            break
+        if axis is None:
+            raise ToolError("unreachable", "no reachable side placement at the target", target_xy=r.round(4).tolist())
+        steps = self._move_axis(carry, axis)
+        steps += self._move_axis(low, axis)
+        steps += self.set_gripper(GripperArgs(state="open"))["steps"]
+        self.holding = False
+        out: dict[str, Any] = {"placed_at_xy": [round(float(r[0]), 4), round(float(r[1]), 4)],
+                               "approach": [round(float(v), 4) for v in axis]}
+        try:  # released; a failed retreat is a warning, not a failed placement
+            steps += self._move_axis(low - axis * 0.06, axis)  # straight back out of the jaws, then up
+            steps += self._move_axis(low - axis * 0.06 + np.array([0, 0, 0.03]), axis)
+        except ToolError as e:
+            out["retreat_warning"] = e.message
+        return {**out, "steps": steps}
+
+    def go_home(self, a: Empty) -> dict[str, Any]:
+        """A validated, recorded joint move to the arm's home pose (collision-swept like every motion)."""
+        home = np.asarray(self.env.module.HOME, dtype=np.float64)
+        target = np.r_[self._check_limits(home[:ARM].copy()), self.cmd[5] if self.holding else home[5]]
+        self._check_path_collisions(target)
+        steps = self._drive(target, timeout=240)
+        err = float(np.abs(np.asarray(self.env.world.joint_state())[:ARM] - home[:ARM]).max())
+        return {"reached_home": err < HOME_TOL_DEG, "max_joint_error_deg": round(err, 2), "steps": steps,
+                "joints_deg": np.round(self.obs["agent_pos"], 1).tolist()}  # type: ignore[index]
+
     def check_task_success(self, a: Empty) -> dict[str, Any]:
-        return {"success": self.env.in_box(), "basis": "simulator ground truth (cube resting inside the box)"}
+        if getattr(self.env, "info", None) is None:
+            return {"success": self.env.in_box(), "basis": "simulator ground truth (cube resting inside the box)"}
+        assert self.obj is not None
+        return {"success": self.env.in_box(),
+                "basis": f"simulator ground truth ({self.obj.label} resting upright inside zone "
+                         f"'{self.target_zone()}', released)"}
 
     # ------------------------------------------------------------- dispatch
     TOOLS: dict[str, tuple[type[BaseModel], str]] = {
         "observe_scene": (ObserveArgs, "Render a camera image (overhead by default; moves the arm clear first)."),
         "get_robot_state": (Empty, "Joint angles, gripper opening, end-effector position, step budget."),
-        "propose_grasp": (ProposeGraspArgs, "Turn a point on the object in the overhead image into validated "
-                                            "pregrasp/grasp poses (yaw from the image)."),
+        "propose_grasp": (ProposeGraspArgs, "Turn a point on the {object} in the overhead image into validated "
+                                            "grasp poses: pregrasp/grasp from above for short objects; for tall "
+                                            "ones a side grasp (approach axis, transit, pregrasp, grasp, slide, lift)."),
         "move_end_effector": (MoveArgs, "Move the gripper tip to a validated pose (workspace, reachability, "
-                                        "joint limits and collisions are checked)."),
+                                        "joint limits and collisions are checked). Pass the pose's approach axis "
+                                        "for side-grasp poses."),
         "set_gripper": (GripperArgs, "Open or close the gripper; reports whether it stalled on an object."),
         "verify_grasp": (Empty, "Check from proprioception (and a wrist image) whether an object is held."),
-        "place_object": (PlaceArgs, "Carry the held object to a point and release it (carry, lower, open, retreat)."),
-        "check_task_success": (Empty, "Simulator ground truth: is the cube resting in the box?"),
+        "place_object": (PlaceArgs, "Carry the held {object} to {zones} (or an image point / explicit target) and "
+                                    "release it (carry, lower, open, retreat; side placement for tall objects)."),
+        "go_home": (Empty, "Return the arm to its home pose (a validated, recorded motion). Do this after placing."),
+        "check_task_success": (Empty, "Simulator ground truth: is the {object} resting in {target}?"),
         "finish_episode": (FinishArgs, "End the episode when done or when no further progress is possible."),
     }
 
@@ -490,13 +875,33 @@ def to_data_url(img: np.ndarray, quality: int = 85) -> str:
     return "data:image/jpeg;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
-def tool_schemas(point_format: str = "pixels") -> list[dict[str, Any]]:
+def describe_terms(ctx: dict[str, Any] | None) -> dict[str, str]:
+    """How tool descriptions and prompts name the task object and zones (ctx: ManipulationSession.task_context)."""
+    if not ctx or ctx.get("scene") != "intake":
+        return {"object": "red cube", "zones": "the box", "target": "the box"}
+    zones = ctx.get("zones") or []
+    return {"object": str(ctx["object"]).replace("_", " "),
+            "zones": ("a zone (" + ", ".join(f"'{z}'" for z in zones) + ")") if zones else "the target",
+            "target": f"zone '{ctx.get('target_zone')}'"}
+
+
+def tool_schemas(point_format: str = "pixels", ctx: dict[str, Any] | None = None) -> list[dict[str, Any]]:
     """OpenAI-style function tool definitions generated from the Pydantic models. For
     norm1000 planners, image points are described (and bounded) in relative 0-1000 units;
-    the planner loop converts them to pixels before validation."""
+    the planner loop converts them to pixels before validation. ``ctx`` (a session's task_context)
+    names the real object and zones in the descriptions and constrains object_id / zone to them."""
+    terms = describe_terms(ctx)
     out = []
     for name, (model, desc) in ManipulationSession.TOOLS.items():
+        desc = desc.format(**terms)
         schema = model.model_json_schema()
+        if ctx and name == "propose_grasp":
+            schema["properties"]["object_id"] = {"type": "string", "enum": [ctx["object"]],
+                                                 "description": "the task object"}
+        if ctx and name == "place_object" and ctx.get("zones"):
+            schema["properties"]["zone"] = {"type": "string", "enum": list(ctx["zones"]),
+                                            "description": f"a named place zone; the task's target is "
+                                                           f"'{ctx.get('target_zone')}'"}
         if point_format == "norm1000" and "ImagePoint" in schema.get("$defs", {}):
             props = schema["$defs"]["ImagePoint"]["properties"]
             props["u"].update(maximum=1000, description="relative x in the overhead image, 0 = left edge, 1000 = right")
