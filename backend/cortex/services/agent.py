@@ -78,10 +78,80 @@ def _sse(event: str, data: Any) -> str:
     return f"event: {event}\ndata: {json.dumps(data, default=str)}\n\n"
 
 
+async def engine(ctx: Ctx) -> str:
+    """Which agent answers the studio chat: the user's Claude Code, a model route, or rules."""
+    from . import claude_code_agent as cc
+
+    want = ctx.settings.agent_engine
+    if want in ("auto", "claude_code") and cc.available() is None and await cc.mcp_up():
+        return "claude_code"
+    if want in ("auto", "model") and ctx.model:
+        return "model"
+    return "rules"
+
+
+def _log_path(ctx: Ctx, pid: str):
+    return ctx.data_dir / "agent_sessions" / pid / "chat.jsonl"
+
+
+def load_log(ctx: Ctx, pid: str) -> list[dict[str, Any]]:
+    """The full chat as the UI shows it: user messages, assistant text, tool calls/results, approvals."""
+    p = _log_path(ctx, pid)
+    if not p.exists():
+        return []
+    return [json.loads(ln) for ln in p.read_text().splitlines() if ln.strip()]
+
+
+def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any]) -> None:
+    from ..models import now
+
+    p = _log_path(ctx, pid)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open("a") as f:
+        f.write(json.dumps({**entry, "at": now().isoformat()}, default=str) + "\n")
+
+
 async def chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
+    """Stream one agent turn and record it to the project's chat log."""
+    _append_log(ctx, pid, {"kind": "user", "text": message})
+    text: list[str] = []
+    async for chunk in _chat(ctx, pid, message):
+        ev, _, data = chunk.partition("\ndata: ")
+        ev = ev.removeprefix("event: ")
+        try:
+            d = json.loads(data)
+        except ValueError:
+            d = {}
+        if ev == "text":
+            text.append(d.get("delta", ""))
+        elif ev in ("tool_call", "tool_result", "approval_required"):
+            if text:
+                _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)})
+                text = []
+            _append_log(ctx, pid, {"kind": ev, **d})
+        elif ev == "done":
+            if text:
+                _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)})
+                text = []
+            _append_log(ctx, pid, {"kind": "done", **d})
+        yield chunk
+
+
+async def _chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
     hist = HISTORY.setdefault(pid, [])
     hist.append({"role": "user", "content": message})
     await ctx.audit("gui", "agent_message", pid, {"message": message[:500]}, "ok", "user message")
+    eng = await engine(ctx)
+    if eng == "claude_code":
+        from . import claude_code_agent as cc
+
+        text = []
+        async for chunk in cc.chat(ctx, pid, message, _sse):
+            if chunk.startswith("event: text"):
+                text.append(json.loads(chunk.split("data: ", 1)[1])["delta"])
+            yield chunk
+        hist.append({"role": "assistant", "content": "".join(text)})
+        return
     if ctx.model:
         async for chunk in _llm(ctx, pid, hist):
             yield chunk

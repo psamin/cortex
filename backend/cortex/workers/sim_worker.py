@@ -20,8 +20,8 @@ from typing import Any
 import numpy as np
 
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
-
-PREVIEW_H, PREVIEW_W = 240, 320
+from ..sim.viewer import VIEW_H as PREVIEW_H  # noqa: F401  (presentation video size, re-exported)
+from ..sim.viewer import VIEW_W as PREVIEW_W  # noqa: F401
 SETTLE_STEPS = 10
 
 
@@ -30,17 +30,17 @@ def emit(**kw: Any) -> None:
 
 
 class Preview:
-    """A larger front-camera render for the UI and episode videos."""
+    """The presentation camera (cortex.sim.viewer) for the live view and episode videos.
+    Cosmetic only: policies are trained on the env's own observation cameras."""
 
     def __init__(self, env: PickPlaceEnv, out_dir: Path, live: bool):
-        import mujoco
+        from ..sim.viewer import DemoCamera
 
-        self.r = mujoco.Renderer(env.world.model, PREVIEW_H, PREVIEW_W)
+        self.r = DemoCamera(env.world.model)
         self.env, self.out_dir, self.live = env, out_dir, live
 
     def grab(self) -> np.ndarray:
-        self.r.update_scene(self.env.world.data, camera="front")
-        img = self.r.render().copy()
+        img = self.r.render(self.env.world.data)
         if self.live:
             from PIL import Image
 

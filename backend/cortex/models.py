@@ -334,6 +334,7 @@ class TrainingJob(BaseModel):
     approved_by: str | None = None
     external_id: str | None = None
     checkpoint_ids: list[str] = []
+    metrics: dict[str, Any] = {}  # e.g. loss_curve [[step, loss], ...] parsed from the training log
     error: str | None = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)

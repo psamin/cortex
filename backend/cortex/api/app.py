@@ -224,11 +224,15 @@ def _render_png(region: str, lighting: str, seed: int) -> bytes:
 
     from ..sim.so101 import PickPlaceEnv, Variation
     with _render_lock:
+        from ..sim.viewer import DemoCamera
         env = _preview_env.get("env")
         if env is None:
-            env = _preview_env["env"] = PickPlaceEnv(height=240, width=320)
+            env = _preview_env["env"] = PickPlaceEnv()
         env.reset(seed, Variation(cube_region=region, lighting=lighting))
-        img = env.render_front()
+        cam = _preview_env.get("cam")
+        if cam is None:
+            cam = _preview_env["cam"] = DemoCamera(env.world.model)
+        img = cam.render(env.world.data)
     buf = io.BytesIO()
     Image.fromarray(img).save(buf, format="PNG")
     return buf.getvalue()
@@ -505,10 +509,26 @@ async def next_actions(pid: str):
     return st.next_actions
 
 
-@app.get("/api/projects/{pid}/graph")
-async def graph(pid: str):
-    from ..services.graph_service import build_graph
-    return await build_graph(ctx(), pid)
+# ------------------------------------------------------------------ studio read models
+@app.get("/api/projects/{pid}/iterations")
+async def iterations(pid: str):
+    from ..services import studio_service
+    return await studio_service.iterations(ctx(), pid)
+
+
+@app.get("/api/projects/{pid}/rollouts")
+async def rollouts(pid: str):
+    from ..services import studio_service
+    return await studio_service.rollouts(ctx(), pid)
+
+
+@app.get("/api/episodes/{eid}/camera/{camera}.mp4")
+async def episode_camera(eid: str, camera: str):
+    from fastapi.responses import FileResponse
+
+    from ..services import studio_service
+    path = await studio_service.camera_video(ctx(), eid, camera)
+    return FileResponse(path, media_type="video/mp4")
 
 
 # ------------------------------------------------------------------ agent demonstrations
@@ -623,7 +643,27 @@ async def chat(pid: str, req: ChatReq):
 
 @app.get("/api/projects/{pid}/agent/history")
 async def history(pid: str):
-    return agent.HISTORY.get(pid, [])
+    """Full chat log: [{kind: user|assistant|tool_call|tool_result|approval_required|done, ..., at}]."""
+    return agent.load_log(ctx(), pid)
+
+
+@app.get("/api/agent/engine")
+async def agent_engine():
+    eng = await agent.engine(ctx())
+    label = {"claude_code": "Claude Code (your agent)", "model": ctx().model.label if ctx().model else "",
+             "rules": "rule-based planner"}[eng]
+    return {"engine": eng, "label": label, "model": ctx().settings.claude_code_model}
+
+
+@app.post("/api/projects/{pid}/agent/reset")
+async def agent_reset(pid: str):
+    from ..services import claude_code_agent as cc
+    cc.reset(ctx(), pid)
+    p = agent._log_path(ctx(), pid)
+    if p.exists():
+        p.unlink()
+    agent.HISTORY.pop(pid, None)
+    return {"reset": True}
 
 
 # ------------------------------------------------------------------ tools (MCP)
