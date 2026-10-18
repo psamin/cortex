@@ -167,7 +167,12 @@ def merge(args: argparse.Namespace) -> None:
     """Join shard datasets into one, with their oracle statistics combined."""
     from lerobot.datasets.aggregate import aggregate_datasets
 
-    roots = [Path(r) for r in args.shards_roots]
+    roots = [Path(r) for r in args.shards_roots if (Path(r) / "meta" / "cortex_sim.json").exists()]
+    skipped = len(args.shards_roots) - len(roots)  # cancelled or crashed shards never finalized: leave them out
+    if skipped:
+        print(json.dumps({"skipped_unfinished_shards": skipped}), flush=True)
+    if not roots:
+        raise SystemExit("no finished shards to merge")
     aggregate_datasets([f"cortex/sim_{args.task}_{i}" for i in range(len(roots))], f"cortex/sim_{args.task}",
                        roots=roots, aggr_root=Path(args.root))
     metas = [json.loads((r / "meta" / "cortex_sim.json").read_text()) for r in roots]

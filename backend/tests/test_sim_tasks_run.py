@@ -71,7 +71,9 @@ def test_parallel_shards_merge_into_one_dataset(tmp_path, monkeypatch):
         run.demos(argparse.Namespace(task="fake", root=str(roots[-1]), episodes=4, size="96x128", examples=None,
                                      n_examples=0, shard=i, shards=2, noise_deg=0.0))
     out = tmp_path / "merged"
-    run.merge(argparse.Namespace(task="fake", root=str(out), shards_roots=[str(r) for r in roots]))
+    unfinished = tmp_path / "cancelled_shard"  # e.g. a shard whose job was cancelled before it finalized
+    (unfinished / "meta").mkdir(parents=True)
+    run.merge(argparse.Namespace(task="fake", root=str(out), shards_roots=[str(r) for r in [*roots, unfinished]]))
     meta = json.loads((out / "meta" / "cortex_sim.json").read_text())
     assert meta["kept_seeds"] == [0, 2, 3, 5] and meta["failed_seeds"] == [1] and meta["shards"] == 2
     assert json.loads((out / "meta" / "info.json").read_text())["total_episodes"] == 4
