@@ -153,12 +153,12 @@ function Session() {
   );
 }
 
-/** FIG.03: how an agent connects, and what it calls once it has. */
+/** how an agent connects, and what it calls once it has. */
 export function ConnectSection() {
   return (
     <section id="connect" aria-labelledby="connect-title" className="kn-gutter border-t border-line py-24 lg:py-32">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)] lg:items-end">
-        <SectionHead titleId="connect-title" fig="FIG.03" label="Connect your agent" first="Add one MCP server." second="Then let it train your robot.">
+        <SectionHead titleId="connect-title" label="Connect your agent" first="Add one MCP server." second="Then let it train your robot.">
           Cortex runs an MCP server on <code className="kn-mono text-[13px] text-ink">localhost:3000/mcp</code>. Add it to
           your agent once. Every tool is also on REST at <code className="kn-mono text-[13px] text-ink">/api/tools</code>.
         </SectionHead>

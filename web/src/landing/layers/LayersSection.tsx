@@ -39,8 +39,7 @@ function Heading() {
   return (
     <>
       <div className="kn-label kn-label-rule">
-        <span className="text-ink">FIG.02</span>
-        <span>How it works</span>
+        <span className="text-ink">How it works</span>
       </div>
       <h2 id="platform-title" className="kn-display mt-6 text-[clamp(2.2rem,3.5vw,3.5rem)] text-ink">
         Seven layers,
@@ -63,7 +62,7 @@ function Tag({ children, on }: { children: string; on?: boolean }) {
   );
 }
 
-/** FIG.02: the scroll-driven exploded stack. Section id stays "platform" for the hero's Explore link. */
+/** The scroll-driven exploded stack. Section id stays "platform" for the hero's Explore link. */
 export function LayersSection() {
   const mode = useMode();
   return (

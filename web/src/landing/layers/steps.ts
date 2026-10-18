@@ -1,5 +1,5 @@
 /** The seven layers of the training loop. Copy is kept to what Cortex actually does today (MVP: physics sim). */
-export type GlyphKind = "card" | "grid" | "loop" | "loss" | "ci" | "branch" | "chip";
+export type GlyphKind = "describe" | "simulate" | "demonstrate" | "train" | "evaluate" | "improve" | "deploy";
 
 export interface LayerStep {
   n: string;
@@ -16,7 +16,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "01",
     label: "Describe",
-    glyph: "card",
+    glyph: "describe",
     readout: "MCP · UPDATE_INTAKE",
     tag: "Agent · MCP",
     body: "Any agent connects over MCP and describes the arm, cameras, objects, zones and layout: your environment, not a fixed demo scene. Typed questions come back for whatever is still open.",
@@ -24,7 +24,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "02",
     label: "Simulate",
-    glyph: "grid",
+    glyph: "simulate",
     readout: "JAW · TORQUE · REACH MEASURED",
     tag: "Sim",
     body: "Cortex builds that exact layout as a MuJoCo scene and measures feasibility from the model: jaw opening, holding torque, reach.",
@@ -32,7 +32,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "03",
     label: "Demonstrate",
-    glyph: "loop",
+    glyph: "demonstrate",
     readout: "HOME → PICK → PLACE → HOME",
     tag: "Sim · verified",
     body: "The agent drives the arm through validated tools: home, pick, place, home, then reset. Only simulator-verified successes become LeRobot episodes.",
@@ -40,7 +40,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "04",
     label: "Train",
-    glyph: "loss",
+    glyph: "train",
     readout: "ACT · GPU SPEND APPROVED",
     tag: "Human approval",
     body: "An ACT policy is trained on the demonstrations. A human approves the GPU spend before anything launches.",
@@ -48,7 +48,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "05",
     label: "Evaluate",
-    glyph: "ci",
+    glyph: "evaluate",
     readout: "SEEDED BRANCHES · WILSON 95% CI",
     tag: "Sim · measured",
     body: "Seeded evaluation branches report success with Wilson confidence intervals. Measured, not claimed.",
@@ -56,7 +56,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "06",
     label: "Improve",
-    glyph: "branch",
+    glyph: "improve",
     readout: "WEAKEST CONDITION → MORE DEMOS",
     tag: "Sim",
     body: "Cortex finds the weakest measured condition and collects targeted demos for it; RL sandboxes are next. The loop repeats.",
@@ -64,7 +64,7 @@ export const STEPS: LayerStep[] = [
   {
     n: "07",
     label: "Deploy",
-    glyph: "chip",
+    glyph: "deploy",
     readout: "PHYSICAL ARM · OPERATOR + E-STOP",
     tag: "Real · supervised",
     body: "The policy moves to the physical arm, where it can keep training on real demonstrations and then run the task itself. Always with an operator present and an e‑stop in reach.",

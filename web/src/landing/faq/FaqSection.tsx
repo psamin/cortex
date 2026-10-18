@@ -20,14 +20,14 @@ function Answer({ text }: { text: string }) {
 }
 
 /**
- * FIG.07: the questions people and agents actually ask. Native <details>, so every answer is in the HTML
+ * the questions people and agents actually ask. Native <details>, so every answer is in the HTML
  * (and in the FAQPage JSON-LD built from the same faq.json) even while collapsed.
  */
 export function FaqSection() {
   return (
     <section id="faq" aria-labelledby="faq-title" className="kn-gutter border-t border-line py-24 lg:py-32">
       <div className="grid gap-12 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <SectionHead titleId="faq-title" fig="FIG.07" label="Questions" first="Asked often." second="Answered plainly." />
+        <SectionHead titleId="faq-title" label="Questions" first="Asked often." second="Answered plainly." />
         <div className="border-t border-ink">
           {FAQ.items.map((f, i) => (
             <details key={f.id} id={`faq-${f.id}`} open={i === 0} className="group border-b border-line">

@@ -44,7 +44,7 @@ export function HomePage() {
       <div className="relative mx-auto flex min-h-full max-w-[760px] flex-col px-6 pb-12 pt-[12vh]">
         <div className="kn-label kn-label-rule">
           <span>
-            <span className="text-ink">FIG.00</span>&nbsp;&nbsp;New skill
+            <span className="text-ink">New skill</span>
           </span>
         </div>
         <h1 className="kn-display mt-6 text-[clamp(2.4rem,5vw,3.6rem)]">

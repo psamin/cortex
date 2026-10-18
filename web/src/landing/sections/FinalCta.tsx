@@ -12,14 +12,13 @@ const LINKS = [
   ["FAQ", "faq"],
 ];
 
-/** FIG.08: the last ask, then the footer. */
+/** The last ask, then the footer. */
 export function FinalCta() {
   return (
     <section id="start" aria-labelledby="start-title" className="kn-gutter border-t border-line py-28 lg:py-36">
       <div>
         <div className="kn-label kn-label-rule">
-          <span className="text-ink">FIG.08</span>
-          <span>Start</span>
+          <span className="text-ink">Start</span>
         </div>
         <h2 id="start-title" className="kn-display mt-6 max-w-[48rem] text-[clamp(2.4rem,4.6vw,4.6rem)] text-ink">
           Let your agent train your robot.
