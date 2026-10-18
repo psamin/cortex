@@ -233,6 +233,9 @@ class Tool:
     description: str
     args: type[BaseModel]
     fn: Callable[[Ctx, Any, str], Awaitable[dict[str, Any]]]
+    # False hides the tool from the studio's own agent (actor "agent") and `call_tool` refuses it
+    # for that actor. MCP clients still reach it on purpose: they drive the simulated arm step by
+    # step (robot_*), and launch_training_job stays behind the human approval token either way.
     agent_callable: bool = True
 
 
@@ -819,12 +822,22 @@ TOOLS.update({t.name: t for t in [
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
 
 
+class NotAgentCallable(PermissionError):
+    """The studio agent asked for a tool reserved for humans or MCP clients. No approval card fixes it."""
+
+    code = "not_agent_callable"
+    approval_required = False
+
+
 async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str) -> dict[str, Any]:
     tool = TOOLS.get(name)
     if tool is None:
         raise KeyError(f"unknown tool {name}")
-    args = tool.args.model_validate(raw_args)
     pid = raw_args.get("project_id")
+    if actor == "agent" and not tool.agent_callable:
+        await ctx.audit(actor, name, pid, raw_args, "refused", "not callable by the studio agent")
+        raise NotAgentCallable(f"{name} is not available to the studio agent; a human runs it from the studio")
+    args = tool.args.model_validate(raw_args)
     try:
         result = await tool.fn(ctx, args, actor)
     except Exception as e:
