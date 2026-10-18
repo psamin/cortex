@@ -178,7 +178,15 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
                   <ShieldAlert className="h-3.5 w-3.5" /> Needs approval before launch
                 </div>
                 <Input value={approver} onChange={(ev) => setApprover(ev.target.value)} placeholder="Approver name" aria-label="Approver name" />
-                <Button variant="primary" size="sm" className="w-full" disabled={!approver.trim()} loading={approve.isPending} onClick={() => approve.mutate()}>
+                <Button
+                  variant="primary"
+                  size="sm"
+                  className="w-full"
+                  disabled={!approver.trim()}
+                  title={approver.trim() ? "Approve this training run" : "Type your name first; it is recorded as the approver"}
+                  loading={approve.isPending}
+                  onClick={() => approve.mutate()}
+                >
                   <Check className="h-3.5 w-3.5" /> Approve{e.paid ? ` ${usd(e.est_cost_usd)}` : ""}
                 </Button>
               </div>

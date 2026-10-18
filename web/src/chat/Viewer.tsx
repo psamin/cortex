@@ -21,7 +21,20 @@ export interface ViewerSelection {
 
 const LIVE_KINDS = /record|collect|eval|sim/i;
 
-export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string; activity: { label: string; busy: boolean } | null; sel: ViewerSelection }) {
+export function Viewer({
+  pid,
+  goal,
+  asked,
+  activity,
+  sel,
+}: {
+  pid: string;
+  goal: string;
+  /** the user's request when the simulated task differs from it */
+  asked?: string | null;
+  activity: { label: string; busy: boolean } | null;
+  sel: ViewerSelection;
+}) {
   const rollouts = useRollouts(pid);
   const jobs = useJobs();
   const liveJob: Job | undefined = useMemo(
@@ -64,9 +77,14 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
   return (
     <section className="flex h-full min-h-0 flex-col bg-[#0b0c0e] text-[#eceDef]" aria-label="Robot simulation viewer">
       {/* toolbar */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-white/[.07] px-4 py-2.5">
-        <div className="flex rounded-lg bg-white/[.05] p-0.5">
-          <ToolbarTab active={showLive} onClick={() => setMode("live")} disabled={!liveJob && mode !== "live"}>
+      <div className="flex items-center gap-2 border-b border-white/[.07] px-4 py-2.5">
+        <div className="flex shrink-0 rounded-lg bg-white/[.05] p-0.5">
+          <ToolbarTab
+            active={showLive}
+            onClick={() => setMode("live")}
+            disabled={!liveJob && mode !== "live"}
+            title={liveJob ? "Watch the simulation live" : "Nothing is running; the live view switches on by itself when a job starts"}
+          >
             <Radio className={cn("h-3.5 w-3.5", liveJob && "text-[#ec6060]")} /> Live
           </ToolbarTab>
           <ToolbarTab active={!showLive} onClick={() => setMode("replay")}>
@@ -74,7 +92,7 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
           </ToolbarTab>
         </div>
         {!showLive && (
-          <div className="flex flex-wrap items-center gap-1">
+          <div className="flex min-w-0 flex-1 items-center gap-1 overflow-x-auto scroll-thin">
             {(
               [
                 ["all", "All", counts.all],
@@ -88,7 +106,7 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
                 type="button"
                 onClick={() => sel.setFilter(k)}
                 className={cn(
-                  "inline-flex h-7 items-center gap-1.5 rounded-full px-3 text-xs transition-colors",
+                  "inline-flex h-7 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 text-xs transition-colors",
                   sel.filter === k ? "bg-white/[.12] text-white" : "text-white/55 hover:bg-white/[.06] hover:text-white/80",
                 )}
               >
@@ -97,20 +115,20 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
               </button>
             ))}
             {sel.evaluationId && (
-              <button type="button" onClick={() => sel.setEvaluationId(null)} className="inline-flex h-7 items-center gap-1 rounded-full bg-[#f0a43a]/15 px-3 text-xs text-[#f0a43a]">
+              <button type="button" onClick={() => sel.setEvaluationId(null)} className="inline-flex h-7 shrink-0 items-center gap-1 whitespace-nowrap rounded-full bg-[#f0a43a]/15 px-3 text-xs text-[#f0a43a]">
                 one evaluation · clear ×
               </button>
             )}
           </div>
         )}
         {!showLive && current && (
-          <div className="ml-auto flex items-center gap-1.5">
+          <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <select
               value={cam?.id ?? "presentation"}
               onChange={(e) => setCamera(e.target.value as Camera)}
               disabled={cams.length < 2}
               title={cam?.detail || cam?.label}
-              className="h-7 max-w-[240px] rounded-md bg-white/[.06] px-2 text-xs text-white/80 outline-none disabled:opacity-70"
+              className="h-7 max-w-[180px] rounded-md bg-white/[.06] px-2 text-xs text-white/80 outline-none disabled:opacity-70"
               aria-label="Camera"
             >
               {cams.map((c) => (
@@ -135,7 +153,7 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
         )}
       </div>
 
-      <Hud goal={goal} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
+      <Hud goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
 
       {/* stage */}
       <div className="relative min-h-0 flex-1">
@@ -190,12 +208,25 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
   );
 }
 
-function ToolbarTab({ active, onClick, disabled, children }: { active: boolean; onClick: () => void; disabled?: boolean; children: React.ReactNode }) {
+function ToolbarTab({
+  active,
+  onClick,
+  disabled,
+  title,
+  children,
+}: {
+  active: boolean;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+  children: React.ReactNode;
+}) {
   return (
     <button
       type="button"
       onClick={onClick}
       disabled={disabled}
+      title={title}
       className={cn("inline-flex h-7 items-center gap-1.5 rounded-md px-3 text-xs font-medium transition-colors disabled:opacity-35", active ? "bg-white/[.12] text-white" : "text-white/55 hover:text-white/85")}
     >
       {children}
@@ -351,12 +382,14 @@ function Controls({ refs, url }: { refs: React.RefObject<HTMLVideoElement>[]; ur
 /** Heads-up band above the stage: the task and what is happening now, plus what is on screen. */
 function Hud({
   goal,
+  asked,
   activity,
   liveJob,
   rollout,
   cam,
 }: {
   goal: string;
+  asked?: string | null;
   activity: { label: string; busy: boolean } | null;
   liveJob?: Job;
   rollout: Rollout | null;
@@ -365,8 +398,13 @@ function Hud({
   return (
     <div className="flex items-start justify-between gap-4 px-5 pt-3">
       <div className="min-w-0">
-        <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-white/40">Task</div>
+        <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-white/40">{asked ? "Simulated task" : "Task"}</div>
         <div className="truncate text-[15px] text-white/90">{goal}</div>
+        {asked && (
+          <div className="truncate text-xs text-white/45" title={`The simulator only has the cube-and-bowl scene. You asked: ${asked}`}>
+            You asked: “{asked}”. The simulator only has the cube-and-bowl scene.
+          </div>
+        )}
         <div className="mt-0.5 flex items-center gap-1.5 text-xs text-white/60">
           {liveJob ? (
             <>

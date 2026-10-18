@@ -120,6 +120,7 @@ function EvaluationCard({
             type="checkbox"
             checked={selected}
             disabled={!done || (!selected && !canSelect)}
+            aria-label="Include in comparison"
             onChange={onToggle}
             className="h-3.5 w-3.5 accent-[rgb(var(--servo))]"
           />
