@@ -20,6 +20,7 @@ class Policy(Protocol):
 
 class ExpertPolicy:
     name = "scripted_expert (oracle, privileged state)"
+    needs_pixels = False
 
     def reset(self, env, obs, seed):
         self.ex = ScriptedExpert(env, np.random.default_rng(seed))

@@ -191,3 +191,23 @@ async def capture_frame(ctx: Ctx, p: Project, camera: str = "top", seed: int = 0
     if inline:
         out["image_b64"] = base64.b64encode(jpg).decode()
     return out
+
+
+def scene_payload(ctx: Ctx, p: Project) -> dict[str, Any] | None:
+    """Worker config for the project's intake scene, or None for the upstream tabletop (cube task).
+
+    A scene built from an older intake is refused instead of silently used: rebuild it first."""
+    if p.intake is None or not p.scene:
+        return None
+    if scene_stale(p):
+        raise ValueError("the sim scene is out of date with the intake; call build_simulation first")
+    pick = next((o for o in p.intake.objects if o.name == p.intake.task.pick), None)
+    obj = {"name": pick.name, "height": pick.height, "grasp_width": pick.grasp_width} if pick else {}
+    return {"info": {k: v for k, v in p.scene.items() if k not in ("feasibility",)},
+            "data_dir": str(ctx.data_dir), "object": obj, "task": instruction_for(p)}
+
+
+def instruction_for(p: Project) -> str:
+    from ..sim.scene import instruction
+
+    return instruction(p.intake) if p.intake else p.spec.goal

@@ -237,7 +237,11 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
 
         if req.collector == "agent":
             p = planner or {}
-            cfg = {"task": req.task or project.spec.goal, "mode": mode, "live_dir": str(live_dir),
+            from .intake_service import scene_payload
+
+            scene = scene_payload(ctx, project)
+            cfg = {"task": req.task or (scene or {}).get("task") or project.spec.goal, "mode": mode,
+                   "live_dir": str(live_dir), "scene": scene,
                    "max_total_usd": cap if paid else 1e9,
                    "planner": {"provider": p["provider"], "model": p["model"], "endpoint": p["endpoint"],
                                "point_format": p["point_format"], "openrouter_extras": p["openrouter_extras"],
@@ -250,7 +254,9 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                                       ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event,
                                       env={"CORTEX_PLANNER_API_KEY": planner["api_key"]})  # type: ignore[index]
         else:
-            cfg = {"mode": "record", "max_steps": 240, "live_dir": str(live_dir),
+            from .intake_service import scene_payload
+
+            cfg = {"mode": "record", "max_steps": 240, "live_dir": str(live_dir), "scene": scene_payload(ctx, project),
                    "episodes": [{"seed": a.seed, "condition": a.scenario.condition.model_dump(),
                                  "scenario": a.scenario.model_dump(), "out_dir": str(ctx.local(attempt_key(a)))}
                                 for a in attempts]}

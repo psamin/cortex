@@ -104,8 +104,10 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
         limit=32 * 1024 * 1024)
     s = RobotSession(id=new_id("rs"), project_id=project.id, collection=col, attempt=attempt, proc=proc)
     SESSIONS[s.id] = s
+    from .intake_service import scene_payload
+
     out = await _rpc(s, {"op": "reset", "seed": seed, "scenario": scenario.model_dump(), "mode": "camera",
-                         "live_dir": str(ctx.local(live_key(project.id)))})
+                         "live_dir": str(ctx.local(live_key(project.id))), "scene": scene_payload(ctx, project)})
     if not out.get("ok"):
         await close(s.id)
         raise RuntimeError(out.get("error", "reset failed"))
