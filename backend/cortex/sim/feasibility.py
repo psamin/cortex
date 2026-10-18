@@ -9,6 +9,9 @@ Checks, per object:
   * stability: tall objects (height > 2.5x their base) need an upright check and extra
     zone clearance.
 Per start and zone: IK reach at grasp and carry height (12 mm tolerance, like the tools).
+Per conveyor that carries an object (issue #255): the reachable intercept window along the belt,
+the stretch where the arm reaches the object at grasp and hover height, and how long the object
+spends in it at the belt speed. An object on a conveyor gets this instead of a start check.
 
 Infeasible objects get a suggestion: the largest catalogue object of the same shape
 family that passes.
@@ -37,6 +40,10 @@ GRASP_TOL = 0.004  # grasp poses: under half the jaw clearance per side
 APPROACH_TOL_DEG = 10.0
 TALL_RATIO = 2.5
 LIFT = 0.06  # carry height above the grasp height
+HOVER_DZ = 0.043  # the intercept's hover above the grasp height (pick_place_skill.HOVER_DZ)
+WINDOW_STEP = 0.02  # m between sampled intercept points
+WINDOW_END_MARGIN = 0.05  # an intercept this close to the belt's end is too late
+MIN_WINDOW_S = 0.5  # the object must spend at least this long in the window
 
 
 
@@ -67,12 +74,27 @@ class PlaceReport(BaseModel):
     suggestion: tuple[float, float] | None = None  # nearest reachable spot on the same bearing
 
 
+class ConveyorReport(BaseModel):
+    """The reachable intercept window on a belt, for the object riding it. ``window_m``: (from, to) metres
+    downstream of the belt's start; ``window_xy``: those two points on the object's line (table frame)."""
+
+    name: str
+    object: str
+    ok: bool
+    speed_mps: float
+    window_m: tuple[float, float] | None = None
+    window_xy: tuple[tuple[float, float], tuple[float, float]] | None = None
+    time_in_window_s: float = 0.0
+    detail: str = ""
+
+
 class FeasibilityReport(BaseModel):
     ok: bool
     jaw_opening_m: float
     objects: list[ObjectReport]
     places: list[PlaceReport]
     summary: str
+    conveyors: list[ConveyorReport] = []
 
 
 def jaw_opening(env: SceneEnv, command: float = GRIP_OPEN_CMD) -> float:
@@ -137,9 +159,17 @@ def check(spec: IntakeSpec, info: SceneInfo, env: SceneEnv | None = None) -> Fea
         carry_qs: dict[str, list[np.ndarray]] = {}
         pick = next((o for o in spec.objects if o.name == (spec.task.pick or "")), None)
         objs = spec.objects
+        belts = info.belts()
+        conveyors: list[ConveyorReport] = []
         for o in objs:
             gz, mode = grasp_height(o.height), grasp_mode(o.height)
             sx, sy = info.starts[o.name]
+            if o.on and o.on in belts:  # it rides the belt: where it can be met matters, not where it starts
+                rep, qc = _conveyor_window(env, belts[o.on], o, (sx, sy))
+                conveyors.append(rep)
+                if qc is not None:
+                    carry_qs.setdefault(o.name, []).append(qc)
+                continue
             qg, eg = _ik_err(env, np.array([sx, sy, gz]), mode)
             qc, ec = _ik_err(env, np.array([sx, sy, gz + LIFT]), mode)
             ok = eg < GRASP_TOL and ec < REACH_TOL
@@ -159,18 +189,59 @@ def check(spec: IntakeSpec, info: SceneInfo, env: SceneEnv | None = None) -> Fea
             if pick:
                 carry_qs.setdefault(pick.name, []).append(qc)
         reports = [_object_report(env, o, opening, limit, carry_qs.get(o.name, [])) for o in objs]
-        ok = all(r.ok for r in reports) and all(p.ok for p in places)
+        ok = all(r.ok for r in reports) and all(p.ok for p in places) and all(c.ok for c in conveyors)
         bad = [r.name for r in reports if not r.ok] + [p.name for p in places if not p.ok]
+        bad += [f"conveyor {c.name}" for c in conveyors if not c.ok]
         # The agent reads this. It must report a physical limit to its human, not edit the world to pass:
         # in a live agent test, it shrank a real mug so the simulated one would fit the jaws.
         summary = "feasible" if ok else (
             "not feasible: " + ", ".join(bad) + ". Tell the user what doesn't fit and why; don't change an object's "
             "measured size or mass to pass. Moving a zone or using a different object needs their OK.")
         return FeasibilityReport(ok=ok, jaw_opening_m=round(opening, 4), objects=reports, places=places,
-                                 summary=summary)
+                                 summary=summary, conveyors=conveyors)
     finally:
         if own:
             env.close()
+
+
+def _conveyor_window(env: SceneEnv, belt, o: ObjectSpec, start: tuple[float, float]
+                     ) -> tuple[ConveyorReport, np.ndarray | None]:
+    """The longest stretch of the object's line along the belt where a top grasp and its hover are both
+    reachable, between its start and WINDOW_END_MARGIN before the end. Also returns a carry pose in it."""
+    s0, lat = belt.coords(np.asarray(start))
+    gz = belt.height + grasp_height(o.height)
+    if grasp_mode(o.height) == "side":
+        return ConveyorReport(name=belt.name, object=o.name, ok=False, speed_mps=belt.speed,
+                              detail=f"{o.name} is tall enough to need a side grasp, which has no intercept mode "
+                                     "for a moving belt yet"), None
+    runs: list[list[float]] = []
+    carry: dict[float, np.ndarray] = {}
+    for s in np.arange(max(0.0, s0), belt.length - WINDOW_END_MARGIN + 1e-9, WINDOW_STEP):
+        p = belt.point(float(s), lat)
+        _, eg = _ik_err(env, np.r_[p, gz])
+        qc, ec = _ik_err(env, np.r_[p, gz + HOVER_DZ])
+        if eg < GRASP_TOL and ec < REACH_TOL:
+            if runs and abs(runs[-1][-1] - (s - WINDOW_STEP)) < 1e-6:
+                runs[-1].append(float(s))
+            else:
+                runs.append([float(s)])
+            carry[float(s)] = qc
+    if not runs:
+        return ConveyorReport(name=belt.name, object=o.name, ok=False, speed_mps=belt.speed,
+                              detail=f"the arm can't reach {o.name} anywhere along conveyor {belt.name}; "
+                                     "move the belt closer to the arm (about 0.15-0.30 m from the base)"), None
+    best = max(runs, key=len)
+    lo, hi = best[0], best[-1]
+    t = (hi - lo) / belt.speed
+    ok = t >= MIN_WINDOW_S
+    a, b = belt.point(lo, lat), belt.point(hi, lat)
+    detail = (f"reachable from {lo:.2f} to {hi:.2f} m along the belt; at {belt.speed:.3f} m/s {o.name} is in "
+              f"reach for {t:.1f} s" + ("" if ok else f", under the {MIN_WINDOW_S} s the intercept needs"))
+    return ConveyorReport(name=belt.name, object=o.name, ok=ok, speed_mps=belt.speed,
+                          window_m=(round(lo, 3), round(hi, 3)),
+                          window_xy=((round(float(a[0]), 3), round(float(a[1]), 3)),
+                                     (round(float(b[0]), 3), round(float(b[1]), 3))),
+                          time_in_window_s=round(t, 2), detail=detail), carry[best[len(best) // 2]]
 
 
 def _nearest_reachable(env: SceneEnv, x: float, y: float, z: float, mode: str) -> tuple[float, float] | None:
