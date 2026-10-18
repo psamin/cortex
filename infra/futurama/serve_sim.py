@@ -101,13 +101,20 @@ def _inset(img: np.ndarray, wrist: np.ndarray) -> np.ndarray:
     return out
 
 
+BAR = 52  # the stats bar under the picture: nothing is drawn over the arm
+
+
 def _overlay(img: np.ndarray, lines: list[tuple[str, tuple[int, int, int]]]) -> bytes:
-    im = Image.fromarray(img)
+    """The frame with its live stats in a bar underneath: lines[0] and lines[3] on the first row (title, status
+    on the right), lines[1] and lines[2] on the second."""
+    h, w = img.shape[:2]
+    im = Image.new("RGB", (w, h + BAR), (14, 14, 14))
+    im.paste(Image.fromarray(img), (0, 0))
     d = ImageDraw.Draw(im)
-    w = max(d.textlength(t, font=FONT) for t, _ in lines) + 32
-    d.rectangle([8, 8, 8 + w, 16 + 20 * len(lines)], fill=(14, 14, 14))
-    for i, (t, color) in enumerate(lines):
-        d.text((16, 12 + 20 * i), t, fill=color, font=FONT)
+    for row, (left, right) in enumerate(((lines[0], lines[3]), (lines[1], lines[2]))):
+        y = h + 7 + 22 * row
+        d.text((12, y), left[0], fill=left[1], font=FONT)
+        d.text((w - 12 - d.textlength(right[0], font=FONT), y), right[0], fill=right[1], font=FONT)
     buf = io.BytesIO()
     im.save(buf, format="JPEG", quality=72)
     return buf.getvalue()
@@ -194,7 +201,7 @@ def _episode(p: dict[str, Any], seed: int, stop, view: str = "both",
                 (f"{p['variant'].upper()} trained only in sim  ·  "
                  + (f"practice layout {seed}" if p.get("layouts") or p.get("layout_seeds")
                     else f"unseen layout (seed {seed})"), (160, 200, 255)),
-                (f"step {step}  ·  inference {ms:5.1f} ms on GPU", (160, 200, 255)),
+                (f"step {step}  ·  {ms:4.1f} ms on GPU", (160, 200, 255)),
                 status])
             yield jpg, step, ms, success
         if held >= 3 * SETTLE:
