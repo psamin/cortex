@@ -4,6 +4,7 @@ import asyncio
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -24,7 +25,8 @@ def _reset_state():
 def _ctx(url: str, host: str | None = None):
     return SimpleNamespace(settings=SimpleNamespace(
         live_policy_url=url, futurama_ssh_host=host, futurama_policy_dir="~/cortex-jenga",
-        futurama_node_domain="cc.gatech.edu", live_policy_gres="gpu:l40s:1"))
+        futurama_node_domain="cc.gatech.edu", live_policy_gres="gpu:l40s:1",
+        futurama_projects_file=Path("/nonexistent/projects.json")))
 
 
 @pytest.fixture

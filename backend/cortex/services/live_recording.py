@@ -176,7 +176,7 @@ async def save_session(ctx: Ctx, task: str, episode: int, rec: StreamRecorder, s
     kind live_sim: /sim/<task>/<seed>, closed loop in MuJoCo (project key sim_<task>; episode is the seed)."""
     rec.close()
     sim = kind == "live_sim"
-    pid = replay_service.project_for_task(ctx, f"sim_{task}" if sim else task)
+    pid = await replay_service.project_for(ctx, f"sim_{task}" if sim else task)
     if pid is None:
         log.info("live %s %s/%s not saved: no project for this task in %s", kind, task, episode,
                  ctx.settings.futurama_projects_file)

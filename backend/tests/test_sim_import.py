@@ -76,6 +76,9 @@ async def test_a_task_run_becomes_a_project_with_data_training_and_evaluations(c
     out = await sim_import_service.import_task(ctx, "jenga", mirror, SRC, logs)
     pid = out["project_id"]
     assert out["project"] == "Jenga (sim)" and out["demos"] == 3 and out["oracle_success_rate"] == 0.75
+    p = await ctx.repo.get("projects", pid, Project)
+    # the studio's header shows the task itself, not the default cube spec
+    assert p.spec.goal == "push the marked block out of the tower" and p.spec.objects == ["block"]
 
     ds = (await ctx.repo.list("dataset_versions", DatasetVersion, project_id=pid))[0]
     assert ds.imported_from == f"{SRC}/dataset" and ds.num_frames == 1234 and "3 scripted-oracle demos" in ds.name
@@ -144,3 +147,18 @@ async def test_a_name_can_be_chosen(ctx, job):
     mirror, logs = job
     out = await sim_import_service.import_task(ctx, "jenga", mirror, SRC, logs, name="Jenga demo (sim)")
     assert out["project"] == "Jenga demo (sim)"
+
+
+async def test_an_existing_project_with_the_cube_spec_gets_its_task(ctx, job):
+    """Projects imported before this fix kept the default spec: re-importing describes the task."""
+    from cortex.models import CreateProjectRequest, Mode
+    from cortex.services import project_service
+
+    old = project_service.create_project(CreateProjectRequest(
+        task_prompt=sim_import_service.PROMPTS["jenga"], name="Jenga (sim)", mode=Mode.sim))
+    await ctx.repo.save("projects", old, status="active")
+    assert old.spec.goal == "pick up the block and place it in the bowl"
+    mirror, logs = job
+    out = await sim_import_service.import_task(ctx, "jenga", mirror, SRC, logs)
+    p = await ctx.repo.get("projects", out["project_id"], Project)
+    assert p.id == old.id and p.spec.goal == "push the marked block out of the tower"

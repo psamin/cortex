@@ -37,6 +37,8 @@ PROMPTS = {"jenga": "Push a block out of a Jenga tower without toppling it (MuJo
            "palletize": "Move boxes off a forklift onto a pallet (MuJoCo sim)",
            "unscrew": "Unscrew a hex bolt from a fixture with the SO-101 (MuJoCo sim)",
            "suture": "Pass a suture needle through a tissue pad (MuJoCo sim, rigid proxy)"}
+OBJECTS = {"jenga": "block", "screwdriver": "screwdriver", "palletize": "box", "unscrew": "bolt",
+           "suture": "needle"}  # the object the project's header names (it appears in the task prompt)
 EXECUTOR = "futurama_slurm"
 ORACLE_RUN = "oracle demos"
 
@@ -46,15 +48,20 @@ def project_name(task: str) -> str:
 
 
 async def find_or_create_project(ctx: Ctx, task: str, instruction: str | None, name: str | None = None) -> Project:
-    """The project with this name (default: named for the task; a deleted one is brought back), else a new one."""
+    """The project with this name (default: named for the task; a deleted one is brought back), else a new one.
+    Its spec describes the task itself: the studio's header shows spec.goal, and the default spec is the cube
+    tabletop ("pick up the cube and place it in the bowl ... sim has cube and bowl only")."""
     name = name or project_name(task)
     rows = [r for r in await ctx.store.list("projects") if r["data"].get("name") == name]
     rows.sort(key=lambda r: (r.get("status") == project_cleanup.DELETED, str(r.get("created_at"))))
     if rows:
         await project_cleanup.restore(ctx, rows[0]["id"])
-        return Project.model_validate(rows[0]["data"])
-    p = project_service.create_project(CreateProjectRequest(
-        task_prompt=PROMPTS.get(task) or instruction or f"{task} (MuJoCo sim)", name=name, mode=Mode.sim))
+        p = Project.model_validate(rows[0]["data"])
+    else:
+        p = project_service.create_project(CreateProjectRequest(
+            task_prompt=PROMPTS.get(task) or instruction or f"{task} (MuJoCo sim)", name=name, mode=Mode.sim))
+    p.spec.goal = (instruction or PROMPTS.get(task) or task).strip().rstrip(".")
+    p.spec.objects = [OBJECTS.get(task, task)]
     await ctx.repo.save("projects", p, status="active")
     return p
 

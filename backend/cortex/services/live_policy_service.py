@@ -86,7 +86,8 @@ async def status(ctx: Ctx) -> dict[str, Any]:
             info = (await c.get(f"{url(ctx)}/policies.json")).json()
         STATE["phase"] = "ready"
         _step("ready")
-        return {"available": True, "phase": "ready", "step": "ready", "steps": STEPS, **info}
+        return {"available": True, "phase": "ready", "step": "ready", "steps": STEPS, **info,
+                "projects": await _projects(ctx, info)}
     except (httpx.HTTPError, ValueError):
         reason = STATE["error"] or (STATE["detail"] if STATE["phase"] == "starting" else None) or (
             "Not connected to a GPU server. Click Request a GPU to attach to one running on Futurama, or "
@@ -94,6 +95,21 @@ async def status(ctx: Ctx) -> dict[str, Any]:
             else "The live GPU server isn't reachable.")
         return {"available": False, "phase": STATE["phase"], "step": STATE["step"], "steps": STEPS,
                 "reason": reason, "error": STATE["error"], "job": STATE["job"]}
+
+
+async def _projects(ctx: Ctx, info: dict[str, Any]) -> dict[str, str]:
+    """The project holding each served task (<task>, or sim_<task>), so the studio opens a project's Inference
+    tab on that project's own policy."""
+    from . import replay_service
+
+    out: dict[str, str] = {}
+    try:
+        for key in [*(info.get("policies") or {}), *(f"sim_{t}" for t in info.get("sim") or {})]:
+            if pid := await replay_service.project_for(ctx, key):
+                out[key] = pid
+    except Exception:  # noqa: BLE001 - only a convenience for the studio; never fail the status
+        log.exception("could not map the served tasks to projects")
+    return out
 
 
 async def start(ctx: Ctx) -> dict[str, Any]:

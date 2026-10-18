@@ -153,6 +153,7 @@ def test_opening_the_tab_requests_a_gpu_narrates_it_and_streams(api, futurama, t
     # a real-data replay and a sim run, each recorded into its project
     real, sim = _project(api, "Pull a block out of a Jenga tower"), _project(api, "Jenga sim", name="Jenga (sim)")
     (tmp_path / "projects.json").write_text(json.dumps({"jenga": real, "sim_jenga": sim}))
+    assert api.get("/live-policy").json()["projects"] == {"jenga": real, "sim_jenga": sim}
     r = api.get("/live-policy/stream/jenga/58")
     assert r.status_code == 200 and r.content.count(b"--frame") == 40
     r = api.get("/live-policy/sim/jenga/123456")
@@ -486,3 +487,15 @@ def test_a_long_palletizing_run_is_recorded_whole(api, futurama, tmp_path):
     ep = _replays(api, pid, timeout=60)[0]["episodes"][0]
     assert ep["frames"] == 1300 and ep["steps"] == 1300 and ep["success"] is True and ep["video_key"]
 
+
+def test_a_sim_run_is_saved_in_the_project_named_for_its_task(api, futurama):
+    """projects.json has no sim_<task> entry (the import ran elsewhere): the project is found by its name."""
+    cluster, serve = futurama
+    cluster.add_job(age=5)
+    api.post("/live-policy/start")
+    _until(api, _ready)
+    pid = _project(api, "Push a block out of a Jenga tower (MuJoCo sim)", name="Jenga (sim)")
+    assert api.get("/live-policy").json()["projects"] == {"sim_jenga": pid}  # the studio opens it on Jenga
+    api.get("/live-policy/sim/jenga/77")
+    rows = _replays(api, pid, timeout=10)
+    assert rows and rows[0]["kind"] == "live_sim"
