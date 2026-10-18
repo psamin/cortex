@@ -92,7 +92,7 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
             ms = (time.perf_counter() - t0) * 1000
             frame = presenter.frame(obs)
             obs, _, success, _, _ = env.step(action)
-            held = held + 1 if success else 0
+            held = held + 1 if success else 0  # keep showing it a few seconds after the verified success
             status = ("Task complete (verified by the simulator)", (110, 220, 130)) if success else (
                 "Running", (200, 200, 200))
             jpg = _overlay(frame, [
@@ -101,7 +101,7 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                 (f"step {step}  ·  inference {ms:5.1f} ms on GPU", (160, 200, 255)),
                 status])
             yield jpg, step, ms, success
-            if held >= SETTLE:
+            if held >= 3 * SETTLE:
                 break
             time.sleep(max(0.0, 1 / fps - (time.perf_counter() - t0)))
     finally:
