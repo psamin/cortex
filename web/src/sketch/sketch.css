@@ -1,0 +1,229 @@
+/*
+  Sketch kit (#52): the Kinetic hero's isometric technical-sketch look as CSS.
+  Toon faces step white → #EDEDED → #D9D9D9 → #BDBDBD; outlines are 1 px ink.
+  Dark mode keeps the structure: light ink outlines on dark grey faces.
+*/
+:root,
+[data-theme="light"] {
+  --sk-ink: #171717;
+  --sk-f1: #ffffff;
+  --sk-f2: #ededed;
+  --sk-f3: #d9d9d9;
+  --sk-f4: #bdbdbd;
+  --sk-edge: #c4c4c4;      /* hairline edge of extrusion faces */
+  --sk-construction: #bdbdbd;
+  --sk-grid: rgba(0, 0, 0, 0.05);
+  --sk-accent: #2f4f46;
+  --sk-label: #858585;
+  --sk-depth: 4px;
+}
+[data-theme="dark"] {
+  --sk-ink: #e6e6e6;
+  --sk-f1: #232424;
+  --sk-f2: #1c1d1d;
+  --sk-f3: #2b2c2c;
+  --sk-f4: #3a3b3b;
+  --sk-edge: #3a3b3b;
+  --sk-construction: #4a4b4b;
+  --sk-grid: rgba(255, 255, 255, 0.045);
+  --sk-accent: #7aa89a;
+  --sk-label: #8c8c8c;
+}
+
+/* ---------- SVG line art */
+.sk-svg { overflow: visible; flex-shrink: 0; }
+.sk-svg polygon,
+.sk-svg path,
+.sk-svg line,
+.sk-svg ellipse,
+.sk-svg circle {
+  stroke: var(--sk-ink);
+  stroke-width: 1;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+  vector-effect: non-scaling-stroke;
+}
+.sk-f1 { fill: var(--sk-f1); }
+.sk-f2 { fill: var(--sk-f2); }
+.sk-f3 { fill: var(--sk-f3); }
+.sk-f4 { fill: var(--sk-f4); }
+.sk-ink-fill { fill: var(--sk-ink); }
+.sk-accent polygon,
+.sk-accent path,
+.sk-accent line,
+.sk-accent circle,
+.sk-accent ellipse { stroke: var(--sk-accent); }
+.sk-accent .sk-ink-fill { fill: var(--sk-accent); }
+
+.sk-svg .sk-construction {
+  fill: none;
+  stroke: var(--sk-construction);
+  stroke-dasharray: 3 3;
+}
+.sk-svg .sk-construction-solid { stroke: var(--sk-construction); }
+.sk-svg .sk-faint { opacity: 0.6; }
+.sk-svg .sk-leader { fill: none; stroke: var(--sk-ink); stroke-width: 0.75; }
+.sk-svg .sk-node { fill: var(--sk-f1); stroke: var(--sk-ink); stroke-width: 0.9; }
+.sk-accent .sk-node { stroke: var(--sk-accent); }
+.sk-accent .sk-leader { stroke: var(--sk-accent); }
+
+.sk-svg-label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  fill: var(--sk-ink);
+  stroke: none !important;
+}
+.sk-svg-label-2 { fill: var(--sk-label); }
+
+.sk-isobox .sk-lift { transition: transform 220ms cubic-bezier(0.23, 1, 0.32, 1); }
+
+/* ---------- Callout (HTML label) */
+.sk-callout { width: 0; height: 0; z-index: 2; }
+.sk-callout-label {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--sk-ink);
+  background: rgb(var(--bench, 255 255 255) / 0.85);
+  padding: 2px 4px;
+  font-variant-numeric: tabular-nums;
+}
+.sk-callout-value { margin-left: 8px; color: var(--sk-label); }
+.sk-accent .sk-callout-label { color: var(--sk-accent); }
+
+/* ---------- Dimension line */
+.sk-dim {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sk-label);
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  font-variant-numeric: tabular-nums;
+}
+.sk-dim-v { flex-direction: column; height: 100%; }
+.sk-dim-h { width: 100%; }
+.sk-dim-line { flex: 1; background: var(--sk-construction); }
+.sk-dim-h .sk-dim-line { height: 1px; }
+.sk-dim-v .sk-dim-line { width: 1px; }
+.sk-dim-tick { background: var(--sk-label); }
+.sk-dim-h .sk-dim-tick { width: 1px; height: 9px; }
+.sk-dim-v .sk-dim-tick { height: 1px; width: 9px; }
+.sk-dim-v .sk-dim-value { writing-mode: vertical-rl; transform: rotate(180deg); }
+
+/* ---------- Backdrops */
+.sk-isogrid {
+  background-image:
+    repeating-linear-gradient(60deg, var(--sk-grid) 0 1px, transparent 1px var(--sk-cell, 28px)),
+    repeating-linear-gradient(120deg, var(--sk-grid) 0 1px, transparent 1px var(--sk-cell, 28px));
+}
+.sk-fade {
+  -webkit-mask-image: radial-gradient(ellipse at center, #000 35%, transparent 80%);
+  mask-image: radial-gradient(ellipse at center, #000 35%, transparent 80%);
+}
+
+/*
+  ---------- Sketch depth: a card drawn as an isometric slab.
+  The bottom and right side faces are two skewed strips with hairline edges (not a shadow).
+  Hovering lifts the slab 2 px up-left while the faces grow, so its base stays put.
+  Offsets use top/left (not transform) so fixed-position descendants are unaffected.
+*/
+.sk-depth {
+  --sk-d: var(--sk-depth);
+  transition: top 180ms cubic-bezier(0.23, 1, 0.32, 1), left 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.sk-depth::before,
+.sk-depth::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  box-sizing: border-box;
+  border: 1px solid var(--sk-edge);
+  transform-origin: 0 0;
+  transition: width 180ms cubic-bezier(0.23, 1, 0.32, 1), height 180ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+/* bottom face */
+.sk-depth::before {
+  left: 4px;
+  right: 0;
+  top: calc(100% - 1px);
+  height: calc(var(--sk-d) + 1px);
+  background: var(--sk-f2);
+  border-top: 0;
+  transform: skewX(45deg);
+}
+/* right face */
+.sk-depth::after {
+  top: 4px;
+  bottom: 0;
+  left: calc(100% - 1px);
+  width: calc(var(--sk-d) + 1px);
+  background: var(--sk-f3);
+  border-left: 0;
+  transform: skewY(45deg);
+}
+.sk-depth.sk-hover { position: relative; top: 0; left: 0; }
+.sk-depth.sk-hover:hover,
+.sk-depth.sk-hover:focus-within {
+  top: -2px;
+  left: -2px;
+  --sk-d: calc(var(--sk-depth) + 2px);
+}
+.sk-depth-lg { --sk-depth: 6px; }
+
+/*
+  ---------- Pill buttons with an iso base plate.
+  The face and the plate are pseudo-elements inside an isolated stacking context,
+  so the label stays on top. Pressing pushes the face down onto the plate.
+*/
+.sk-pill {
+  position: relative;
+  isolation: isolate;
+  border-radius: 9999px;
+  background: transparent !important;
+  margin-bottom: 3px;
+  transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1);
+}
+.sk-pill::before,
+.sk-pill::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  transition: transform 120ms cubic-bezier(0.23, 1, 0.32, 1), background-color 150ms;
+}
+.sk-pill::before { z-index: -1; }
+.sk-pill::after { z-index: -2; transform: translateY(3px); }
+.sk-pill:active:not(:disabled) { transform: translateY(2px); }
+.sk-pill:active:not(:disabled)::after { transform: translateY(1px); }
+
+.sk-pill-primary { color: rgb(var(--bench)); }
+.sk-pill-primary::before { background: rgb(var(--ink)); }
+.sk-pill-primary:hover::before { background: #000; }
+[data-theme="dark"] .sk-pill-primary:hover::before { background: #fff; }
+.sk-pill-primary::after { background: var(--sk-f4); border: 1px solid rgb(var(--ink)); }
+
+.sk-pill-secondary { color: rgb(var(--ink)); }
+.sk-pill-secondary::before { background: rgb(var(--plate)); border: 1px solid var(--line-strong, #d4d4d4); }
+.sk-pill-secondary:hover::before { border-color: rgb(var(--ink)); }
+.sk-pill-secondary::after { background: var(--sk-f2); border: 1px solid var(--line-strong, #d4d4d4); }
+
+.sk-pill-danger { color: rgb(var(--fault)); }
+.sk-pill-danger::before { background: rgb(var(--plate)); border: 1px solid rgb(var(--fault) / 0.45); }
+.sk-pill-danger:hover::before { background: rgb(var(--fault) / 0.06); }
+.sk-pill-danger::after { background: var(--sk-f2); border: 1px solid rgb(var(--fault) / 0.45); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sk-depth,
+  .sk-depth::before,
+  .sk-depth::after,
+  .sk-pill,
+  .sk-pill::before,
+  .sk-pill::after,
+  .sk-isobox .sk-lift { transition: none; }
+}
