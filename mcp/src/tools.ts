@@ -467,6 +467,68 @@ const TOOLS: Def[] = [
     annotations: ROBOT,
     backend: (i) => ["robot_finish_episode", { session_id: i.session_id, believes_success: i.believes_success, summary: i.summary ?? "" }],
   },
+  // ---------------------------------------------------------------- intake (spec v2)
+  {
+    name: "start_intake",
+    title: "Start intake",
+    description:
+      "Start teaching a task by describing your setup. Creates a draft project and returns typed questions about the arm, " +
+      "cameras, objects, place zones, surroundings and task. Every question carries a ready-to-send `patch` for " +
+      "cortex.update_intake, so you can accept defaults or edit them. Objects named in the prompt (e.g. 'water bottle', " +
+      "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them.",
+    inputSchema: z.object({
+      prompt: z.string().optional().describe("The task in plain language, e.g. 'pick up the small water bottle and put it on the coaster'"),
+      mode: z.enum(["sim", "real"]).optional().describe("'sim' (default; the MVP runs everything in physics sim) or 'real'"),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "update_intake",
+    title: "Update intake",
+    description:
+      "Answer intake questions by merging a partial spec into the project. Lists of objects, zones, cameras and " +
+      "environment.obstacles merge by `name` ({name, _delete: true} removes one; {name, confirm: true} confirms an object's " +
+      "catalogue values). Units: metres and kilograms; table frame with x away from the arm base, y to its left. Unknown " +
+      "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.",
+    inputSchema: z.object({
+      project_id: projectId,
+      patch: z.record(z.string(), z.unknown()).describe(
+        "Partial intake, e.g. {objects:[{name:'cup', mass_kg:0.2}], zones:[{name:'coaster', center:[0.3,0.1]}], task:{pick:'cup', place:['coaster']}, environment:{lighting:'dim', obstacles:[...]}}",
+      ),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "get_intake_status",
+    title: "Get intake status",
+    description: "The project's intake spec, open questions, whether it is complete and whether the sim scene is built.",
+    inputSchema: z.object({ project_id: projectId }),
+    annotations: READ,
+  },
+  {
+    name: "build_simulation",
+    title: "Build simulation",
+    description:
+      "Build the MuJoCo scene from the completed intake, then check feasibility against the arm model: jaw opening " +
+      "vs object width, holding torque vs actuator limits, and IK reach to every start and zone. Infeasible items " +
+      "come back with alternatives (a smaller object, the nearest reachable spot). Returns a top-camera preview image. " +
+      "Takes 10-60 s.",
+    inputSchema: z.object({ project_id: projectId }),
+    annotations: WRITE,
+  },
+  {
+    name: "capture_frame",
+    title: "Capture frame",
+    description:
+      "Render a camera of the built scene (top, front or wrist_cam) as an image, so you can check that the simulation " +
+      "matches the setup you described. Fix differences with cortex.update_intake, then cortex.build_simulation again.",
+    inputSchema: z.object({
+      project_id: projectId,
+      camera: z.enum(["top", "front", "wrist_cam"]).optional(),
+      seed: z.number().int().optional().describe("Scene randomization seed (default 0)"),
+    }),
+    annotations: READ,
+  },
 ];
 
 /** Registers every backend tool as `cortex.<name>`. */

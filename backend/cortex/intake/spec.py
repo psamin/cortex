@@ -28,6 +28,10 @@ class Strict(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 SUPPORTED_ARMS = ("so101",)
+# Limits that keep scene builds fast and bounded (they run on the single GL thread).
+MAX_OBJECTS, MAX_ZONES, MAX_OBSTACLES, MAX_CAMERAS = 8, 12, 16, 4
+NAME = r"^[a-z0-9_]{1,40}$"  # names are slugged by the intake service before validation
+TEXT = 500
 # The EnvHub env's HOME: arm folded above the table, gripper half open.
 SO101_HOME = [0.0, -60.0, 60.0, 35.0, 0.0, 30.0]
 SO101_JOINTS = ("shoulder_pan", "shoulder_lift", "elbow_flex", "wrist_flex", "wrist_roll", "gripper")
@@ -45,7 +49,7 @@ class RobotProfile(Strict):
 
 
 class CameraSpec(Strict):
-    name: str
+    name: str = Field(pattern=NAME)
     role: CameraRole
     device: str | None = None  # index or URL for a real camera; None in sim
     width: int = 640
@@ -71,7 +75,7 @@ class ObjectSpec(Strict):
     """A graspable primitive. ``size``: box = full x, y, z extents; cylinder = diameter, height;
     sphere = diameter."""
 
-    name: str
+    name: str = Field(pattern=NAME)
     shape: Shape
     size: list[float] = Field(min_length=1, max_length=3)
     mass_kg: float = Field(gt=0, le=5)
@@ -100,7 +104,7 @@ class ObjectSpec(Strict):
 
 
 class PlaceZone(Strict):
-    name: str
+    name: str = Field(pattern=NAME)
     center: Vec2
     half_size: Vec2 = (0.04, 0.04)
 
@@ -121,7 +125,7 @@ class TaskV2(Strict):
 class Obstacle(Strict):
     """A static, non-graspable primitive the arm must avoid (a shelf, a wall, a mug stand)."""
 
-    name: str
+    name: str = Field(pattern=NAME)
     shape: Shape
     size: list[float] = Field(min_length=1, max_length=3)  # same conventions as ObjectSpec.size
     center: Vec2
@@ -135,20 +139,21 @@ class Environment(Strict):
     table_size: Vec2 = (0.80, 0.80)  # metres, centred 0.2 m in front of the arm base
     table_rgba: tuple[float, float, float, float] = (0.80, 0.72, 0.60, 1.0)
     lighting: Literal["dim", "normal", "bright"] = "normal"
-    obstacles: list[Obstacle] = []
-    description: str = ""  # free text from the agent, e.g. "white desk by a window, afternoon light"
+    obstacles: list[Obstacle] = Field(default_factory=list, max_length=MAX_OBSTACLES)
+    description: str = Field("", max_length=TEXT)  # free text from the agent, e.g. "white desk by a window, afternoon light"
     assumed: set[str] = Field(default_factory=lambda: {"table_size", "table_rgba", "lighting"})
 
 
 class IntakeSpec(Strict):
-    prompt: str = ""
+    prompt: str = Field("", max_length=TEXT)
     mode: Literal["sim", "real"] = "sim"
     robot: RobotProfile = Field(default_factory=RobotProfile)
-    cameras: list[CameraSpec] = Field(default_factory=lambda: [CameraSpec(name="top", role="overhead")])
+    cameras: list[CameraSpec] = Field(default_factory=lambda: [CameraSpec(name="top", role="overhead")],
+                                      max_length=MAX_CAMERAS)
     workspace: Workspace = Field(default_factory=Workspace)
     environment: Environment = Field(default_factory=Environment)
-    objects: list[ObjectSpec] = []
-    zones: list[PlaceZone] = []
+    objects: list[ObjectSpec] = Field(default_factory=list, max_length=MAX_OBJECTS)
+    zones: list[PlaceZone] = Field(default_factory=list, max_length=MAX_ZONES)
     task: TaskV2 = Field(default_factory=TaskV2)
 
 

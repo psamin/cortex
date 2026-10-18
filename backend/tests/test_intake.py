@@ -137,3 +137,19 @@ def test_environment_and_obstacles():
     assert spec.environment.lighting == "dim" and "lighting" not in spec.environment.assumed
     spec = intake.apply_patch(spec, {"environment": {"obstacles": [{"name": "shelf", "_delete": True}]}})
     assert spec.environment.obstacles == []
+
+
+def test_limits_names_and_obstacle_overlap():
+    many = [{"name": f"z{i}", "center": [0.2, 0.0]} for i in range(13)]
+    with pytest.raises(intake.IntakeError, match="zones"):
+        intake.apply_patch(intake.start(), {"zones": many})
+    spec = intake.apply_patch(intake.start(), {"zones": [{"name": "Spot A!", "center": [0.22, 0.12]}]})
+    assert spec.zones[0].name == "spot_a"  # names are slugged
+    with pytest.raises(intake.IntakeError, match="too large"):
+        intake.apply_patch(intake.start(), {"environment": {"description": "x" * 30_000}})
+    with pytest.raises(intake.IntakeError, match="arm base"):
+        intake.apply_patch(intake.start(), {"environment": {"obstacles": [
+            {"name": "slab", "shape": "box", "size": [0.5, 0.5, 0.1], "center": [0.0, 0.0]}]}})
+    with pytest.raises(intake.IntakeError, match="zone 'spot_a'"):
+        intake.apply_patch(spec, {"environment": {"obstacles": [
+            {"name": "mug", "shape": "cylinder", "size": [0.08, 0.1], "center": [0.23, 0.12]}]}})
