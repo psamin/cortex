@@ -697,6 +697,14 @@ async def skill(sid: str):
     return await skills_service.get_skill(ctx(), sid)
 
 
+@app.get("/api/skills/{task}/replays/{name}")
+async def skill_replay(task: str, name: str):
+    """A recorded replay of a sim skill (#308): <data dir>/skill_replays/<task>/<name>, never outside it."""
+    from fastapi.responses import FileResponse
+    from ..services import skills_service
+    return FileResponse(skills_service.replay_file(ctx(), task, name), media_type="video/mp4")
+
+
 @app.get("/api/live-policy")
 async def live_policy_status():
     from ..services import live_policy_service as lp
@@ -747,9 +755,10 @@ async def live_policy_stream(task: str, episode: int):
 
 
 @app.get("/api/live-policy/sim/{task}/{seed}")
-async def live_policy_sim(task: str, seed: int):
+async def live_policy_sim(task: str, seed: int, view: Literal["both", "front", "wrist"] | None = None):
     """A sim-trained policy running closed loop in MuJoCo on the GPU, on an unseen layout, as MJPEG.
-    The run is recorded as it passes and saved to the sim_<task> project when the stream ends (#179)."""
+    The run is recorded as it passes and saved to the sim_<task> project when the stream ends (#179).
+    `view` (front camera, wrist camera, or both) is passed on to the GPU server (#308)."""
     from ..services import live_policy_service as lp
     from ..services import live_recording
     st = await lp.status(ctx())
@@ -761,7 +770,7 @@ async def live_policy_sim(task: str, seed: int):
 
     async def gen():
         try:
-            async for chunk in lp.relay(ctx(), f"/sim/{task}/{seed}", rec):
+            async for chunk in lp.relay(ctx(), f"/sim/{task}/{seed}" + (f"?view={view}" if view else ""), rec):
                 yield chunk
         finally:  # finished, or the viewer left: encode and store in the background
             live_recording.save_soon(ctx(), task, seed, rec, st, lp.STATE.get("job"), kind="live_sim")

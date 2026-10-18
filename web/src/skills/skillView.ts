@@ -49,3 +49,16 @@ export function trainedLine(s: PhysicalSkill): string {
 
 /** A layout seed for a live run. The GPU server maps it onto a practice layout when the policy was served on those. */
 export const newSeed = () => 100_000 + Math.floor(Math.random() * 900_000);
+
+export type SkillVideo = { url: string; label: string; success?: boolean | null };
+
+/** Every recorded video of a skill (#308): its replays (newest first), then past live runs, then the episodes behind
+ *  its score. */
+export function skillVideos(s: PhysicalSkill): SkillVideo[] {
+  const name = (u: string) => decodeURIComponent(u.split("/").pop() ?? "").replace(/\.mp4$/i, "");
+  return [
+    ...s.replays.map((u) => ({ url: u, label: name(u) })),
+    ...s.runs.flatMap((r) => (r.video_url ? [{ url: r.video_url, label: `${r.label} · ${ago(r.when)}`, success: r.success }] : [])),
+    ...s.evidence.flatMap((e) => (e.video_url ? [{ url: e.video_url, label: e.label, success: e.success }] : [])),
+  ];
+}

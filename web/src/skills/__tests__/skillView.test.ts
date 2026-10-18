@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LivePolicyStatus, PhysicalSkill, SkillScore } from "../../api/types";
-import { runAction, scoreBadge, scoreWhere, simWhere, trainedLine } from "../skillView";
+import { runAction, scoreBadge, scoreWhere, simWhere, skillVideos, trainedLine } from "../skillView";
 
 const score = (s: Partial<SkillScore>): SkillScore => ({ kind: "none", value: null, n: null, label: "", detail: "", ...s });
 
@@ -10,7 +10,7 @@ const skill = (s: Partial<PhysicalSkill> = {}): PhysicalSkill => ({
   steps: 30000, layouts: null, trained_where: "Futurama H200", trained_at: null, weights: "on the cluster", checkpoint_id: "ck_1",
   checkpoint: "030000", training_job_id: "tj_1", dataset_version_id: null, slurm_job: null,
   score: score({}), run: { kind: "sim", task: "unscrew", episodes: [], live_now: false, note: null },
-  runs: [], evidence: [], thumbnail_url: null, ...s,
+  runs: [], evidence: [], thumbnail_url: null, replays: [], live: false, ...s,
 });
 
 const gpu = (s: Partial<LivePolicyStatus>): LivePolicyStatus => ({ available: false, phase: "stopped", ...s });
@@ -71,5 +71,24 @@ describe("trainedLine", () => {
     expect(trainedLine(skill({ trained_at: null }))).toBe("Trained on Futurama H200");
     expect(trainedLine(skill({ trained_where: null, trained_at: null }))).toBe("");
     expect(trainedLine(skill({ trained_at: new Date(Date.now() - 2 * 3600_000).toISOString() }))).toBe("Trained on Futurama H200 · 2h ago");
+  });
+});
+
+describe("skillVideos", () => {
+  it("lists replays first (named for their file), then past live runs and score episodes that kept a video", () => {
+    const v = skillVideos(
+      skill({
+        replays: ["/api/skills/unscrew/replays/run%202.mp4", "/api/skills/unscrew/replays/a.mp4"],
+        runs: [
+          { id: "r1", kind: "live_sim", label: "Live sim run", when: new Date().toISOString(), partial: false, success: true, joint_mae_deg: null, steps: 9, inference_ms: null, gpu: null, video_url: "/files/r1.mp4", note: "" },
+          { id: "r2", kind: "live_sim", label: "Live sim run", when: new Date().toISOString(), partial: true, success: null, joint_mae_deg: null, steps: 3, inference_ms: null, gpu: null, video_url: null, note: "" },
+        ],
+        evidence: [{ label: "Unseen layout 100000", success: false, video_url: "/files/e.mp4" }],
+      }),
+    );
+    expect(v.map((x) => x.url)).toEqual(["/api/skills/unscrew/replays/run%202.mp4", "/api/skills/unscrew/replays/a.mp4", "/files/r1.mp4", "/files/e.mp4"]);
+    expect(v[0].label).toBe("run 2");
+    expect(v[2].success).toBe(true);
+    expect(v[3]).toMatchObject({ label: "Unseen layout 100000", success: false });
   });
 });
