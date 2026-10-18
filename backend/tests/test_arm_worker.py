@@ -129,8 +129,8 @@ def test_the_table_floor_trips_before_the_gripper_goes_below_it():
 def test_stop_discards_the_partial_episode_and_holds_until_release(tmp_path, monkeypatch):
     monkeypatch.setattr(aw, "STUDIO_GONE_RELEASE_S", 0.1)
     arm, ctl = FakeArm(camera=True), aw.Controls(aw.Deadman())
-    beat(ctl, 3.0)
     rec = aw.Recorder(tmp_path / "ds", "local/teleop_test", 30, arm, "pick up the cube")
+    beat(ctl, 3.0)  # after the (slow on Windows) recorder is built
     threading.Timer(0.3, lambda: setattr(ctl, "stop", True)).start()
     threading.Timer(0.5, lambda: setattr(ctl, "studio_gone_at", time.monotonic())).start()  # studio closed
     out = aw.control(arm, lambda obs: HOME, ctl, cfg(episodes=2), safety(), recorder=rec)
@@ -141,13 +141,18 @@ def test_teleop_recording_writes_a_lerobot_dataset(tmp_path):
     from lerobot.datasets import LeRobotDataset
 
     arm, ctl = FakeArm(camera=True), aw.Controls(aw.Deadman())
+    rec = aw.Recorder(tmp_path / "ds", "local/teleop_test", 30, arm, "pick up the cube")  # slow on Windows: build first
     beat(ctl, 3.0)
-    rec = aw.Recorder(tmp_path / "ds", "local/teleop_test", 30, arm, "pick up the cube")
     release_on_hold(ctl, after=1.5)
     out = aw.control(arm, lambda obs: HOME + np.r_[1, 0, 0, 0, 0, 0], ctl, cfg(episodes=2, episode_s=0.3), safety(),
                      recorder=rec)
     assert out["reason"] == "run complete" and len(out["episodes_saved"]) == 2
-    ds = LeRobotDataset("local/teleop_test", root=tmp_path / "ds")
+    try:
+        ds = LeRobotDataset("local/teleop_test", root=tmp_path / "ds")
+    except (ImportError, OSError, RuntimeError) as e:  # Windows without FFmpeg shared DLLs (Gyan.FFmpeg.Shared)
+        if "torchcodec" not in str(e).lower():
+            raise
+        pytest.skip(f"torchcodec can't load here; recording itself passed ({type(e).__name__})")
     assert ds.meta.total_episodes == 2 and ds.meta.total_frames == sum(out["episodes_saved"])
     assert "observation.images.front" in ds.meta.features and ds.meta.robot_type == "so101_follower"
 
