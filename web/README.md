@@ -11,7 +11,10 @@ pnpm dev              # http://localhost:5173
 pnpm build            # tsc typecheck + vite build -> dist/
 pnpm typecheck        # tsc only
 pnpm preview          # serve dist/
+pnpm gen:agents       # regenerate public/llms.txt, llms-full.txt, .well-known/*, server-card.json, robots.txt, sitemap.xml
 ```
+
+The agent-facing files in `public/` are generated from the backend tool registry by `scripts/gen_agent_index.py`; rerun `pnpm gen:agents` whenever a tool or its arguments change (`backend/tests/test_agent_index.py` fails while they are stale). The meta tags, JSON-LD and the no-JS copy of the landing page in `index.html` are filled at build time from `src/landing/staticHtml.ts`. Set `CORTEX_SITE_URL` to the public origin for both.
 
 `VITE_API_URL` is the API base, including `/api`. Every request sends `X-Cortex-Actor: gui` so the audit log attributes it. The backend must allow the studio origin through CORS (`cors_origins` in backend settings, default `http://localhost:5173`).
 

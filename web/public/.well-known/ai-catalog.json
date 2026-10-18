@@ -1,0 +1,10 @@
+{
+  "specVersion": "1.0",
+  "entries": [
+    {
+      "identifier": "urn:air:localhost:mcp:cortex",
+      "type": "application/mcp-server-card+json",
+      "url": "http://localhost:5173/server-card.json"
+    }
+  ]
+}

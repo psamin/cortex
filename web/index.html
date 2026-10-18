@@ -4,14 +4,24 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="color-scheme" content="light dark" />
-    <title>Cortex Studio</title>
+    <title><!--app-title--></title>
+    <!-- Description, OpenGraph/Twitter, llms.txt link and JSON-LD: generated from src/landing (see vite.config.ts). -->
+    <!--agent-head-->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%23161719'/%3E%3Cpath d='M4 11V5h2.5L8 8l1.5-3H12v6' stroke='%23F0A43A' stroke-width='1.6' fill='none'/%3E%3C/svg%3E" />
     <script>
+      document.documentElement.classList.add("js");
       try { var t = localStorage.getItem("cortex.theme"); if (t) document.documentElement.dataset.theme = t; } catch (e) {}
     </script>
+    <style>
+      .js #landing-static { display: none; }
+      #landing-static { max-width: 46rem; margin: 0 auto; padding: 2rem 1rem; font: 16px/1.6 system-ui, sans-serif; color: #171717; }
+      #landing-static pre { overflow-x: auto; background: #f5f5f5; padding: 0.75rem; }
+    </style>
   </head>
   <body>
     <div id="root"></div>
+    <!-- No-JS copy of the landing page for agents and crawlers; generated from src/landing/staticHtml.ts. -->
+    <!--landing-static-->
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

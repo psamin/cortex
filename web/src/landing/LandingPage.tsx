@@ -15,13 +15,14 @@ import { ConnectSection } from "./connect/ConnectSection";
 import { AgentLoop } from "./sections/AgentLoop";
 import { BuiltOn } from "./sections/BuiltOn";
 import { Safety } from "./sections/Safety";
-import { FinalCta } from "./sections/FinalCta";
+import { FinalCta, SiteFooter } from "./sections/FinalCta";
+import { FaqSection } from "./faq/FaqSection";
 
-/** Public home page: the arm hero, the exploded training loop, then the agent loop, stack, safety and CTA. */
+/** Public home page: the arm hero, the exploded training loop, then connect, the agent loop, stack, safety, FAQ and CTA. */
 export function LandingPage() {
   useEffect(() => {
     const prev = document.title;
-    document.title = `${BRAND.name}: ${BRAND.tagline}`;
+    document.title = BRAND.title;
     return () => {
       document.title = prev;
     };
@@ -29,16 +30,18 @@ export function LandingPage() {
 
   return (
     <div className="kn-page min-h-full">
+      <SiteNav />
       <main>
-        <SiteNav />
         <HeroSection copy={<HeroCopy />} />
         <LayersSection />
         <ConnectSection />
         <AgentLoop />
         <BuiltOn />
         <Safety />
+        <FaqSection />
+        <FinalCta />
       </main>
-      <FinalCta />
+      <SiteFooter />
     </div>
   );
 }

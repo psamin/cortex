@@ -1,0 +1,19 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/v1/server-card.schema.json",
+  "name": "io.github.psamin/cortex",
+  "version": "0.1.0",
+  "title": "Cortex",
+  "description": "Robot-learning studio: simulate, collect demos, train and evaluate policies, human-approved.",
+  "websiteUrl": "http://localhost:5173/",
+  "repository": {
+    "url": "https://github.com/psamin/speculativespeculativeagentaction",
+    "source": "github",
+    "subfolder": "mcp"
+  },
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "http://localhost:3000/mcp"
+    }
+  ]
+}

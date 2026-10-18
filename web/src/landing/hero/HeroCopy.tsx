@@ -9,7 +9,7 @@ export function HeroCopy() {
       <div className="reveal flex items-center gap-3 kn-mono text-[10.5px] uppercase tracking-[0.18em] text-[#858585]" style={{ animationDelay: "80ms" }}>
         <span className="h-px w-9 bg-[#171717]" />
         <span className="text-[#171717]">FIG.00</span>
-        <span>Physical AI infrastructure</span>
+        <span>MCP server for robot learning</span>
       </div>
 
       <h1

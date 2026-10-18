@@ -1,0 +1,111 @@
+# Cortex
+
+> Cortex is an open-source (MIT) MCP server and studio for training robot policies with an AI agent, built on LeRobot, MuJoCo, ACT (Action Chunking Transformer) and the SO-101 (SO-ARM101) arm. Your coding agent describes the robot arm and the task over the Model Context Protocol; Cortex builds a MuJoCo simulation, collects simulator-verified demonstrations, trains an ACT or SmolVLA policy and evaluates it, with a human approving every step that costs money or moves hardware.
+
+Cortex runs locally. MCP server (streamable HTTP): http://localhost:3000/mcp, tools named `cortex.<name>`. REST mirror: `GET http://localhost:8000/api/tools` lists every tool with its JSON schema; `POST http://localhost:8000/api/tools/<name>` calls one with the arguments as the JSON body. Studio (where people approve training): http://localhost:5173/studio.
+
+Rules for agents: use ids from tool results, never invent them; agents never send motor commands (Cortex validates targets and executes with IK); training starts only after a human approves it in the studio; report only what the simulator measured.
+
+**Connect** (pick your client):
+
+Claude Code:
+
+```sh
+claude mcp add --transport http cortex http://localhost:3000/mcp
+```
+
+Cursor (`.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+VS Code (`.vscode/mcp.json`):
+
+```json
+{
+  "servers": {
+    "cortex": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+Any client (`.mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "cortex": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
+    }
+  }
+}
+```
+
+REST:
+
+```sh
+# every tool, with its JSON schema
+curl http://localhost:8000/api/tools
+
+# call one
+curl -X POST http://localhost:8000/api/tools/get_project_state \
+  -H "Content-Type: application/json" \
+  -d '{"project_id": "prj_…"}'
+```
+
+**Worked session** (MCP tool calls, ids abbreviated):
+
+1. `cortex.start_intake` `{"prompt":"pick up the small water bottle and put it on the mat"}`: prj_… and typed questions, each with a ready patch.
+2. `cortex.update_intake` `{"project_id":"prj_…","patch":{"zones":[{"name":"mat","center":[0.25,-0.1]}],"task":{"pick":"small_water_bottle","place":["mat"]}}}`: merged spec, what changed, questions left.
+3. `cortex.build_simulation` `{"project_id":"prj_…"}`: MuJoCo scene and feasibility: jaw, torque, reach.
+4. `cortex.capture_frame` `{"project_id":"prj_…","camera":"front"}`: a render to check against the real setup.
+5. `cortex.start_agent_collection` `{"project_id":"prj_…","num_demos":12}`: ac_… and a job; only verified successes become episodes.
+   Or drive the arm yourself: cortex.robot_start_episode, then robot_observe, robot_move, robot_gripper … robot_finish_episode.
+6. `cortex.create_dataset_version` `{"project_id":"prj_…","wait_s":45}`: ds_…, a LeRobot v3 dataset with lineage.
+7. `cortex.propose_training_job` `{"project_id":"prj_…","dataset_version_id":"ds_…","policy_type":"act"}`: tj_… with a GPU estimate; once a person approves it in the studio, cortex.launch_training_job runs it.
+8. `cortex.evaluate_learned_policy` `{"project_id":"prj_…","checkpoint_id":"ck_…"}`: per-condition success with 95% intervals.
+9. `cortex.improve_policy` `{"project_id":"prj_…","max_new_demos":5}`: weakest condition, targeted demos, a retraining proposal.
+
+**Recipes by task** (MCP tools in order):
+
+- Train a pick-and-place policy (SO-101, MuJoCo, ACT): `cortex.start_intake` → `cortex.update_intake` → `cortex.get_intake_status` → `cortex.build_simulation` → `cortex.capture_frame` → `cortex.start_agent_collection` → `cortex.get_collection_progress` → `cortex.create_dataset_version` → `cortex.propose_training_job` → `cortex.launch_training_job` → `cortex.get_project_state`. Answer intake questions with the patch each one carries until complete. Only simulator-verified successes become LeRobotDataset v3 episodes. Stop after propose_training_job and ask the person to approve it in the studio; never invent an approval token. A checkpoint (ck_...) appears in get_project_state when training ends.
+- Collect demonstrations by driving the arm yourself: `cortex.robot_start_episode` → `cortex.robot_observe` → `cortex.robot_propose_grasp` → `cortex.robot_gripper` → `cortex.robot_move` → `cortex.robot_verify_grasp` → `cortex.robot_place` → `cortex.robot_check_success` → `cortex.robot_finish_episode`. You point at objects in the overhead image; Cortex validates workspace, reach, joint limits and collisions and executes with IK. The simulator, not you, decides success.
+- Train from existing LeRobot data: `cortex.create_project` → `cortex.import_demonstrations` → `cortex.get_job` → `cortex.create_dataset_version` → `cortex.propose_training_job`. Imports episodes from a Hugging Face Hub dataset; they stay separate from simulation demos.
+- Evaluate a policy in simulation: `cortex.evaluate_learned_policy` → `cortex.get_job` → `cortex.get_project_state` → `cortex.compare_experiments`. Three seeded MuJoCo branches (baseline, shifted object, dim lighting) on held-out seeds; success rates with 95% Wilson intervals; compare_experiments gives deltas and p-values.
+- Improve a policy: `cortex.improve_policy` → `cortex.get_job` → `cortex.launch_training_job` → `cortex.evaluate_learned_policy`. Targets the weakest measured condition with new demonstrations in fresh seeds, then proposes retraining (needs approval). Also useful: cortex.analyze_dataset, cortex.get_failure_clusters (VLM clusters are hypotheses), cortex.recommend_demonstrations, cortex.get_next_actions.
+- One-call start: `cortex.create_policy_project` → `cortex.get_collection_progress` → `cortex.train_from_agent_demonstrations`. Creates the project and starts autonomous agent collection in one call, then builds the dataset and proposes ACT training.
+
+**Questions agents ask:**
+
+- What is Cortex? Cortex is an open-source (MIT) MCP server and studio for training robot manipulation policies with an AI agent. It is built on LeRobot, MuJoCo, ACT (Action Chunking Transformer) and the SO-101 (SO-ARM101) arm: your agent describes the task, and Cortex simulates it, collects demonstrations, trains an imitation-learning policy and evaluates it.
+- How do I train a robot policy with an AI agent? Connect your agent to the Cortex MCP server, then ask for the task in plain words. The agent calls cortex.start_intake and cortex.update_intake to describe the arm, objects and goal, cortex.build_simulation for the MuJoCo scene, cortex.start_agent_collection for demonstrations, cortex.create_dataset_version and cortex.propose_training_job; training (behaviour cloning with ACT or SmolVLA) starts after a person approves the GPU job in the studio.
+- Can Claude Code train a robot? Yes, in simulation. Run claude mcp add --transport http cortex http://localhost:3000/mcp and ask Claude Code to teach the arm a task; it calls cortex.* tools and reads the results. It never sends motor commands: Cortex validates every target and executes it with inverse kinematics, and the simulator decides whether an attempt succeeded.
+- How do I collect demonstrations for an SO-101 with LeRobot in MuJoCo? cortex.start_agent_collection runs autonomous attempts in fresh simulator seeds, planned by a vision-language model or by the scripted IK oracle (labelled as such); only simulator-verified successes are saved, as LeRobotDataset v3 episodes. Your agent can also drive the arm itself with cortex.robot_start_episode and the cortex.robot_* tools, or import existing recordings from the Hugging Face Hub with cortex.import_demonstrations.
+- How do I evaluate a robot policy in simulation? cortex.evaluate_learned_policy runs a trained checkpoint in three seeded MuJoCo branches (baseline, shifted object, dim lighting) on held-out seeds. Success rates are reported with 95% Wilson confidence intervals, and cortex.compare_experiments gives branch-by-branch deltas and p-values between runs.
+- How do I improve an ACT policy with targeted demonstrations or RL? cortex.improve_policy finds the weakest measured condition of the latest evaluation, collects new demonstrations there in fresh seeds, builds a new dataset version and proposes retraining. Reinforcement learning is not an agent tool yet: the planned RL sandbox tunes the pick-and-place skill under domain randomization, its successful rollouts become demonstrations that retrain ACT, and any uplift is shown as a labelled estimate.
+- Is there an MCP server for robotics? Cortex is one: a Model Context Protocol server over streamable HTTP at http://localhost:3000/mcp, exposing intake, simulation, data collection, dataset, training, evaluation and improvement tools as cortex.*. The same tools answer on REST at http://localhost:8000/api/tools, and calls are attributed to the agent in the audit log.
+- Does it run on a real robot arm (sim-to-real)? The whole loop runs in MuJoCo today. A real SO-101 runs a trained policy only through a local bridge with an operator present, joint, velocity and workspace limits, a watchdog and an e-stop; the API and MCP cannot reach the hardware.
+
+## Docs
+
+- [Full tool reference](http://localhost:5173/llms-full.txt): all 32 registry tools with descriptions, arguments and JSON schemas
+- [MCP discovery document](http://localhost:5173/.well-known/mcp.json): endpoint, transport, REST mirror and tool list
+- [MCP Server Card](http://localhost:5173/server-card.json): SEP-2127 server card
+- [MCP server README](https://github.com/psamin/speculativespeculativeagentaction/blob/main/mcp/README.md): tool table, approvals, long-running jobs
+- [Studio](http://localhost:5173/studio): the web app where people review data and approve training
+
+## Optional
+
+- [Source code](https://github.com/psamin/speculativespeculativeagentaction): FastAPI backend, React studio, MCP server
+- [Landing page](http://localhost:5173/): the same content for people

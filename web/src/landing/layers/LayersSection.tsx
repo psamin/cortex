@@ -42,7 +42,7 @@ function Heading() {
         <span className="text-[#171717]">FIG.02</span>
         <span>How it works</span>
       </div>
-      <h2 className="kn-display mt-6 text-[clamp(2.2rem,3.5vw,3.5rem)] text-[#171717]">
+      <h2 id="platform-title" className="kn-display mt-6 text-[clamp(2.2rem,3.5vw,3.5rem)] text-[#171717]">
         Seven layers,
         <br />
         <span className="kn-second">one training loop.</span>
@@ -67,7 +67,7 @@ function Tag({ children, on }: { children: string; on?: boolean }) {
 export function LayersSection() {
   const mode = useMode();
   return (
-    <section id="platform" aria-label="How it works" className="relative scroll-mt-0 border-t border-[#E6E6E6]">
+    <section id="platform" aria-labelledby="platform-title" className="relative scroll-mt-0 border-t border-[#E6E6E6]">
       {mode === "pinned" ? <Pinned /> : mode === "static" ? <StaticExploded /> : <MobileStack />}
     </section>
   );
