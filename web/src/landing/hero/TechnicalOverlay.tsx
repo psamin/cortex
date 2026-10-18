@@ -38,7 +38,7 @@ export function TechnicalOverlay() {
         <div className="flex items-center gap-3 text-[#171717]">
           <span className="h-px w-8 bg-[#171717]" />
           <span>FIG.01</span>
-          <span className="text-[#858585]">KN-6 Manipulator</span>
+          <span className="text-[#858585]">Illustrative 6-axis arm</span>
         </div>
         <div className="mt-2 pl-11">Kinematic control</div>
         <div className="flex items-center gap-2 pl-11 text-[#171717]">

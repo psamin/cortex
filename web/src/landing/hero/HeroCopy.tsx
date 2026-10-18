@@ -52,9 +52,9 @@ export function HeroCopy() {
         style={{ animationDelay: "420ms" }}
       >
         {[
-          ["01", "Simulate"],
-          ["02", "Train"],
-          ["03", "Deploy"],
+          ["01", "Describe"],
+          ["04", "Train"],
+          ["07", "Deploy"],
         ].map(([n, t]) => (
           <div key={n} className="flex gap-2">
             <dt className="text-[#171717]">{n}</dt>

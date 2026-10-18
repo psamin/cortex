@@ -1,4 +1,4 @@
-import { lazy, Suspense, useMemo, useRef, useSyncExternalStore } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { Canvas } from "@react-three/fiber";
 import { Line } from "@react-three/drei";
 import * as THREE from "three";
@@ -41,16 +41,24 @@ export default function RobotCanvas({ runtime }: { runtime: RobotRuntime }) {
   const flags = useSyncExternalStore(debugStore.subscribe, debugStore.get, debugStore.get);
   const tcpRef = useRef<THREE.Object3D | null>(null);
   const style = useMemo(() => ({ edges: flags.edges, outlines: flags.outlines }), [flags.edges, flags.outlines]);
+  // Stop rendering while the hero is scrolled out of view, so the sections below scroll smoothly.
+  const [onScreen, setOnScreen] = useState(true);
+  const ioRef = useRef<IntersectionObserver | null>(null);
+  useEffect(() => () => ioRef.current?.disconnect(), []);
 
   return (
     <Canvas
       orthographic
       flat
       dpr={[1, 2]}
+      frameloop={onScreen ? "always" : "never"}
       gl={{ antialias: true, alpha: true, powerPreference: "high-performance" }}
       onCreated={({ gl }) => {
         runtime.canvas = gl.domElement;
         gl.setClearColor(0xffffff, 0);
+        ioRef.current?.disconnect();
+        ioRef.current = new IntersectionObserver(([e]) => setOnScreen(e.isIntersecting));
+        ioRef.current.observe(gl.domElement);
       }}
       style={{ pointerEvents: "none" }}
       aria-hidden

@@ -2,7 +2,12 @@ import { Link } from "react-router-dom";
 import { BRAND, STUDIO_ENTRY } from "../brand";
 import { scrollToSection } from "../scroll";
 
-const LINKS = ["Platform", "Simulation", "Research", "Docs", "Company"];
+const LINKS: [string, string][] = [
+  ["How it works", "platform"],
+  ["Agent loop", "loop"],
+  ["Built on", "stack"],
+  ["Safety", "safety"],
+];
 
 /** Minimal top navigation. Section links scroll in-page; account actions open the studio. */
 export function SiteNav() {
@@ -17,11 +22,11 @@ export function SiteNav() {
           <span className="kn-sans text-[15px] font-medium tracking-[-0.01em]">{BRAND.name}</span>
         </Link>
         <ul className="hidden items-center gap-9 kn-sans text-[13px] text-[#3a3a3a] md:flex">
-          {LINKS.map((l) => (
-            <li key={l}>
+          {LINKS.map(([l, id]) => (
+            <li key={id}>
               <a
-                href={`#${l.toLowerCase()}`}
-                onClick={(e) => scrollToSection(e, l.toLowerCase())}
+                href={`#${id}`}
+                onClick={(e) => scrollToSection(e, id)}
                 className="transition-colors hover:text-[#171717] focus-visible:underline"
               >
                 {l}
@@ -30,15 +35,12 @@ export function SiteNav() {
           ))}
         </ul>
         <div className="flex items-center gap-5">
-          <Link to={STUDIO_ENTRY} className="hidden kn-sans text-[13px] text-[#3a3a3a] hover:text-[#171717] sm:inline">
-            Sign in
-          </Link>
           <Link
             to={STUDIO_ENTRY}
             className="inline-flex h-9 items-center rounded-full bg-[#171717] px-4 kn-sans text-[12.5px] font-medium text-white hover:bg-black"
             data-testid="cta-access"
           >
-            Request access
+            Open studio
           </Link>
         </div>
       </nav>
