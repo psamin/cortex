@@ -57,6 +57,14 @@ async def lifespan(app: FastAPI):
     for n in CTX.notes:
         log.warning(n)
     await training_service.resume_pollers(CTX)
+    agent.install_job_listener(CTX)
+    # collections whose worker died with the previous process are not running any more
+    from ..models import AgentCollection
+    for status in ("running", "queued"):
+        for col in await CTX.repo.list("agent_collections", AgentCollection, status=status):
+            if not (col.job_id and CTX.jobs.get(col.job_id) and CTX.jobs.get(col.job_id).status == "running"):
+                col.status, col.error = "failed", "interrupted by a backend restart; recorded attempts are kept"
+                await CTX.repo.save("agent_collections", col)
     resumed = await autopilot.resume_all(CTX)
     if resumed:
         log.info("resumed %d autopilot run(s)", resumed)

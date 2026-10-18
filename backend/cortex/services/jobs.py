@@ -55,12 +55,34 @@ class EventBus:
         self.subs[project_id].discard(q)
 
 
+TERMINAL = ("succeeded", "failed", "cancelled")
+
+
 class JobManager:
-    def __init__(self, bus: EventBus):
+    """Jobs run in this process, but their state is written to disk so a backend restart
+    reports in-flight jobs as interrupted instead of forgetting them."""
+
+    def __init__(self, bus: EventBus, persist: Path | None = None):
         self.bus = bus
         self.jobs: dict[str, Job] = {}
         self.tasks: dict[str, asyncio.Task] = {}
         self.procs: dict[str, list[asyncio.subprocess.Process]] = defaultdict(list)
+        self.persist = persist
+        self.on_finished: list[Callable[[Job], None]] = []
+        if persist and persist.exists():
+            for row in json.loads(persist.read_text() or "[]"):
+                j = Job.model_validate(row)
+                if j.status not in TERMINAL:
+                    j.status, j.error = "failed", "interrupted by a backend restart"
+                self.jobs[j.id] = j
+            self._save()
+
+    def _save(self) -> None:
+        if self.persist:
+            recent = sorted(self.jobs.values(), key=lambda j: j.created_at)[-500:]
+            tmp = self.persist.with_suffix(".tmp")
+            tmp.write_text(json.dumps([j.model_dump() for j in recent]))
+            os.replace(tmp, self.persist)
 
     def get(self, job_id: str) -> Job | None:
         return self.jobs.get(job_id)
@@ -69,9 +91,18 @@ class JobManager:
         return [j for j in self.jobs.values() if j.project_id == project_id]
 
     def update(self, job: Job, **kw: Any) -> None:
+        was = job.status
         for k, v in kw.items():
             setattr(job, k, v)
         self.bus.publish(job.project_id, "job", job.model_dump())
+        if "status" in kw or was != job.status:
+            self._save()
+        if job.status in TERMINAL and was not in TERMINAL:
+            for cb in self.on_finished:
+                try:
+                    cb(job)
+                except Exception:  # a listener must never break the job
+                    log.exception("job finish listener failed")
 
     def log(self, job: Job, line: str) -> None:
         self.bus.publish(job.project_id, "log", {"job_id": job.id, "line": line})
@@ -84,6 +115,7 @@ class JobManager:
                     return j
         job = Job(kind=kind, project_id=project_id, idempotency_key=idempotency_key)
         self.jobs[job.id] = job
+        self._save()
         self.bus.publish(project_id, "job", job.model_dump())
 
         async def run() -> None:

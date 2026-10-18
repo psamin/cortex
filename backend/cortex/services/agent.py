@@ -128,7 +128,8 @@ async def chat(ctx: Ctx, pid: str, message: str) -> AsyncIterator[str]:
             if text:
                 _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)})
                 text = []
-            _append_log(ctx, pid, {"kind": ev, **d})
+            # keep the card's own kind (e.g. "training") under card_kind; `kind` is the row type
+            _append_log(ctx, pid, {**d, "card_kind": d.get("kind"), "kind": ev})
         elif ev == "done":
             if text:
                 _append_log(ctx, pid, {"kind": "assistant", "text": "".join(text)})
@@ -254,3 +255,59 @@ async def _rules(ctx: Ctx, pid: str, message: str, hist: list[dict[str, Any]]) -
     note = " (rule-based planner: configure a model endpoint to enable the LLM agent)"
     yield _sse("text", {"delta": text + note})
     hist.append({"role": "assistant", "content": text})
+
+
+# ------------------------------------------------- deterministic job status lines in the chat
+
+JOB_LABELS = {"record": "Recording demonstrations", "agent_collect": "Demonstration collection",
+              "analyze": "Quality analysis", "dataset": "Dataset build", "evaluate": "Evaluation",
+              "train": "Training", "train_from_agent": "Dataset + training proposal",
+              "improve_policy": "Improvement round", "import": "Demonstration import"}
+
+
+async def post_job_done(ctx: Ctx, job) -> None:
+    """When a job finishes, Cortex (not the LLM) posts a fixed status line into the chat."""
+    from ..models import AgentCollection, DatasetVersion
+
+    label = JOB_LABELS.get(job.kind, job.kind)
+    detail = ""
+    try:
+        if job.status == "succeeded" and job.result_ref:
+            ref = job.result_ref
+            if ref.startswith("ac_"):
+                c = await ctx.repo.get("agent_collections", ref, AgentCollection)
+                if c:
+                    t = c.totals
+                    detail = f"{t.get('successes', 0)}/{t.get('attempts', 0)} demos succeeded in simulation"
+            elif ref.startswith("ds_"):
+                d = await ctx.repo.get("dataset_versions", ref, DatasetVersion)
+                if d:
+                    detail = f"{d.name}: {d.num_source_episodes} demos, {len(d.links)} LeRobot episodes"
+            elif ref.startswith("ev_"):
+                from . import simulation_runner
+                ev = await simulation_runner.get_evaluation(ctx, ref)
+                if ev:
+                    detail = ", ".join(f"{b.spec.name} {b.result.successes}/{b.result.n}" for b in ev["branches"]
+                                       if b.result)
+            elif ref.startswith("an_"):
+                from . import analysis_service
+                an = await analysis_service.latest_analysis(ctx, job.project_id)
+                detail = an.summary if an else ""
+    except Exception:
+        detail = ""
+    text = {"succeeded": f"{label} finished" + (f": {detail}" if detail else ""),
+            "failed": f"{label} failed: {job.error or job.message or 'unknown error'}",
+            "cancelled": f"{label} stopped"}.get(job.status, f"{label}: {job.status}")
+    entry = {"kind": "job_done", "job_id": job.id, "job_kind": job.kind, "status": job.status,
+             "text": text, "ref_ids": [r for r in (job.result_ref or "").split(",") if r][:12]}
+    _append_log(ctx, job.project_id, entry)
+    ctx.bus.publish(job.project_id, "chat", entry)
+
+
+def install_job_listener(ctx: Ctx) -> None:
+    import asyncio
+
+    def on_finished(job) -> None:
+        if job.kind in JOB_LABELS:
+            asyncio.get_running_loop().create_task(post_job_done(ctx, job))
+    ctx.jobs.on_finished.append(on_finished)
