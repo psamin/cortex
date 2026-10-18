@@ -47,7 +47,8 @@ def best_checkpoints(sim_dir: Path) -> dict[str, dict[str, Any]]:
         if not (ck / "config.json").exists():
             continue
         cand = {"task": task, "variant": variant, "step": int(step), "checkpoint": str(ck),
-                "success_rate": r["success_rate"], "eval_episodes": r["episodes"], "eval_seeds": r["seeds"]}
+                "success_rate": r["success_rate"], "eval_episodes": r["episodes"], "eval_seeds": r["seeds"],
+                "layouts": r.get("layouts")}
         if task in unscored or (cand["success_rate"], cand["step"]) > (best[task]["success_rate"], best[task]["step"]):
             best[task] = cand
             unscored.discard(task)
@@ -60,11 +61,14 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
 
     out = {}
     for task, info in best_checkpoints(sim_dir).items():
+        meta = sim_dir / task / "dataset" / "meta" / "cortex_sim.json"  # practice layouts it was trained on, if any
+        info["layouts"] = info.get("layouts") or (json.loads(meta.read_text()).get("layouts") if meta.exists() else None)
         env, _ = make(task, 240, 320)
         policy = LeRobotPolicy(info["checkpoint"], device="cuda", task=env.instruction,
                                cameras=CAMERAS.get(info["variant"]))
         out[task] = {**info, "env": env, "policy": policy, "instruction": env.instruction}
-        score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} unseen layouts"
+        where = f"{info['layouts']} practice layouts" if info.get("layouts") else "unseen layouts"
+        score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} runs over {where}"
                  if info["success_rate"] is not None else "score pending")
         print(f"[serve] sim {task}: {info['variant']} step {info['step']}, {score}", flush=True)
     return out
@@ -101,7 +105,10 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
     from cortex.sim.tasks.run import SETTLE, Presenter
 
     env, policy = p["env"], p["policy"]
-    seed = visible_seed(p["task"], env, seed)
+    if p.get("layouts"):
+        seed = seed % p["layouts"]  # a practice layout it was trained on (demo reliability over generalization)
+    else:
+        seed = visible_seed(p["task"], env, seed)
     obs = env.reset(seed)
     policy.reset(env, obs, seed)
     presenter = Presenter(env)
@@ -120,7 +127,8 @@ def stream(p: dict[str, Any], seed: int, fps: int = 30) -> Iterator[tuple[bytes,
                 "Running", (200, 200, 200))
             jpg = _overlay(frame, [
                 (TITLES.get(p["task"], p["task"]), (240, 240, 240)),
-                (f"{p['variant'].upper()} trained only in sim  ·  unseen layout (seed {seed})", (160, 200, 255)),
+                (f"{p['variant'].upper()} trained only in sim  ·  "
+                 + (f"practice layout {seed}" if p.get("layouts") else f"unseen layout (seed {seed})"), (160, 200, 255)),
                 (f"step {step}  ·  inference {ms:5.1f} ms on GPU", (160, 200, 255)),
                 status])
             yield jpg, step, ms, success
