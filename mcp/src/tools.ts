@@ -753,6 +753,31 @@ const TOOLS: Def[] = [
     annotations: READ,
   },
   {
+    name: "list",
+    title: "List anything in Cortex",
+    description:
+      "One read-only query for everything, compact and newest first: your projects, the built-in sim tasks you can " +
+      "train on (jenga, conveyor, suture, ...), Physical Skills, and one project's jobs, datasets, checkpoints, " +
+      "training, evaluations, replays, RL sandboxes or Agent log. Use it to find ids, check what exists before " +
+      "creating something, and see what you (or another agent) already did.",
+    inputSchema: z.object({
+      kind: z.enum(["projects", "sim_tasks", "skills", "jobs", "datasets", "checkpoints", "training", "evaluations", "replays", "rl_sandboxes", "agent_log"])
+        .describe("projects, sim_tasks and skills are global; the rest need project_id"),
+      project_id: projectId.optional(),
+      limit: z.number().int().min(1).max(200).optional().describe("Newest first; default 20"),
+    }),
+    annotations: READ,
+  },
+  {
+    name: "cancel_job",
+    title: "Stop a background job",
+    description:
+      "Stop a background job you started (a recording, demo collection, dataset build, evaluation or RL run) that is " +
+      "wrong, stuck or no longer needed. Finished jobs keep their result.",
+    inputSchema: z.object({ job_id: z.string().describe("A job_id you started (from get_job, list kind='jobs', or a tool's result)") }),
+    annotations: WRITE,
+  },
+  {
     name: "register_agent",
     title: "Register this agent (name yourself)",
     description:

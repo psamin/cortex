@@ -1898,6 +1898,79 @@
       "needsApproval": false
     },
     {
+      "name": "list",
+      "mcpTools": [
+        "cortex.list"
+      ],
+      "description": "One read-only query for everything in Cortex, compact and newest first: your projects, the built-in sim tasks you can train on, Physical Skills, and one project's jobs, datasets, checkpoints, training, evaluations, replays, RL sandboxes or Agent log. Use it to find ids, check what exists before creating something, and see what you (or another agent) already did.",
+      "inputSchema": {
+        "properties": {
+          "kind": {
+            "description": "projects: your projects | sim_tasks: built-in sim tasks you can train on (jenga, conveyor, suture, ...) | skills: every trained Physical Skill | jobs, datasets, checkpoints, training, evaluations, replays, rl_sandboxes, agent_log: one project's (needs project_id)",
+            "enum": [
+              "projects",
+              "sim_tasks",
+              "skills",
+              "jobs",
+              "datasets",
+              "checkpoints",
+              "training",
+              "evaluations",
+              "replays",
+              "rl_sandboxes",
+              "agent_log"
+            ],
+            "type": "string"
+          },
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          },
+          "limit": {
+            "default": 20,
+            "description": "newest first",
+            "maximum": 200,
+            "minimum": 1,
+            "type": "integer"
+          }
+        },
+        "required": [
+          "kind"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "cancel_job",
+      "mcpTools": [
+        "cortex.cancel_job"
+      ],
+      "description": "Stop a background job you started (a recording, demo collection, dataset build, evaluation or RL run) that is wrong, stuck or no longer needed. Finished jobs keep their result.",
+      "inputSchema": {
+        "properties": {
+          "job_id": {
+            "description": "a job_id you started (from get_job, list kind='jobs', or a tool's result)",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "register_agent",
       "mcpTools": [
         "cortex.register_agent"
