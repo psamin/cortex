@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { CircleDashed, Columns2, Pause, Play, Radio, VideoOff } from "lucide-react";
+import { CircleDashed, Columns2, Cpu, Pause, Play, Radio, VideoOff } from "lucide-react";
 import { api } from "../api/client";
 import { isJobActive, useJobs } from "../api/events";
 import { useDatasets } from "../api/hooks";
@@ -10,6 +10,7 @@ import { cn } from "../lib/format";
 import { DashedOrbit, SketchScene } from "../sketch";
 import { InfoTip } from "../components/ui";
 import { useRolloutVideo, useRollouts, type Camera, type Rollout, type RolloutOrigin } from "./rollouts";
+import { GpuStage } from "./LivePolicy";
 
 export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
 
@@ -73,8 +74,10 @@ export function Viewer({
     () => Object.values(jobs).find((j) => j.project_id === pid && isJobActive(j) && LIVE_KINDS.test(j.kind)),
     [jobs, pid],
   );
-  const [mode, setMode] = useState<"auto" | "live" | "replay">("auto");
+  const [mode, setMode] = useState<"auto" | "live" | "replay" | "gpu">("auto");
   const showLive = mode === "live" || (mode === "auto" && !!liveJob);
+  const showGpu = mode === "gpu";
+  const replay = !showLive && !showGpu;
   const [camera, setCamera] = useState<Camera>("presentation");
   const [compare, setCompare] = useState(false);
 
@@ -122,11 +125,14 @@ export function Viewer({
           >
             <Radio className={cn("h-3.5 w-3.5", liveJob && "text-fault")} /> Live
           </ToolbarTab>
-          <ToolbarTab active={!showLive} onClick={() => setMode("replay")}>
+          <ToolbarTab active={replay} onClick={() => setMode("replay")}>
             Replays
           </ToolbarTab>
+          <ToolbarTab active={showGpu} onClick={() => setMode("gpu")} title="Trained policies running live on a cluster GPU">
+            <Cpu className="h-3.5 w-3.5" /> GPU
+          </ToolbarTab>
         </div>
-        {!showLive && (
+        {replay && (
           <div className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto px-1 scroll-thin">
             {(
               [
@@ -155,7 +161,7 @@ export function Viewer({
             )}
           </div>
         )}
-        {!showLive && current && (
+        {replay && current && (
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <select
               value={cam?.id ?? "presentation"}
@@ -187,12 +193,14 @@ export function Viewer({
         )}
       </div>
 
-      <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} />
+      <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={!replay || compare ? null : current} />
 
       {/* stage */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <DashedOrbit r={200} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-70" />
-        {showLive ? (
+        {showGpu ? (
+          <GpuStage />
+        ) : showLive ? (
           <LiveStage pid={pid} job={liveJob} />
         ) : rollouts.isLoading ? (
           <div className="relative flex h-full items-center justify-center">
@@ -212,7 +220,7 @@ export function Viewer({
       </div>
 
       {/* selector */}
-      {!showLive && filtered.length > 0 && (
+      {replay && filtered.length > 0 && (
         <div className="relative border-t border-line bg-bench">
           <p className="flex items-center gap-1.5 px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
             Newest first · ✓ sim-verified · ✗ failed

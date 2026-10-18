@@ -5,6 +5,7 @@
 Loads the newest checkpoint per task from <job_dir>/output/<task>/ and that task's held-out episodes
 (prepared by prepare_dataset.py under <data_root>/<task>). Serves:
   GET  /                      page listing policies and held-out episodes
+  GET  /policies.json         the same as JSON (GPU name, checkpoint, held-out episodes per task)
   GET  /live/<task>/<ep>      MJPEG: the policy runs on the GPU frame by frame on a held-out episode it
                               never trained on; each frame shows the camera, its joint targets vs the
                               human's, and the measured inference time
@@ -90,6 +91,15 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parts = [x for x in self.path.split("?")[0].split("/") if x]
+        if parts == ["policies.json"]:
+            body = json.dumps({"gpu": torch.cuda.get_device_name(0), "policies": {
+                t: {"checkpoint": p["checkpoint"], "stage": p["stage"], "held_out": p["held_out"]}
+                for t, p in POLICIES.items()}}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if not parts:
             rows = "".join(f"<li><b>{t}</b> ({p['checkpoint']}): " + " ".join(
                 f'<a href="/live/{t}/{e}">episode {e}</a>' for e in p["held_out"]) + "</li>"

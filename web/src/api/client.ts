@@ -36,6 +36,7 @@ import type {
   HardwareProcess,
   HardwareRun,
   HardwareStatus,
+  LivePolicyStatus,
   RemoteRollout,
   Iteration,
   Project,
@@ -182,6 +183,12 @@ export const api = {
   simFrameUrl: (pid: string, c: Condition, seed: number) =>
     `${API_BASE}/projects/${pid}/sim/frame?cube_region=${c.cube_region}&lighting=${c.lighting}&seed=${seed}`,
   simLiveUrl: (pid: string) => `${API_BASE}/projects/${pid}/sim/live`,
+
+  // trained policies running live on a Futurama GPU (#157)
+  livePolicy: () => get<LivePolicyStatus>("/live-policy"),
+  startLivePolicy: () => post<LivePolicyStatus>("/live-policy/start"),
+  stopLivePolicy: () => post<LivePolicyStatus>("/live-policy/stop"),
+  livePolicyStreamUrl: (task: string, episode: number) => `${API_BASE}/live-policy/stream/${task}/${episode}`,
   record: (pid: string, condition: Condition, seed?: number) =>
     post<Job>(`/projects/${pid}/recordings`, seed === undefined ? { condition } : { condition, seed }),
   recordBatch: (pid: string, conditions: Condition[], per_condition: number, base_seed?: number) =>
