@@ -3,7 +3,8 @@
 With a Model Gateway key: an LLM (OpenRouter, OpenAI-compatible tool calling)
 plans over the same tool registry the MCP server exposes. Without one: a small
 deterministic intent planner covers the core flow. Either way the agent never
-launches gated work itself; it emits `approval_required` cards the human clicks.
+approves gated work itself: a human clicks an `approval_required` card, or, in
+autonomous mode, the project's standing approval covers it (services/autonomy.py).
 """
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ import httpx
 
 from ..context import Ctx
 from . import agent_orchestrator as orch
-from . import autopilot
+from . import autonomy, autopilot
 from .narration import tool_line
 
 MAX_TURNS = 8
@@ -29,7 +30,7 @@ Act, don't ask: call tools to make progress, then explain in 2-4 short sentences
 Rules:
 - Distinguish measured results (sim evaluations, quality checks) from VLM hypotheses (unverified).
 - Never invent numbers; only cite tool outputs.
-- Evaluations and training proposals are surfaced as approval cards for the human; call the tool and say approval is pending.
+{mode_rules}
 - To run the whole loop unattended, call start_autopilot.
 Current state summary: {state}"""
 
@@ -61,7 +62,7 @@ async def run_tool(ctx: Ctx, pid: str, name: str, args: dict[str, Any]) -> tuple
     if name == "start_autopilot":
         run = await autopilot.start(ctx, await orch.get_project(ctx, pid))
         return {"summary": f"Autopilot {run.id} started", "ref_ids": [run.id]}, None
-    if name == "launch_simulation_evaluation":
+    if name == "launch_simulation_evaluation" and not autonomy.is_autonomous(await orch.get_project(ctx, pid)):
         card = {"kind": "evaluation", "ref_id": pid, "summary": (
             f"Evaluate {args.get('policy', 'scripted_expert')} on baseline / shifted object / dim lighting, "
             f"{args.get('episodes_per_branch', 10)} seeds each"), "args": {**args, "project_id": pid}}
@@ -130,16 +131,34 @@ async def _append_log(ctx: Ctx, pid: str, entry: dict[str, Any], tid: str | None
 
 
 async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:
-    """Stream one agent turn and record it to the chat thread (the latest unless `tid` is given)."""
+    """Stream one user turn and record it to the chat thread (the latest unless `tid` is given).
+    Turns in a project run one at a time: a message sent during an automatic step waits for it."""
+    async with autonomy.lock(pid):
+        async for chunk in turn(ctx, pid, message, tid):
+            yield chunk
+
+
+async def turn(ctx: Ctx, pid: str, message: str, tid: str | None = None, auto: str | None = None) -> AsyncIterator[str]:
+    """One agent turn; the caller holds autonomy.lock(pid). `auto`: Cortex woke the agent (autonomous mode)
+    because this work finished; the row shows that instead of a user message."""
+    import time
+
     from . import chat_store, project_cleanup
 
     tid = (await chat_store.current(ctx, pid, tid))["id"]
     yield _sse("thread", {"id": tid})
     await project_cleanup.restore(ctx, pid)  # a chat is history: an empty project deleted earlier comes back
-    await _append_log(ctx, pid, {"kind": "user", "text": message}, tid)
+    autonomy.turn_started(ctx, pid, auto=bool(auto))
+    if auto:
+        row = autonomy.notice("auto", f"Continuing on my own: {auto}")
+        await _append_log(ctx, pid, row, tid)
+        yield _sse("notice", row)
+    else:
+        await _append_log(ctx, pid, {"kind": "user", "text": message}, tid)
     before = await _counts(ctx, pid)
     text: list[str] = []
-    async for chunk in _chat(ctx, pid, message, tid):
+    last_result_at = time.time()
+    async for chunk in _chat(ctx, pid, message, tid, actor="cortex" if auto else "gui"):
         ev, _, data = chunk.partition("\ndata: ")
         ev = ev.removeprefix("event: ")
         try:
@@ -166,6 +185,15 @@ async def chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> Asyn
                 yield _sse("changes", {"items": changes})
             await _append_log(ctx, pid, {"kind": "done", **d}, tid)
         yield chunk
+        if ev in ("tool_result", "approval_required"):
+            last_result_at = time.time()
+            # autonomous mode: training the agent proposed starts now if the standing approval covers it
+            for ref in {r for r in [*d.get("ref_ids", []), d.get("ref_id") or ""] if r.startswith("tj_")}:
+                if row := await autonomy.approve_if_covered(ctx, pid, ref):
+                    await _append_log(ctx, pid, row, tid)
+                    yield _sse("notice", row)
+        elif ev == "done":
+            await autonomy.turn_ended(ctx, pid, tid, last_result_at)
 
 
 CHANGE_LABELS = {"episodes": ("demo", "demos"), "dataset_versions": ("dataset version", "dataset versions"),
@@ -192,10 +220,11 @@ def _diff(before: dict[str, int], after: dict[str, int]) -> list[dict[str, Any]]
     return items
 
 
-async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None) -> AsyncIterator[str]:
+async def _chat(ctx: Ctx, pid: str, message: str, tid: str | None = None, actor: str = "gui") -> AsyncIterator[str]:
     hist = HISTORY.setdefault(f"{pid}:{tid}", [])
     hist.append({"role": "user", "content": message})
-    await ctx.audit("gui", "agent_message", pid, {"message": message[:500]}, "ok", "user message")
+    await ctx.audit(actor, "agent_message", pid, {"message": message[:500]}, "ok",
+                    "user message" if actor == "gui" else "autonomous mode: continue after background work")
     eng = await engine(ctx)
     if eng == "claude_code":
         from . import claude_code_agent as cc
@@ -220,6 +249,7 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
     project = await orch.get_project(ctx, pid)
     st = await orch.project_state(ctx, project)
     sysmsg = SYSTEM.format(project=f"{project.name}: {project.spec.goal} ({project.mode})",
+                           mode_rules=autonomy.mode_rules(project),
                            state=json.dumps({"episodes": st.episode_counts, "evaluations": st.evaluations,
                                              "next": [n.action for n in st.next_actions]}, default=str))
     msgs: list[dict[str, Any]] = [{"role": "system", "content": sysmsg}, *hist[-20:]]
@@ -361,8 +391,12 @@ async def post_job_done(ctx: Ctx, job) -> None:
     entry = {"kind": "job_done", "job_id": job.id, "job_kind": job.kind, "status": job.status,
              "text": text, "detail": getattr(job, "error_detail", None),
              "ref_ids": [r for r in (job.result_ref or "").split(",") if r][:12]}
-    await _append_log(ctx, job.project_id, entry)
+    tid = autonomy.armed_thread(ctx, job.project_id)  # an autonomous chain keeps its results in its own chat
+    await _append_log(ctx, job.project_id, entry, tid)
     ctx.bus.publish(job.project_id, "chat", entry)
+    if row := await autonomy.job_done(ctx, job, entry):  # autonomous mode: start covered training, wake the agent
+        await _append_log(ctx, job.project_id, row, tid)
+        ctx.bus.publish(job.project_id, "chat", row)
 
 
 def install_job_listener(ctx: Ctx) -> None:

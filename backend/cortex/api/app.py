@@ -948,6 +948,13 @@ async def chat(pid: str, req: ChatReq):
     return StreamingResponse(agent.chat(ctx(), pid, req.message, req.thread), media_type="text/event-stream")
 
 
+@app.post("/api/projects/{pid}/agent/stop")
+async def agent_stop(pid: str):
+    """Stop the autonomous chain: no more automatic steps, and the one running now (if any) ends."""
+    from ..services import autonomy
+    return {"stopped": autonomy.stop(ctx(), pid)}
+
+
 @app.get("/api/projects/{pid}/agent/history")
 async def history(pid: str, thread: str | None = None):
     """One chat thread (the latest unless `thread` is given):

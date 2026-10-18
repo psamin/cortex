@@ -100,6 +100,9 @@ class AutopilotPolicy(BaseModel):
     planning_mode: Literal["camera", "privileged"] = "camera"
     max_gpu_hours_per_job: float = 1.5
     allow_paid_jobs: bool = False  # paid cloud GPUs always need an explicit click
+    # autonomous: the studio agent chains every step and training inside this policy starts without a click;
+    # manual: one step per turn, training waits for approval. Real-robot motion needs a human either way.
+    autonomy: Literal["autonomous", "manual"] = "autonomous"
 
 
 GPU_CHOICES = {"gpu:l40s:1": "1x L40S 48 GB", "gpu:l40:1": "1x L40 48 GB", "gpu:l4:1": "1x L4 24 GB",

@@ -18,6 +18,7 @@ from typing import Any
 
 from ..context import Ctx
 from . import agent_orchestrator as orch
+from . import autonomy
 from .narration import thought_line, todo_line, tool_line
 
 MCP_URL = "http://localhost:3000/mcp"
@@ -30,7 +31,7 @@ Style: act, don't ask. Call tools to make progress, then reply in 2-4 short plai
 happened and what the evidence shows. No JSON, no ids unless the user asks, no markdown tables.
 Rules:
 - Only report numbers that tools returned. Simulator results are measured; VLM/agent diagnoses are hypotheses.
-- Training on the GPU cluster needs the human's approval in the app: propose it, then tell the user to approve.
+{mode_rules}
 - For work with several steps, keep a short TodoWrite checklist (at most 6 items, plain words) and update it as
   steps finish: the user sees it live.
 - Long jobs (collection, analysis, datasets, evaluation) return a job id. Start the job, then END YOUR TURN
@@ -131,7 +132,8 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     cmd = ["claude", "-p", message, "--output-format", "stream-json", "--verbose",
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
            "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
-           "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal)]
+           "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal,
+                                                     mode_rules=autonomy.mode_rules(project))]
     if ctx.settings.claude_code_model:
         cmd += ["--model", ctx.settings.claude_code_model]
     thread = await chat_store.current(ctx, pid, tid)  # each chat thread is its own Claude Code session
