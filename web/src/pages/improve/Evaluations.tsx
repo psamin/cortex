@@ -6,7 +6,7 @@ import { FlaskConical, GitCompare, Play } from "lucide-react";
 import { api, resolveMediaUrl } from "../../api/client";
 import { useCheckpoints, useEvaluations } from "../../api/hooks";
 import type { EpisodeResult, EvaluationWithBranches, ExperimentComparison, LaunchEvaluationRequest, SimulationBranch } from "../../api/types";
-import { Badge, Button, Dialog, EmptyState, ErrorState, Field, Input, Panel, QueryState, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
+import { Badge, Button, Dialog, EmptyState, ErrorState, Field, InfoTip, Input, Panel, QueryState, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
 import { NextActionsPanel } from "../Plan";
 import { ago, cn, evidenceValue, num, pct } from "../../lib/format";
@@ -36,12 +36,12 @@ export function EvaluationsTab() {
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
-        <p className="text-xs text-ink-3">
-          Each evaluation runs three sim branches in parallel local worker processes: baseline, shifted object, and changed lighting. Success rates
-          carry 95% confidence intervals; with small n they are wide.
+        <p className="flex items-center gap-1.5 text-xs text-ink-3">
+          3 sim branches · 95% CI
+          <InfoTip>Each evaluation runs three sim branches in parallel local worker processes: baseline, shifted object, and changed lighting. Success rates carry 95% confidence intervals; with small n they are wide.</InfoTip>
         </p>
         <Button variant="primary" size="sm" onClick={() => setOpen(true)}>
-          <Play className="h-3.5 w-3.5" /> Launch evaluation
+          <Play className="h-3.5 w-3.5" /> Evaluate
         </Button>
       </div>
 
@@ -51,14 +51,14 @@ export function EvaluationsTab() {
             <Panel>
               <EmptyState
                 icon={<FlaskConical className="h-5 w-5" />}
-                title="No evaluations yet — launch one"
+                title="No evaluations yet"
                 action={
                   <Button size="sm" onClick={() => setOpen(true)}>
-                    Launch evaluation
+                    Evaluate
                   </Button>
                 }
               >
-                Evaluate a trained checkpoint, or the scripted expert as an oracle reference ceiling.
+                A checkpoint, or the scripted expert (oracle ceiling).
               </EmptyState>
             </Panel>
           ) : (
@@ -129,7 +129,7 @@ function EvaluationCard({
         <span className="text-sm font-medium">{policyLabel(e.run)}</span>
         {oracle && !/oracle/i.test(e.run.policy_label) && (
           <Badge tone="hypothesis" title="The scripted expert generates the demos. It is a reference ceiling, not a learned policy.">
-            oracle reference · not a learned policy
+            oracle · not learned
           </Badge>
         )}
         <StatusBadge status={e.run.status} />
@@ -140,7 +140,7 @@ function EvaluationCard({
       </header>
       <div className="grid grid-cols-1 gap-2.5 p-3 lg:grid-cols-3">
         {e.branches.length === 0 ? (
-          <p className="text-xs text-ink-3">No branches reported yet.</p>
+          <p className="text-xs text-ink-3">No branches yet.</p>
         ) : (
           e.branches.map((b) => <BranchCard key={b.id} b={b} />)
         )}
@@ -471,12 +471,12 @@ function LaunchDialog({ pid, open, onClose }: { pid: string; open: boolean; onCl
           label="Policy"
           hint={
             policy === "expert"
-              ? "The scripted expert generated your demos. Use it as a ceiling, not as evidence that a policy learned."
+              ? "Oracle ceiling, not evidence a policy learned."
               : undefined
           }
         >
           <Select value={policy} onChange={(e) => setPolicy(e.target.value)}>
-            <option value="expert">Scripted expert (oracle reference)</option>
+            <option value="expert">Scripted expert (oracle)</option>
             {(cks.data ?? []).map((c) => (
               <option key={c.id} value={c.id}>
                 {c.policy_type.toUpperCase()} · step {c.step} · {c.id}
@@ -484,7 +484,7 @@ function LaunchDialog({ pid, open, onClose }: { pid: string; open: boolean; onCl
             ))}
           </Select>
         </Field>
-        {cks.data && cks.data.length === 0 && <p className="-mt-2 text-2xs text-ink-3">No checkpoints yet — train a policy to evaluate it.</p>}
+        {cks.data && cks.data.length === 0 && <p className="-mt-2 text-2xs text-ink-3">No checkpoints yet. Train a policy first.</p>}
         <div className="rounded bg-well p-3 text-xs text-ink-2 border border-line">
           <div className="mb-1 text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Branches (backend defaults)</div>
           <ul className="space-y-0.5">

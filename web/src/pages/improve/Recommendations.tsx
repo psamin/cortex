@@ -5,7 +5,7 @@ import { RefreshCw, ShieldCheck, Sparkles } from "lucide-react";
 import { api } from "../../api/client";
 import { useRecommendations } from "../../api/hooks";
 import type { Evidence, Recommendation, RecommendationStatus } from "../../api/types";
-import { Badge, Button, EmptyState, ErrorState, Input, Panel, SkeletonRows, InlineError } from "../../components/ui";
+import { Badge, Button, EmptyState, ErrorState, InfoTip, Input, Panel, SkeletonRows, InlineError } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
 import { RefChip } from "../../components/refs";
 import { cn, evidenceValue, humanize } from "../../lib/format";
@@ -25,7 +25,7 @@ export function SupportBadge({ support }: { support: Recommendation["support"] }
 const MEASURED_KINDS = new Set<Evidence["kind"]>(["coverage", "evaluation", "quality", "budget"]);
 
 export function EvidenceList({ evidence, pid, compact }: { evidence: Evidence[]; pid: string; compact?: boolean }) {
-  if (evidence.length === 0) return <p className="text-2xs text-ink-4">No evidence attached.</p>;
+  if (evidence.length === 0) return <p className="text-2xs text-ink-4">No evidence.</p>;
   return (
     <ul className={cn("space-y-1", compact && "space-y-0.5")}>
       {evidence.map((ev, i) => {
@@ -100,10 +100,9 @@ export function RecommendationsTab() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="max-w-[560px] text-xs text-ink-3">
-          Ranked by expected gain per demo. <span className="text-pass">Evidence-backed</span> items cite measured coverage,
-          quality, or evaluation data; <span className="text-ink-2 underline decoration-dashed underline-offset-2">hypotheses</span>{" "}
-          rest on model guesses and should be tested first.
+        <p className="flex max-w-[560px] items-center gap-1.5 text-xs text-ink-3">
+          Ranked by expected gain per demo
+          <InfoTip>Evidence-backed items cite measured coverage, quality, or evaluation data; hypotheses rest on model guesses and should be tested first.</InfoTip>
         </p>
         <div className="flex items-center gap-2">
           <label className="flex items-center gap-1.5 whitespace-nowrap text-xs text-ink-3">
@@ -122,8 +121,8 @@ export function RecommendationsTab() {
         <ErrorState error={state.error} onRetry={() => state.refetch()} />
       ) : ranked.length === 0 ? (
         <Panel>
-          <EmptyState title="No open recommendations" action={<Button size="sm" onClick={() => refresh.mutate()}>Generate recommendations</Button>}>
-            Recommendations are computed from plan coverage, episode quality, failure clusters, and evaluation results.
+          <EmptyState title="No recommendations" action={<Button size="sm" onClick={() => refresh.mutate()}>Generate</Button>}>
+            From coverage, quality, failures and evals.
           </EmptyState>
         </Panel>
       ) : (

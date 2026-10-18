@@ -22,7 +22,7 @@ export function TrainingTab() {
           jobs.length === 0 ? (
             <Panel>
               <EmptyState icon={<Cpu className="h-5 w-5" />} title="No training runs yet">
-                Propose a run above. Nothing launches until a named person approves it.
+                Nothing launches without a named approver.
               </EmptyState>
             </Panel>
           ) : (
@@ -54,9 +54,9 @@ function ProposeForm({ pid }: { pid: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ["training", pid] }),
   });
   return (
-    <Panel title="Propose a training run" meta="the proposal shows cost before anything runs">
+    <Panel title="Propose training" meta="estimate shown first">
       {datasets.data && datasets.data.length === 0 ? (
-        <p className="text-xs text-ink-3">Create a dataset version first (Datasets tab).</p>
+        <p className="text-xs text-ink-3">Create a dataset first (Datasets tab).</p>
       ) : (
         <div className="flex flex-wrap items-end gap-3">
           <div className="w-[240px]">
@@ -118,7 +118,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
         <span className="text-2xs text-ink-3">
           on <span className="font-mono">{t.dataset_version_id}</span> · {t.backend.replace("_", " ")}
         </span>
-        <span className="ml-auto text-2xs text-ink-4">updated {ago(t.updated_at)}</span>
+        <span className="ml-auto text-2xs text-ink-4">{ago(t.updated_at)}</span>
       </header>
 
       <div className="grid grid-cols-1 gap-4 p-3.5 lg:grid-cols-[minmax(0,1fr)_260px]">
@@ -140,8 +140,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
           {t.error && <InlineError error={t.error} fallback="Training stopped with an error." />}
           {t.backend === "manual" && t.status !== "proposed" && t.status !== "succeeded" && (
             <div>
-              <div className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Manual training</div>
-              <p className="mt-0.5 text-xs text-ink-3">No GPU backend is configured. Run the command bundle yourself, then register the checkpoint.</p>
+              <div className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Manual · no GPU backend</div>
               <ManualTraining pid={pid} tid={t.id} />
             </div>
           )}
@@ -159,7 +158,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
         {/* estimate + approval gate */}
         <div className={cn("rounded p-3", e.paid ? "bg-caution/5 border border-caution/35" : "bg-well border border-line")}>
           <div className="flex items-center justify-between">
-            <span className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Resource estimate</span>
+            <span className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Estimate</span>
             {e.paid ? <Badge tone="caution">paid</Badge> : <Badge>no charge</Badge>}
           </div>
           <div className="mt-2 flex items-baseline gap-1">
@@ -175,7 +174,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
             {t.status === "proposed" && (
               <div className="space-y-2">
                 <div className="flex items-center gap-1.5 text-2xs font-medium text-servo">
-                  <ShieldAlert className="h-3.5 w-3.5" /> Needs approval before launch
+                  <ShieldAlert className="h-3.5 w-3.5" /> Needs approval
                 </div>
                 <Input value={approver} onChange={(ev) => setApprover(ev.target.value)} placeholder="Approver name" aria-label="Approver name" />
                 <Button
@@ -242,7 +241,7 @@ function LogView({ ids, active }: { ids: (string | null)[]; active: boolean }) {
         <span className="ml-auto num font-mono">{lines.length} lines</span>
       </div>
       <pre ref={ref} className="max-h-56 overflow-auto bg-well px-3.5 py-2 font-mono text-[11px] leading-[1.55] text-ink-2 scroll-thin">
-        {lines.length ? lines.join("\n") : active ? "Waiting for log lines…" : "No log lines received in this session."}
+        {lines.length ? lines.join("\n") : active ? "Waiting for logs…" : "No logs this session."}
       </pre>
     </div>
   );
@@ -255,7 +254,7 @@ function Checkpoints({ pid }: { pid: string }) {
       <QueryState q={q} skeleton={<div className="p-3.5"><SkeletonRows rows={2} /></div>}>
         {(cks) =>
           cks.length === 0 ? (
-            <EmptyState title="No checkpoints yet">They appear here as training runs save them.</EmptyState>
+            <EmptyState title="No checkpoints yet">Saved by training runs.</EmptyState>
           ) : (
             <table className="w-full text-left text-sm">
               <thead className="text-2xs uppercase tracking-[0.05em] text-ink-3">
