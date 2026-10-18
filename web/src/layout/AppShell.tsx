@@ -1,12 +1,13 @@
 import { useEffect, useState } from "react";
 import { Link, Outlet, useMatch } from "react-router-dom";
-import { ChevronRight, Moon, Sun } from "lucide-react";
+import { Moon, Sun } from "lucide-react";
 import { HealthPills } from "../components/HealthPills";
 import { useProjects } from "../api/hooks";
+import { BRAND } from "../lib/brand";
 
 function useTheme() {
   const [theme, setTheme] = useState<"dark" | "light">(
-    () => (document.documentElement.dataset.theme as "dark" | "light") || "dark",
+    () => (document.documentElement.dataset.theme as "dark" | "light") || "light",
   );
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
@@ -19,11 +20,12 @@ function useTheme() {
   return [theme, setTheme] as const;
 }
 
-export function Logo() {
+/** Isometric cube mark. */
+export function Logo({ className = "h-[18px] w-[18px]" }: { className?: string }) {
   return (
-    <svg viewBox="0 0 20 20" className="h-5 w-5" aria-hidden>
-      <rect width="20" height="20" rx="4" className="fill-rail" />
-      <path d="M5 14V6h3l2 4 2-4h3v8" className="stroke-servo" strokeWidth="1.8" fill="none" strokeLinejoin="round" />
+    <svg viewBox="0 0 20 20" className={className} aria-hidden fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinejoin="round">
+      <path d="M10 1.8 17.2 6v8L10 18.2 2.8 14V6z" />
+      <path d="M2.8 6 10 10.2 17.2 6M10 10.2v8" />
     </svg>
   );
 }
@@ -37,33 +39,33 @@ export function AppShell() {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="flex h-11 shrink-0 items-center gap-3 border-b border-line px-3">
-        <Link to="/" className="flex items-center gap-2 rounded px-1 py-0.5 hover:bg-rail">
+      <div className="h-[10px] shrink-0" style={{ background: "var(--bar)" }} aria-hidden />
+      <header className="flex h-14 shrink-0 items-center gap-6 border-b border-line px-5 sm:px-8">
+        <Link to="/" className="flex items-center gap-2.5 text-ink">
           <Logo />
-          <span className="text-sm font-semibold tracking-[-0.01em]">Cortex</span>
+          <span className="text-[15px] font-medium tracking-[-0.01em]">{BRAND}</span>
         </Link>
         {pid && (
-          <div className="flex min-w-0 items-center gap-1.5 text-sm">
-            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-ink-4" />
-            <span className="truncate font-medium text-ink-2">{project?.name ?? <span className="font-mono text-xs">{pid}</span>}</span>
-            {project && (
-              <span className="rounded-sm bg-rail px-1.5 py-px text-2xs font-medium uppercase tracking-wide text-ink-3">
-                {project.mode === "sim" ? "sim" : "real robot"}
-              </span>
-            )}
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="h-4 w-px bg-[var(--line-strong)]" aria-hidden />
+            <span className="truncate text-sm text-ink-2">{project?.name ?? <span className="font-mono text-xs">{pid}</span>}</span>
+            {project && <span className="label hidden sm:inline">{project.mode === "sim" ? "Physics sim" : "Real robot"}</span>}
           </div>
         )}
-        <div className="ml-auto flex items-center gap-2">
+        <nav className="ml-auto flex items-center gap-5">
+          <Link to="/" className="label hidden hover:text-ink md:inline">
+            Projects
+          </Link>
           <HealthPills />
           <button
             type="button"
             onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
-            className="rounded p-1.5 text-ink-3 hover:bg-rail hover:text-ink"
+            className="rounded-full p-1.5 text-ink-3 hover:bg-rail hover:text-ink"
             aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} mode`}
           >
             {theme === "dark" ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
           </button>
-        </div>
+        </nav>
       </header>
       <div className="min-h-0 flex-1">
         <Outlet />

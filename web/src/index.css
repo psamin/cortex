@@ -3,60 +3,65 @@
 @tailwind utilities;
 
 /*
-  Cortex tokens. Graphite workbench + one "servo amber" accent.
-  Provenance is the signature: measured things get solid edges, hypotheses
-  and fallbacks get dashed edges / hatching (see .prov-* below).
+  Studio tokens (brand: see src/lib/brand.ts). Near-white paper, near-black ink, hairline rules,
+  one dark slate-green accent used sparingly (active states, live indicators, the top bar).
+  Provenance is still encoded: measured = solid hairline, hypotheses and fallbacks = dashed.
 */
 :root,
-[data-theme="dark"] {
-  --bench: 17 18 20;      /* canvas */
-  --plate: 23 24 27;      /* panels, +~3% */
-  --rail: 31 33 37;       /* hover / popover */
-  --well: 13 14 16;       /* inputs are inset: darker */
-  --ink: 236 237 239;
-  --ink-2: 178 181 188;
-  --ink-3: 128 132 140;
-  --ink-4: 88 92 100;
-  --servo: 240 164 58;    /* accent */
-  --servo-ink: 24 16 4;   /* text on accent */
-  --pass: 74 196 128;
-  --fault: 236 96 96;
-  --caution: 226 196 84;
-  --line: rgba(255, 255, 255, 0.08);
-  --line-soft: rgba(255, 255, 255, 0.05);
-  --line-strong: rgba(255, 255, 255, 0.16);
-  --hatch: rgba(255, 255, 255, 0.045);
-  /* chart series (validated reference categorical palette, fixed order) */
-  --series-1: #3987e5;
-  --series-2: #d95926;
-  --series-3: #199e70;
-  --series-4: #c98500;
-  color-scheme: dark;
+[data-theme="light"] {
+  --bench: 255 255 255;   /* page */
+  --plate: 255 255 255;   /* panels */
+  --rail: 250 250 250;    /* hover / subtle fill */
+  --well: 250 250 250;    /* inputs */
+  --ink: 17 17 17;
+  --ink-2: 74 74 74;
+  --ink-3: 138 138 138;
+  --ink-4: 181 181 181;
+  --muted: 154 154 154;   /* two-tone headline */
+  --servo: 47 79 70;      /* accent: slate green */
+  --servo-ink: 255 255 255;
+  --pass: 47 111 84;
+  --fault: 179 38 30;
+  --caution: 150 104 0;
+  --line: #e6e6e6;
+  --line-soft: #f0f0f0;
+  --line-strong: #d0d0d0;
+  --hatch: rgba(0, 0, 0, 0.035);
+  --grid: rgba(0, 0, 0, 0.045);
+  --bar: #2f4f46;
+  --series-1: #2f4f46;
+  --series-2: #8a8a8a;
+  --series-3: #6f9a8c;
+  --series-4: #111111;
+  color-scheme: light;
 }
 
-[data-theme="light"] {
-  --bench: 246 246 244;
-  --plate: 255 255 255;
-  --rail: 238 238 235;
-  --well: 241 241 238;
-  --ink: 22 23 26;
-  --ink-2: 70 74 82;
-  --ink-3: 112 116 124;
-  --ink-4: 156 160 166;
-  --servo: 196 120 18;
-  --servo-ink: 255 250 240;
-  --pass: 22 140 78;
-  --fault: 200 52 52;
-  --caution: 160 120 0;
-  --line: rgba(0, 0, 0, 0.09);
-  --line-soft: rgba(0, 0, 0, 0.055);
-  --line-strong: rgba(0, 0, 0, 0.18);
-  --hatch: rgba(0, 0, 0, 0.04);
-  --series-1: #2a78d6;
-  --series-2: #eb6834;
-  --series-3: #1baf7a;
-  --series-4: #eda100;
-  color-scheme: light;
+[data-theme="dark"] {
+  --bench: 14 15 15;
+  --plate: 18 19 19;
+  --rail: 24 26 26;
+  --well: 11 12 12;
+  --ink: 236 236 234;
+  --ink-2: 190 190 188;
+  --ink-3: 138 138 138;
+  --ink-4: 92 94 94;
+  --muted: 112 114 114;
+  --servo: 128 168 154;   /* the slate green, lifted for contrast on dark */
+  --servo-ink: 10 14 13;
+  --pass: 112 176 146;
+  --fault: 232 112 104;
+  --caution: 214 176 84;
+  --line: #242626;
+  --line-soft: #1b1d1d;
+  --line-strong: #353838;
+  --hatch: rgba(255, 255, 255, 0.04);
+  --grid: rgba(255, 255, 255, 0.045);
+  --bar: #2f4f46;
+  --series-1: #80a89a;
+  --series-2: #8a8a8a;
+  --series-3: #c8d8d2;
+  --series-4: #ececea;
+  color-scheme: dark;
 }
 
 html,
@@ -69,7 +74,35 @@ body {
   @apply bg-bench text-ink font-sans text-base;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
-  font-feature-settings: "cv11", "ss01";
+}
+
+/* Mono labels: "— FIG.02  SCENE · TOP CAMERA" */
+.label {
+  @apply font-mono text-2xs uppercase text-ink-3;
+  letter-spacing: 0.18em;
+}
+.label-rule::before {
+  content: "";
+  display: inline-block;
+  width: 40px;
+  height: 1px;
+  margin-right: 12px;
+  vertical-align: middle;
+  background: var(--line-strong);
+}
+.display {
+  font-family: "Newsreader", Georgia, serif;
+  font-weight: 300;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
+}
+/* Technical-drawing ground for viewports */
+.drafting {
+  background-color: rgb(var(--rail));
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 24px 24px;
 }
 
 h1, h2, h3 { text-wrap: balance; }

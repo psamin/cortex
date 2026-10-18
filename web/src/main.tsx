@@ -2,8 +2,6 @@ import React from "react";
 import ReactDOM from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter } from "react-router-dom";
-import "@fontsource-variable/inter";
-import "@fontsource-variable/jetbrains-mono";
 import "./index.css";
 import { App } from "./App";
 import { ApiError } from "./api/client";

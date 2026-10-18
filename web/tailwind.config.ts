@@ -13,6 +13,7 @@ export default {
         rail: v("rail"), // popover / hover surface
         well: v("well"), // inset inputs
         ink: { DEFAULT: v("ink"), 2: v("ink-2"), 3: v("ink-3"), 4: v("ink-4") },
+        muted: v("muted"),
         servo: { DEFAULT: v("servo"), ink: v("servo-ink") }, // the one accent
         pass: v("pass"),
         fault: v("fault"),
@@ -20,8 +21,9 @@ export default {
       },
       borderColor: { line: "var(--line)", "line-soft": "var(--line-soft)", "line-strong": "var(--line-strong)" },
       fontFamily: {
-        sans: ['"Inter Variable"', "ui-sans-serif", "system-ui", "sans-serif"],
-        mono: ['"JetBrains Mono Variable"', "ui-monospace", "SFMono-Regular", "monospace"],
+        sans: ['"IBM Plex Sans"', "ui-sans-serif", "system-ui", "sans-serif"],
+        mono: ['"IBM Plex Mono"', "ui-monospace", "SFMono-Regular", "monospace"],
+        serif: ["Newsreader", "Georgia", "serif"],
       },
       fontSize: {
         "2xs": ["11px", "16px"],
@@ -33,7 +35,7 @@ export default {
         "2xl": ["22px", "28px"],
         "3xl": ["28px", "34px"],
       },
-      borderRadius: { sm: "4px", DEFAULT: "6px", md: "8px", lg: "10px" },
+      borderRadius: { sm: "3px", DEFAULT: "4px", md: "6px", lg: "6px" },
       transitionTimingFunction: { out: "cubic-bezier(0.23, 1, 0.32, 1)" },
     },
   },

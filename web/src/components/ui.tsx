@@ -17,16 +17,16 @@ type BtnVariant = "primary" | "secondary" | "ghost" | "danger";
 type BtnSize = "sm" | "md";
 
 const btnBase =
-  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded font-medium select-none " +
+  "inline-flex items-center justify-center gap-1.5 whitespace-nowrap rounded-full font-medium select-none " +
   "transition-[background-color,color,box-shadow,transform] duration-150 ease-out active:scale-[0.97] " +
   "disabled:opacity-40 disabled:pointer-events-none";
 const btnVariants: Record<BtnVariant, string> = {
-  primary: "bg-servo text-servo-ink hover:bg-servo/90 shadow-[inset_0_1px_0_rgba(255,255,255,.2)]",
-  secondary: "bg-rail text-ink hover:bg-rail/70 shadow-[0_0_0_1px_var(--line)]",
+  primary: "bg-ink text-bench hover:bg-ink/85",
+  secondary: "bg-bench text-ink hover:bg-rail shadow-[inset_0_0_0_1px_var(--line-strong)]",
   ghost: "text-ink-2 hover:text-ink hover:bg-rail",
   danger: "text-fault hover:bg-fault/10 shadow-[0_0_0_1px_rgb(var(--fault)/.35)]",
 };
-const btnSizes: Record<BtnSize, string> = { sm: "h-7 px-2.5 text-xs", md: "h-8 px-3 text-sm" };
+const btnSizes: Record<BtnSize, string> = { sm: "h-7 px-3 text-xs", md: "h-9 px-4 text-sm" };
 
 export const Button = forwardRef<
   HTMLButtonElement,
