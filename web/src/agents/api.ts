@@ -27,6 +27,8 @@ export interface AgentCall {
   project_id?: string | null;
   session_id?: string | null;
   client?: string | null;
+  /** who made the call: mcp (an MCP agent), agent (the studio agent), gui (a person), autopilot */
+  actor?: string;
   status: CallStatus;
   started_at: string;
   ended_at?: string;
@@ -99,6 +101,7 @@ export const agentsApi = {
   login: (email: string, password: string) => req<{ access_token: string | null }>("POST", "/login", { email, password }),
   sessions: () => req<AgentSession[]>("GET", "/sessions"),
   calls: (sid: string) => req<AgentCall[]>("GET", `/sessions/${sid}/calls`),
+  projectCalls: (pid: string) => req<AgentCall[]>("GET", `/projects/${pid}/calls`),
   keys: () => req<AgentKey[]>("GET", "/keys"),
   createKey: (label: string) => req<AgentKey>("POST", "/keys", { label }),
   revokeKey: (id: string) => req<AgentKey>("DELETE", `/keys/${id}`),

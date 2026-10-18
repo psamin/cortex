@@ -204,6 +204,14 @@ async def session_calls(ctx: Ctx, owner: str, session_id: str, limit: int = 500)
     return [await call_view(ctx, r) for r in rows]
 
 
+async def project_calls(ctx: Ctx, project_id: str, limit: int = 300) -> list[dict[str, Any]]:
+    """Every tool call on one project, from any agent (MCP sessions and the studio agent), oldest first.
+    The project is the scope here, like /api/projects/{pid}/audit, so no owner filter."""
+    rows = await ctx.store.list("tool_audit_logs", project_id=project_id)
+    rows = sorted(rows, key=lambda r: r["data"].get("started_at") or r["data"].get("created_at") or "")[-limit:]
+    return [await call_view(ctx, r) for r in rows if r["data"].get("tool")]
+
+
 async def call_view(ctx: Ctx, row: dict[str, Any]) -> dict[str, Any]:
     d = {**row["data"], "status": row["status"]}
     d["image_urls"] = [await ctx.media_url(k) for k in d.get("images") or []]
