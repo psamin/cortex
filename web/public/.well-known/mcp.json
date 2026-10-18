@@ -1898,6 +1898,84 @@
       "needsApproval": false
     },
     {
+      "name": "request_gpu",
+      "mcpTools": [
+        "cortex.request_gpu"
+      ],
+      "description": "Request a GPU on Georgia Tech's Futurama cluster through Slurm (the studio's Request a GPU button), or attach to one already running. It loads the newest trained policies so they can run live. Free for the user, but cluster access is limited: one server at a time, and after a failed request Cortex waits 10 min before asking again. Returns at once; poll cortex_get_gpu_status until available. Needs the GT VPN and FUTURAMA_SSH_HOST on the backend.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "the project this GPU is for, so the request shows in its Agent log"
+          }
+        },
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "get_gpu_status",
+      "mcpTools": [
+        "cortex.get_gpu_status"
+      ],
+      "description": "Whether a Futurama GPU server is live, or how far along a requested one is (queued, installing, loading policies, connecting), and which trained policies it serves.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "the project this GPU is for, so the request shows in its Agent log"
+          }
+        },
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "release_gpu",
+      "mcpTools": [
+        "cortex.release_gpu"
+      ],
+      "description": "Stop the Futurama GPU server and cancel its Slurm job, freeing the GPU. Do this when you are done with live policy runs.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "the project this GPU is for, so the request shows in its Agent log"
+          }
+        },
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "log_decision",
       "mcpTools": [
         "cortex.log_decision"
