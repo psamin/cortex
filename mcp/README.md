@@ -305,8 +305,21 @@ The link's security:
 Notes:
 
 - The Manufact free plan scales to zero, so expect a cold start on the first call. A runner that is polling keeps the server warm.
-- **The deployed `/mcp` endpoint has no auth of its own.** Anyone with the URL can call the `cortex.*` tools through it, and with a runner connected those calls reach your laptop's backend: they can create projects, record simulations and run evaluations. Training still cannot launch without a human approval in the studio. Treat the URL as a secret, and stop the runner when you are done.
+- **Set `CORTEX_REQUIRE_AGENT_KEY=1` on the deployment** (add `--env CORTEX_REQUIRE_AGENT_KEY=1` to the deploy command). Without it the deployed `/mcp` has no auth of its own: anyone with the URL can call the `cortex.*` tools, and with a runner connected those calls reach your laptop's backend (training still needs a human approval). See [Hosted endpoint auth](#hosted-endpoint-auth).
 - The relay keeps its queue in memory. Run the hosted server as a single instance. A call that is in flight when the server restarts fails, and the runner reconnects on its own.
+
+## Hosted endpoint auth
+
+With `CORTEX_REQUIRE_AGENT_KEY=1`, `src/auth.ts` gates `/mcp`: a request without a key gets `401` with `WWW-Authenticate: Bearer realm="cortex"`, and a key is checked once a minute per key with the backend's `verify_agent_key` tool, over the same transport as every tool call (direct, tunnel or runner relay; the backend's remote guard only admits `/api/tools`). Unknown or revoked: `401`; backend unreachable: `503`. Clients send the key they already use for attribution:
+
+```bash
+claude mcp add --transport http cortex https://<slug>.run.mcp-use.com/mcp --header "Authorization: Bearer ck_..."
+```
+
+`X-Cortex-Agent-Key: ck_...` works too. Revoking the key in the studio locks that client out within a minute. `CORTEX_AGENT_KEY` (the server-side fallback key) does **not** open the gate; it only attributes calls from keyless clients when the gate is off. A key never approves training or drives the real arm.
+
+Why not OAuth: mcp-use 2.10.1 can make `/mcp` an OAuth resource server (`oauth:` with WorkOS, Auth0, Clerk, Supabase, Keycloak, Scalekit, Better Auth, Convex, a custom provider, or `oauthProxy` in front of GitHub or Google). Manufact does not provide an identity provider of its own for this, so OAuth would mean registering an app with one of those IdPs, deploying its client secret, and mapping the IdP's user to a Cortex owner in the backend (today owners are the local user or an InsForge Auth user). It also changes the server's generic user type, which every tool callback in `src/tools.ts` sees. The agent-key gate needs none of that and reuses keys the studio already issues and revokes. A custom provider whose token verifier calls `verify_agent_key` (or InsForge Auth) is the natural next step if a client that only speaks OAuth needs to connect.
+
 
 ## Evals
 
@@ -352,13 +365,14 @@ What needs the Manufact dashboard (the user's login; not done here):
 2. **Publish > Checklist > Run checklist** ($0.10 per run; ChatGPT and Claude end-to-end checks need Hobby, $2). Fix any failures and run it again. The free scorecard at manufact.com/mcp-catalog also takes a public URL with no account.
 3. **Testing > Add test suite**, once per entry in `evals/manufact/test-suites.json`. Pick Claude Code (with tool search both on and off), Claude and Codex CLI. Each run costs $1.
 4. **Publish > Submission pack > Generate pack** (Hobby, $5), after the checklist passes. Check that the tool justifications match the annotations above and that the reviewer test cases include the approval gate.
-5. Before listing it anywhere, note that the deployed `/mcp` endpoint has no auth of its own yet (see the deploy notes above).
+5. Before listing it anywhere, deploy with `CORTEX_REQUIRE_AGENT_KEY=1` so the hosted `/mcp` needs an agent key (see Hosted endpoint auth above).
 
 ## Layout
 
 ```
 index.ts                MCPServer setup (name "cortex"): tools, views, prompt, resources, stages, relay
-src/backend.ts          POST /tools/{name} and read-only GETs (runner or direct): headers (incl. agent identity), error mapping, approval handling; trackClients
+src/auth.ts             CORTEX_REQUIRE_AGENT_KEY gate on /mcp (agent key checked with the verify_agent_key tool)
+ /tools/{name} and read-only GETs (runner or direct): headers (incl. agent identity), error mapping, approval handling; trackClients
 src/relay.ts            /relay/poll and /relay/result: the authenticated long-poll link to the local runner
 src/tools.ts            zod input schemas mirroring GET /api/tools, descriptions, annotations
 src/views.ts            MCP Apps view tools (collection, evaluation, approval); views/<name>/view.tsx

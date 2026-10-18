@@ -1,6 +1,6 @@
 import type { CallToolResult, MCPServer, ToolAnnotations } from "mcp-use";
 import { z } from "zod";
-import { callTool, STUDIO_URL } from "./backend.js";
+import { callTool, identityOf, STUDIO_URL } from "./backend.js";
 
 // MCP Apps views (#119): Cortex results rendered inside the agent's chat (Claude, ChatGPT, any MCP
 // Apps host). Each model-visible `cortex.show_*` tool is bound to a view under views/<name>/view.tsx;
@@ -15,8 +15,8 @@ type Failure = { isError: true; content: CallToolResult["content"] };
 const text = (s: string) => [{ type: "text" as const, text: s }];
 
 /** Backend JSON for a registry tool, or an MCP error result to return as-is. */
-async function backend(tool: string, args: Json, signal?: AbortSignal): Promise<Json | Failure> {
-  const res = await callTool(tool, args, signal);
+async function backend(tool: string, args: Json, ctx: Parameters<typeof identityOf>[0] & { signal?: AbortSignal }): Promise<Json | Failure> {
+  const res = await callTool(tool, args, ctx.signal, identityOf(ctx));
   if (res.isError || !res.structuredContent) return { isError: true, content: res.content ?? text(`cortex.${tool} failed`) };
   const data = res.structuredContent as Json;
   // A refused approval comes back as a non-error "ask the human" result; for a view it is an error.
@@ -133,7 +133,7 @@ export function registerViews(server: MCPServer) {
       view: { name: "collection", description: "Live MuJoCo collection viewport", prefersBorder: true },
     },
     async (input, ctx) => {
-      const d = await backend("collection_snapshot", input, ctx.signal);
+      const d = await backend("collection_snapshot", input, ctx);
       if (isResult(d)) return d;
       const { out, frame, age } = collection(d);
       return {
@@ -155,7 +155,7 @@ export function registerViews(server: MCPServer) {
       visibility: "app",
     },
     async (input, ctx) => {
-      const d = await backend("collection_snapshot", input, ctx.signal);
+      const d = await backend("collection_snapshot", input, ctx);
       if (isResult(d)) return d;
       const { out, frame, age } = collection(d);
       return {
@@ -178,7 +178,7 @@ export function registerViews(server: MCPServer) {
       view: { name: "evaluation", description: "Evaluation results per condition", prefersBorder: true },
     },
     async (input, ctx) => {
-      const d = await backend("evaluation_report", input, ctx.signal);
+      const d = await backend("evaluation_report", input, ctx);
       if (isResult(d)) return d;
       const out = evaluationOut.parse({ ...d, studio_url: `${STUDIO_URL}/p/${d.project_id}/improve` });
       return { content: text(String(d.summary)), structuredContent: out };
@@ -196,7 +196,7 @@ export function registerViews(server: MCPServer) {
       visibility: "app",
     },
     async (input, ctx) => {
-      const d = await backend("evaluation_report", input, ctx.signal);
+      const d = await backend("evaluation_report", input, ctx);
       if (isResult(d)) return d;
       return {
         content: text(String(d.summary)),
@@ -220,7 +220,7 @@ export function registerViews(server: MCPServer) {
       view: { name: "approval", description: "Training approval card (human click only)", prefersBorder: true },
     },
     async (input, ctx) => {
-      const d = await backend("review_training_job", input, ctx.signal);
+      const d = await backend("review_training_job", input, ctx);
       if (isResult(d)) return d;
       const nonce = d.view_approval_nonce as string | undefined;
       const out = reviewOut.parse({ ...d, studio_url: `${STUDIO_URL}/p/${d.project_id}/improve` });
@@ -247,7 +247,7 @@ export function registerViews(server: MCPServer) {
       visibility: "app",
     },
     async (input, ctx) => {
-      const d = await backend("approve_training_from_view", input, ctx.signal);
+      const d = await backend("approve_training_from_view", input, ctx);
       if (isResult(d)) return d;
       return {
         content: text(String(d.summary)),

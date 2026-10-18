@@ -1886,6 +1886,17 @@
       "needsApproval": false
     },
     {
+      "name": "verify_agent_key",
+      "mcpTools": [],
+      "description": "For the hosted MCP server's /mcp gate: is the X-Cortex-Agent-Key on this call active? Goes through /api/tools so it works over a tunnel or the runner relay.",
+      "inputSchema": {
+        "properties": {},
+        "type": "object"
+      },
+      "agentCallable": false,
+      "needsApproval": false
+    },
+    {
       "name": "get_session_link",
       "mcpTools": [
         "cortex.get_session_link"

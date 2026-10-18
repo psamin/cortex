@@ -15,6 +15,10 @@ const MCP_KEY = process.env.CORTEX_MCP_KEY;
 // Agent key (ck_...) from the studio's Settings -> Agents: ties these calls to a person (#105).
 // A client can also send its own with `--header "X-Cortex-Agent-Key: ck_..."` (or `Authorization: Bearer ck_...`).
 const AGENT_KEY = process.env.CORTEX_AGENT_KEY;
+// Same check as src/auth.ts. When the hosted gate is on, a request that sent no key must not be
+// attributed to the operator's CORTEX_AGENT_KEY (#152 finding 6). auth.ts imports this module, so
+// the env check is repeated here instead of imported.
+const REQUIRE_AGENT_KEY = /^(1|true|yes)$/i.test(process.env.CORTEX_REQUIRE_AGENT_KEY ?? "");
 
 /** Who is calling, forwarded on every backend call so the studio can show the agent's session live. */
 export type Identity = { sessionId?: string; client?: string; agentKey?: string };
@@ -74,7 +78,8 @@ type ToolCtx = {
 export function identityOf(ctx: ToolCtx): Identity {
   const header = (n: string) => ctx.request?.header(n)?.trim() || undefined;
   const bearer = header("authorization")?.match(/^Bearer\s+(ck_\S+)$/i)?.[1];
-  const agentKey = header("x-cortex-agent-key") ?? bearer ?? AGENT_KEY;
+  const presented = header("x-cortex-agent-key") ?? bearer;
+  const agentKey = presented ?? (REQUIRE_AGENT_KEY ? undefined : AGENT_KEY);
   let sessionId = header("mcp-session-id");
   const client = fmt(ctx.client.info()) ?? (sessionId ? clients.get(sessionId) : undefined);
   // 2026-era clients have no session at all: group their calls per client (and key) instead.
@@ -196,6 +201,22 @@ async function send(tool: string, args: Json, signal?: AbortSignal, who: Identit
       ),
     };
   }
+}
+
+/** Raw status and JSON body of a registry tool call, over the same transport as callTool (runner or direct). */
+export async function toolStatus(tool: string, args: Json, who: Identity = {}): Promise<{ status: number; data: Json } | { error: string }> {
+  const sent = await send(tool, args, undefined, who);
+  if ("error" in sent) {
+    const first = sent.error.content?.[0];
+    return { error: first && first.type === "text" ? first.text : `cortex.${tool} could not reach the backend` };
+  }
+  let data: unknown;
+  try {
+    data = sent.raw ? JSON.parse(sent.raw) : {};
+  } catch {
+    data = {};
+  }
+  return { status: sent.status, data: (data && typeof data === "object" && !Array.isArray(data) ? data : {}) as Json };
 }
 
 /** POST /tools/{tool} (directly or through the runner) and turn the response into an MCP tool result. */

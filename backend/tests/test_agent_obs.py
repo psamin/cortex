@@ -218,3 +218,16 @@ def test_insforge_auth_sign_in_and_verify():
         asyncio.run(insforge_auth.current_user(s, "bad", transport=t))
     with pytest.raises(insforge_auth.SignInRequired):
         asyncio.run(insforge_auth.current_user(s, None, transport=t))
+
+
+def test_verify_agent_key_tool_works_through_the_tools_path(client):
+    """The hosted /mcp gate (#149) checks keys via /api/tools, the only route a tunnel or the runner relay reaches."""
+    k = client.post("/api/agents/keys", json={}).json()
+    ok = client.post("/api/tools/verify_agent_key", json={}, headers=agent(k["key"]))
+    assert ok.status_code == 200 and ok.json()["valid"] and ok.json()["key_id"] == k["id"]
+    none = client.post("/api/tools/verify_agent_key", json={}, headers=agent())
+    assert none.status_code == 403 and none.json()["code"] == "agent_key_invalid"
+    client.delete(f"/api/agents/keys/{k['id']}")
+    for key in (k["key"], "ck_nope"):
+        r = client.post("/api/tools/verify_agent_key", json={}, headers=agent(key))
+        assert r.status_code == 403 and r.json()["code"] == "agent_key_invalid"

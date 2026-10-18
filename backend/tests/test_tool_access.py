@@ -45,6 +45,7 @@ def _args(name, pid):
             "robot_start_episode": {"project_id": pid},
             "robot_act": {"session_id": "rs_x", "tool": "observe_scene"},
             "robot_finish_episode": {"session_id": "rs_x", "believes_success": True},
+            "verify_agent_key": {},
             "get_diagnosis_inputs": {"project_id": pid},
             "submit_failure_hypotheses": {"project_id": pid, "analysis_id": "an_x", "route": "mcp_agent", "model": "m",
                                           "answers": [{"ref_id": "x", "error": "e"}]}}[name]
@@ -52,7 +53,8 @@ def _args(name, pid):
 
 def test_the_human_only_set_is_what_the_policy_says():
     assert HUMAN_ONLY == ["approve_training_from_view", "get_diagnosis_inputs", "launch_training_job", "robot_act",
-                          "robot_finish_episode", "robot_start_episode", "submit_failure_hypotheses"]
+                          "robot_finish_episode", "robot_start_episode", "submit_failure_hypotheses",
+                          "verify_agent_key"]
     assert not {s["function"]["name"] for s in agent.tool_specs()} & set(HUMAN_ONLY)
 
 

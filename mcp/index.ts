@@ -1,4 +1,5 @@
 import { MCPServer } from "mcp-use";
+import { requireAgentKey } from "./src/auth.js";
 import { trackClients } from "./src/backend.js";
 import { intakeRequestState } from "./src/intake.js";
 import { registerPrompts } from "./src/prompts.js";
@@ -67,6 +68,7 @@ const server = new MCPServer({
   ].join("\n"),
 });
 
+requireAgentKey(server); // CORTEX_REQUIRE_AGENT_KEY=1: hosted /mcp needs an active agent key (#149)
 trackClients(server); // remember each connection's clientInfo for the studio's Agents view
 registerTools(server);
 registerViews(server); // MCP Apps views rendered in the agent's chat (#119)
