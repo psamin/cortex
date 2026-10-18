@@ -19,7 +19,8 @@ React studio; agents use the same project through an MCP server.
 
 ## Quick start
 
-Requirements: macOS or Linux, [uv](https://docs.astral.sh/uv/), Node 22, pnpm.
+Requirements: macOS, Linux or Windows, [uv](https://docs.astral.sh/uv/), Node 22, pnpm. On Windows, run
+`scripts/dev.sh` from Git Bash, or start the backend, studio and MCP server separately (see Commands).
 
 ```bash
 cp .env.example .env          # optional: every provider falls back to a local equivalent

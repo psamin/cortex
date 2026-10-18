@@ -85,9 +85,8 @@ Claude Code session act on the project live.
 | [simulation_runner](backend/cortex/services/simulation_runner.py) | Parallel evaluation branches with explicit seeds, Wilson 95% intervals |
 | [experiment_comparison](backend/cortex/services/experiment_comparison.py) | Branch-by-branch deltas with two-proportion p-values |
 | [autopilot](backend/cortex/services/autopilot.py) | Explicit, resumable state machine: TASK_REQUESTED → SCENARIO_PLANNED → AGENT_COLLECTING → EPISODES_VALIDATED → DATASET_VERSIONED → TRAINING_REQUESTED → POLICY_TRAINED → POLICY_EVALUATED → FAILURES_ANALYZED → NEXT_EXPERIMENT_SELECTED → … The weakest measured branch becomes the next targeted Astra collection |
-| [hardware/so101_bridge](backend/cortex/hardware/so101_bridge.py) | Local, supervised-only SO-101 adapter behind a safety controller (limits, velocity, workspace, watchdog, e-stop and operator gate). Not reachable from the API or MCP |
+| [hardware/](backend/cortex/hardware/) | Local, supervised-only SO-101 driver, setup, calibration and arm worker behind a safety controller (limits, velocity, workspace with the table as a floor, watchdog thread, e-stop, deadman). The studio's Robot page reaches it through `/api/hardware/*`, which only answers to localhost and needs `CORTEX_ENABLE_HARDWARE=1`. Not exposed as MCP tools |
 | [agent](backend/cortex/services/agent.py) | Studio chat: OpenRouter tool calling over the registry, or a deterministic intent planner |
-| [graph_service](backend/cortex/services/graph_service.py) | Lineage graph (episodes → datasets → training → checkpoints → evaluations → recommendations) |
 | [store/](backend/cortex/store/) | `Store`/`BlobStore` interfaces; InsForge REST adapters and SQLite/disk fallbacks |
 | [sim/](backend/cortex/sim/) | EnvHub env wrapper (conditions, success, reward), scripted IK expert, policy loaders |
 | [workers/](backend/cortex/workers/) | Subprocess entry points: `sim_worker` (record/evaluate), `dataset_builder` |
@@ -153,13 +152,15 @@ augmentation never inflates the demo count. Each version writes `meta/cortex_lin
 - **Agent limits.** Agents cannot launch training themselves. `launch_training_job` is not
   agent-callable, and MCP calls without the operator token get an "approve in the studio" answer.
 - **Real-robot mode.** Real-robot recording and Autopilot are refused for remote callers. Hardware
-  control is designed to stay in an opt-in local LeRobot bridge; that bridge is not part of this build.
+  control lives in the local [hardware/](backend/cortex/hardware/) module: off unless
+  `CORTEX_ENABLE_HARDWARE=1`, reachable only from localhost, and never through MCP.
 - **Tunnel restriction.** When the backend is tunneled for a hosted MCP server, remote requests can
   only reach `/api/tools` with `CORTEX_MCP_KEY`. Every other route answers only to localhost.
 
 ## Data model
 
-Migrations: [001_init.sql](backend/migrations/001_init.sql), [002_autopilot.sql](backend/migrations/002_autopilot.sql).
+Migrations: [001_init.sql](backend/migrations/001_init.sql), [002_autopilot.sql](backend/migrations/002_autopilot.sql),
+[003_agent_demos.sql](backend/migrations/003_agent_demos.sql), [004_enable_rls.sql](backend/migrations/004_enable_rls.sql).
 
 - **Tables:** `users`, `projects`, `project_members` (per-project roles and approval rights),
   `robot_configs`, `episodes`, `episode_artifacts`, `dataset_versions`, `dataset_episode_links`,
