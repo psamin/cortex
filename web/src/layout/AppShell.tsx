@@ -164,6 +164,9 @@ export function AppShell() {
               {engine.data.label}
             </span>
           )}
+          <Link to="/studio/agents" className="inline-flex h-7 items-center rounded-full px-2.5 text-[13px] text-ink-2 hover:text-ink">
+            Agents
+          </Link>
           <HealthSummary />
           {pid && <DetailsMenu pid={pid} />}
           {!onStudioHome && (
