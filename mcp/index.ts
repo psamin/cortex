@@ -1,5 +1,4 @@
 import { MCPServer } from "mcp-use";
-import { trackClients } from "./src/backend.js";
 import { registerPrompts } from "./src/prompts.js";
 import { registerTools } from "./src/tools.js";
 
@@ -43,7 +42,6 @@ const server = new MCPServer({
   ].join("\n"),
 });
 
-trackClients(server); // remember each connection's clientInfo for the studio's Agents view
 registerTools(server);
 registerPrompts(server);
 
