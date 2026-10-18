@@ -37,7 +37,8 @@ LOCK = threading.Lock()  # one GPU, one stream at a time
 job_dir, data_root, port = Path(sys.argv[1]), Path(sys.argv[2]), int(sys.argv[3])
 POLICIES = {}
 for task, stage in STAGE.items():
-    cks = sorted((job_dir / "output" / task).glob("*_[0-9]*"), key=lambda p: p.stat().st_mtime)
+    cks = sorted((c for c in (job_dir / "output" / task).glob("*_[0-9]*") if (c / "config.json").exists()),
+                 key=lambda p: p.stat().st_mtime)  # skip half-copied checkpoints
     if not cks or not (data_root / stage).exists():
         continue
     ck = cks[-1]
