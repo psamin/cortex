@@ -157,13 +157,13 @@ Arguments:
 
 Augmentation:
 
-  - `type` ("brightness" | "contrast" | "color_temperature" | "shadow", required)
+  - `type` ("brightness" | "contrast" | "color_temperature" | "shadow" | "hue_saturation" | "blur" | "noise" | "camera_jitter", required)
   - `params` (dict[string, number], required)
 
 JSON schema:
 
 ```json
-{"$defs":{"Augmentation":{"properties":{"type":{"enum":["brightness","contrast","color_temperature","shadow"],"type":"string"},"params":{"additionalProperties":{"type":"number"},"type":"object"}},"required":["type","params"],"type":"object"}},"properties":{"project_id":{"type":"string"},"augmentation_preset":{"anyOf":[{"const":"lighting_robustness","type":"string"},{"type":"null"}],"default":null,"description":"brightness x2, color temperature and shadow views of each train episode"},"augmentations":{"default":[],"items":{"$ref":"#/$defs/Augmentation"},"type":"array"},"eval_fraction":{"default":0.2,"type":"number"},"name":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null},"wait_s":{"default":0,"maximum":600,"minimum":0,"type":"integer"}},"required":["project_id"],"type":"object"}
+{"$defs":{"Augmentation":{"properties":{"type":{"enum":["brightness","contrast","color_temperature","shadow","hue_saturation","blur","noise","camera_jitter"],"type":"string"},"params":{"additionalProperties":{"type":"number"},"type":"object"}},"required":["type","params"],"type":"object"}},"properties":{"project_id":{"type":"string"},"augmentation_preset":{"anyOf":[{"const":"lighting_robustness","type":"string"},{"type":"null"}],"default":null,"description":"brightness x2, color temperature and shadow views of each train episode"},"augmentations":{"default":[],"items":{"$ref":"#/$defs/Augmentation"},"type":"array"},"eval_fraction":{"default":0.2,"type":"number"},"name":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null},"wait_s":{"default":0,"maximum":600,"minimum":0,"type":"integer"}},"required":["project_id"],"type":"object"}
 ```
 
 ### propose_training_job

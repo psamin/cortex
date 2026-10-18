@@ -297,7 +297,11 @@
                   "brightness",
                   "contrast",
                   "color_temperature",
-                  "shadow"
+                  "shadow",
+                  "hue_saturation",
+                  "blur",
+                  "noise",
+                  "camera_jitter"
                 ],
                 "type": "string"
               },
