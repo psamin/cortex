@@ -42,6 +42,7 @@ from .sim_worker import Preview, emit, failure_mode, write_mp4
 STATS_EVERY = 15  # control steps between sim_stats events
 LIVE_EVERY_S = 0.5  # live.jpg throttle
 SETTLE_STEPS = 10
+UNSTABLE_Z, UNSTABLE_DIST = 0.5, 1.0  # metres: the object left the workspace, i.e. the physics blew up
 PILOT_SEEDS, TRAIN_SEEDS, HELDOUT_SEEDS, DEMO_SEEDS = 10_000, 100_000, 500_000, 700_000
 
 
@@ -147,7 +148,10 @@ class Runner:
         ep = {"seed": seed, "success": bool(success), "steps": steps, "max_cube_z": env.max_cube_z,
               "final_cube_box_dist": dist,
               "failure_mode": failure_mode(success, env.max_cube_z, steps, self.max_steps, dist)}
-        ep["return"] = round(episode_return(ep, self.sb.reward_weights)[0], 4)
+        if env.max_cube_z > UNSTABLE_Z or dist > UNSTABLE_DIST:  # never reward a physics blow-up as a "lift"
+            ep.update({"success": False, "failure_mode": "sim_unstable", "return": 0.0})
+        else:
+            ep["return"] = round(episode_return(ep, self.sb.reward_weights)[0], 4)
         emit(type="rl_episode", sandbox_id=self.sb.id, phase=self.phase, **ep)
         if record:
             ep["buf"], ep["video"] = buf, video

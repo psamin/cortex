@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 
 from ..models import Condition, new_id, now
 
-FailureMode = Literal["grasp_failed", "dropped_before_target", "released_outside_target", "other"]
+FailureMode = Literal["grasp_failed", "dropped_before_target", "released_outside_target", "sim_unstable", "other"]
 
 
 class StartCluster(BaseModel):
