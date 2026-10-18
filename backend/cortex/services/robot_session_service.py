@@ -74,7 +74,8 @@ def _phase(tool: str, args: dict[str, Any], holding: bool) -> str:
 
 async def start(ctx: Ctx, project: Project, cube_region: str | None = None, lighting: str | None = None,
                 seed: int | None = None, collection_id: str | None = None, agent_label: str = "claude-code",
-                actor: str = "mcp") -> dict[str, Any]:
+                actor: str = "mcp", scenario: Scenario | None = None, attempt_index: int | None = None
+                ) -> dict[str, Any]:
     if project.mode != "sim":
         raise PermissionError("Physical robots need the local hardware adapter with an operator present.")
     await _reap_idle(ctx)
@@ -88,12 +89,13 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
         await ctx.repo.save("agent_collections", col)
     prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
     seed = seed if seed is not None else acs.AGENT_SEED_BASE + len(prior)
-    if cube_region or lighting:
+    if scenario is None and (cube_region or lighting):
         cond = Condition(cube_region=cube_region or "center", lighting=lighting or "normal")  # type: ignore[arg-type]
         scenario = Scenario(cube_region=cond.cube_region, lighting=cond.lighting)
-    else:
+    elif scenario is None:
         scenario = acs.plan_scenarios(project, StartAgentCollectionRequest(num_demos=1, diversity="medium"), seed)[0]
-    attempt = AgentAttempt(project_id=project.id, collection_id=col.id, index=col.totals.get("attempts", 0),
+    index = attempt_index if attempt_index is not None else col.totals.get("attempts", 0)
+    attempt = AgentAttempt(project_id=project.id, collection_id=col.id, index=index,
                            collector="agent", seed=seed, scenario=scenario, status="failed", mode="camera",
                            provider=col.provider, model=col.model)
     proc = await asyncio.create_subprocess_exec(
@@ -154,8 +156,9 @@ async def finish(ctx: Ctx, session_id: str, believes_success: bool, summary: str
     blur_ref = await dataset_blur_reference(ctx, s.project_id)
     project = await ctx.repo.get("projects", s.project_id, Project)
     await acs._record_attempt(ctx, project, s.collection, a, ev, blur_ref)  # type: ignore[arg-type]
-    s.collection.status = "succeeded"
-    await ctx.repo.save("agent_collections", s.collection)
+    if s.collection.reason == "interactive agent session":  # batch collections are closed by their runner
+        s.collection.status = "succeeded"
+        await ctx.repo.save("agent_collections", s.collection)
     await close(session_id)
     await ctx.audit(actor, "robot_finish_episode", s.project_id, {"session_id": session_id}, "ok",
                     f"{'success' if res['success'] else 'failure'} (simulator); agent claimed {believes_success}")

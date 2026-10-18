@@ -17,7 +17,7 @@ def client(tmp_path_factory):
     data = tmp_path_factory.mktemp("cortex-data")
     with FakePlanner(sabotage={1}) as fp:
         env = {"DATA_DIR": str(data), "OPENROUTER_API_KEY": "test-key", "CORTEX_PLANNER_BASE_URL": fp.url,
-               "INSFORGE_BASE_URL": "", "INSFORGE_API_KEY": ""}
+               "INSFORGE_BASE_URL": "", "INSFORGE_API_KEY": "", "AGENT_ENGINE": "model"}
         old = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
         from cortex.config import settings
@@ -125,7 +125,7 @@ def test_selfhosted_qwen_route_converts_norm1000_points(tmp_path):
     with FakePlanner(point_format="norm1000", model_id=model) as fp:
         env = {"DATA_DIR": str(tmp_path), "PLANNER_BASE_URL": fp.base, "PLANNER_API_KEY": "local",
                "OPENROUTER_API_KEY": "", "INSFORGE_BASE_URL": "", "INSFORGE_API_KEY": "",
-               "CORTEX_PLANNER_BASE_URL": ""}
+               "CORTEX_PLANNER_BASE_URL": "", "AGENT_ENGINE": "model"}
         old = {k: os.environ.get(k) for k in env}
         os.environ.update(env)
         from cortex.config import settings

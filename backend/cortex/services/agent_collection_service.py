@@ -14,6 +14,7 @@ standing model budget; going beyond it needs a human to raise the budget.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import random
 from typing import Any
@@ -104,6 +105,12 @@ async def openrouter_balance_problem(ctx: Ctx) -> str | None:
 
 
 async def planner_status(ctx: Ctx) -> dict[str, Any]:
+    from . import claude_code_agent as cc
+
+    if ctx.settings.agent_engine in ("auto", "claude_code") and cc.available() is None and await cc.mcp_up():
+        return {"available": True, "model": ctx.settings.claude_code_model or "claude-code",
+                "provider": "claude_code", "route": "Claude Code (your agent) via MCP", "point_format": "pixels",
+                "pricing_per_m_tokens": "your Claude Code subscription (not charged by Cortex)"}
     p = resolve_planner(ctx)
     if not p:
         reason = (f"InsForge Model Gateway: {ctx.gateway_error}" if ctx.gateway_error else
@@ -169,6 +176,8 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                               "hardware adapter with an operator present.")
     # the scripted oracle always reads simulator object poses, so it is privileged by construction
     mode = "privileged" if req.collector == "oracle" else (req.mode or project.autopilot.planning_mode)
+    if req.collector == "agent" and await use_claude_code(ctx, req):
+        return await _start_claude_code_collection(ctx, project, req, actor)
     planner = resolve_planner(ctx) if req.collector == "agent" else None
     if req.collector == "agent" and planner is None:
         raise PlannerUnavailable("No agent planner is configured (self-hosted endpoint or InsForge/OpenRouter key). "
@@ -259,6 +268,65 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
 
 
 ACTOR_SYSTEM = "system"
+
+
+async def use_claude_code(ctx: Ctx, req: StartAgentCollectionRequest) -> bool:
+    from . import claude_code_agent as cc
+
+    if req.planner == "model":
+        return False
+    ok = cc.available() is None and await cc.mcp_up()
+    if req.planner == "claude_code" and not ok:
+        raise PlannerUnavailable("Claude Code planner requested but the `claude` CLI or the Cortex MCP server "
+                                 "(http://localhost:3000/mcp) is not available.")
+    return ok and ctx.settings.agent_engine in ("auto", "claude_code")
+
+
+async def _start_claude_code_collection(ctx: Ctx, project: Project, req: StartAgentCollectionRequest,
+                                        actor: str) -> AgentCollection:
+    """The user's Claude Code plans every attempt (one headless run per attempt)."""
+    from . import claude_code_collector as ccc
+
+    prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
+    base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)
+    scenarios = plan_scenarios(project, req, base_seed)
+    model = ctx.settings.claude_code_model or "claude-code"
+    col = AgentCollection(project_id=project.id, collector="agent", request=req, mode="camera",
+                          provider="Claude Code (your agent) via MCP", model=model,
+                          scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
+                          reason=req.reason or "agent collection", totals=_empty_totals(0))
+    await ctx.repo.save("agent_collections", col)
+    await ctx.audit(actor, "start_agent_collection", project.id,
+                    {**req.model_dump(mode="json"), "planner": "claude_code"}, "ok",
+                    f"{col.id}: {req.num_demos} attempts planned by Claude Code")
+
+    async def run(job: Job) -> str:
+        col.status, col.job_id = "running", job.id
+        await _save(ctx, col)
+        try:
+            for i, sc in enumerate(scenarios):
+                ctx.jobs.update(job, message=f"Claude Code attempt {i + 1}/{len(scenarios)}",
+                                progress=i / len(scenarios))
+                out = await ccc.run_attempt(ctx, project, col, sc, base_seed + i, i, ctx.settings.claude_code_model)
+                fresh = await get_collection(ctx, col.id)  # totals were updated by the session finish
+                fresh.totals["model_calls"] = fresh.totals.get("model_calls", 0) + int(out.get("turns") or 0)
+                col.totals = fresh.totals
+                await _save(ctx, col)
+        except BaseException as e:  # stopped by the user or an attempt crashed: never leave it "running"
+            col.status = "cancelled" if isinstance(e, asyncio.CancelledError) else "failed"
+            col.error = None if col.status == "cancelled" else f"{type(e).__name__}: {e}"
+            await _save(ctx, col)
+            raise
+        col.status = "succeeded"
+        await _save(ctx, col)
+        await ctx.audit(ACTOR_SYSTEM, "agent_collection_finished", project.id, {"collection_id": col.id}, "ok",
+                        _summary(col))
+        return col.id
+
+    job = ctx.jobs.submit("agent_collect", project.id, run, idempotency_key=f"collect:{col.id}")
+    col.job_id = job.id
+    await _save(ctx, col)
+    return col
 
 
 def attempt_key(a: AgentAttempt, name: str = "") -> str:
