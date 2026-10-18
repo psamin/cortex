@@ -941,6 +941,27 @@ mcp_views.register(TOOLS, Tool)
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
 
 
+# ------------------------------------------------------------------ agent observability (#105)
+class NoArgs(BaseModel):
+    pass
+
+
+async def t_session_link(ctx, a, actor):
+    from .agent_obs import session_link
+
+    url, sid = session_link(ctx)
+    what = f"session {sid}" if sid else "your agent sessions (this call carried no MCP session id)"
+    return {"summary": f"Watch {what} live in the Cortex studio: {url}", "ref_ids": [sid] if sid else [],
+            "url": url, "session_id": sid}
+
+
+TOOLS.update({t.name: t for t in [
+    Tool("get_session_link", "The Cortex studio URL where your human can watch this agent session live (every tool "
+         "call, its arguments, results, images and approvals). Share it when you start working.", NoArgs,
+         t_session_link),
+]})
+
+
 class NotAgentCallable(PermissionError):
     """The studio agent asked for a tool reserved for humans or MCP clients. No approval card fixes it."""
 
@@ -948,22 +969,16 @@ class NotAgentCallable(PermissionError):
     approval_required = False
 
 
-async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str) -> dict[str, Any]:
+async def call_tool(ctx: Ctx, name: str, raw_args: dict[str, Any], actor: str, caller: Any = None) -> dict[str, Any]:
+    """Every call writes a start row and an end row (agent_obs.observe); `caller` is the agent session, if any."""
+    from . import agent_obs
+
     tool = TOOLS.get(name)
     if tool is None:
         raise KeyError(f"unknown tool {name}")
-    pid = raw_args.get("project_id")
     if actor == "agent" and not tool.agent_callable:
-        await ctx.audit(actor, name, pid, raw_args, "refused", "not callable by the studio agent")
+        await ctx.audit(actor, name, raw_args.get("project_id"), raw_args, "refused", "not callable by the studio agent")
         raise NotAgentCallable(f"{name} is not available to the studio agent; a human runs it from the studio")
-    args = tool.args.model_validate(raw_args)
-    try:
-        result = await tool.fn(ctx, args, actor)
-    except Exception as e:
-        await ctx.audit(actor, name, pid, raw_args, "error", f"{type(e).__name__}: {e}"[:300])
-        raise
-    if name in ("get_project_state", "list_episodes", "get_failure_clusters", "get_next_actions", "get_job",
-                "compare_experiments", "get_intake_status", "capture_frame", "get_policy_weaknesses",
-                "get_rl_sandbox_status"):
-        await ctx.audit(actor, name, pid, raw_args, "ok", result.get("summary", "")[:300])
-    return result
+    # validated inside observe, so an agent's invalid arguments show up in its timeline too
+    return await agent_obs.observe(ctx, caller, name, raw_args, actor,
+                                   lambda: tool.fn(ctx, tool.args.model_validate(raw_args), actor))

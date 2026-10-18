@@ -86,8 +86,10 @@ class InsForgeStore(Store):
         return rows[0] if rows else None
 
     async def list(self, table: str, project_id: str | None = None,
-                   status: str | None = None) -> list[dict[str, Any]]:
+                   status: str | None = None, where: dict[str, str] | None = None) -> list[dict[str, Any]]:
         params: dict[str, Any] = {"order": "created_at.asc,id.asc", "limit": PAGE}
+        for col, val in (where or {}).items():
+            params[col] = f"eq.{val}"
         if project_id is not None:
             params["project_id"] = f"eq.{project_id}"
         if status is not None:

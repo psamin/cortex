@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import mimetypes
 import time
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,9 @@ from .store.base import BlobStore, Repo, Store
 from .store.local import LocalBlobStore, SqliteStore
 
 log = logging.getLogger(__name__)
+
+# The agent tool call in flight on this task (set by agent_obs around call_tool): {id, tool, session_id, open, ...}.
+CURRENT_CALL: ContextVar[dict[str, Any] | None] = ContextVar("cortex_current_call", default=None)
 
 
 @dataclass
@@ -92,11 +96,19 @@ class Ctx:
     # ------------------------------------------------------------ audit
     async def audit(self, actor: str, tool: str, project_id: str | None, args: dict[str, Any],
                     status: str, summary: str, approved: bool | None = None) -> None:
+        call = CURRENT_CALL.get()
+        if call and call.get("open"):
+            # A service's own audit during a tool call in flight: fold it into that call's row
+            # (written at the call's end) instead of extra rows for the same action.
+            call.setdefault("domain", []).append(
+                {"tool": tool, "status": status, "summary": summary, "approved": approved})
+            return
         row_id = new_id("aud")
+        session_id = call.get("session_id") if call else None
         await self.store.put("tool_audit_logs", {
-            "id": row_id, "project_id": project_id, "status": status,
+            "id": row_id, "project_id": project_id, "status": status, "session_id": session_id,
             "data": {"id": row_id, "actor": actor, "tool": tool, "args": args, "summary": summary,
-                     "approved": approved, "created_at": now().isoformat()},
+                     "approved": approved, "session_id": session_id, "created_at": now().isoformat()},
             "created_at": now().isoformat()})
         if project_id:
             self.bus.publish(project_id, "entity", {"table": "tool_audit_logs", "id": row_id})
