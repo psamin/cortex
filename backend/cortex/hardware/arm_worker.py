@@ -6,8 +6,8 @@ stdin:  {"op": "heartbeat"}    the operator's held deadman, relayed by the studi
         {"op": "end_episode"}  {"op": "stop"}  {"op": "release"}
 stdout: {"type": "ready" | "state" | "tripped" | "episode_saved" | "holding" | "result", ...}
 
-Each tick reads the follower arm, takes a target (the leader arm's joints for teleop; a trained
-policy's action, added with the service), clips it to the joint limits, rate-limits it to
+Each tick reads the follower arm, takes a target (the leader arm's joints for teleop, or a trained
+checkpoint's action for a policy run), clips it to the joint limits, rate-limits it to
 `max_step_deg` per tick, checks it with `SafetyController` (and the gripper against the table
 floor), and sends it only while the deadman is live and the watchdog has not tripped. The
 watchdog runs on its own thread: a lapsed deadman or a stalled loop trips it, and the loop
@@ -240,6 +240,34 @@ class Recorder:
         self.ds.finalize()
 
 
+class PolicySource:
+    """A trained LeRobot checkpoint driving the real follower: its joints become observation.state and its
+    cameras are resized to the image size the policy was trained on. Checked before the arm is touched."""
+
+    def __init__(self, path: str, camera_names: list[str]):
+        from ..errors import UserError
+        from ..sim.policies import LeRobotPolicy
+
+        cfg = json.loads((Path(path) / "config.json").read_text())
+        self.shapes = {k.rsplit(".", 1)[-1]: v["shape"] for k, v in cfg.get("input_features", {}).items()
+                       if k.startswith("observation.images.")}
+        missing = sorted(set(self.shapes) - set(camera_names))
+        if missing:
+            raise UserError(f"This policy needs camera(s) {missing}, but the arm's cameras are "
+                            f"{sorted(camera_names) or 'none'}. Name the cameras in the hardware setup to match.")
+        self.p = LeRobotPolicy(path)
+
+    def reset(self) -> None:
+        self.p.policy.reset()
+
+    def __call__(self, obs: dict[str, Any]) -> np.ndarray:
+        from PIL import Image
+
+        pixels = {cam: np.asarray(Image.fromarray(obs[cam]).resize((shape[2], shape[1]), Image.BILINEAR))
+                  for cam, shape in self.shapes.items()}
+        return self.p.act({"agent_pos": joints(obs).astype(np.float32), "pixels": pixels}).astype(float)
+
+
 def connect_follower(c: dict[str, Any], max_step: float):
     from lerobot.cameras.opencv import OpenCVCameraConfig
     from lerobot.robots.so_follower import SO101Follower, SOFollowerRobotConfig
@@ -295,18 +323,21 @@ def main() -> None:
     safety = SafetyController(limits, fk=floor_fk() if c.get("workspace_check", True) else None)
     ctl = Controls(Deadman())
     threading.Thread(target=ctl.read, args=(sys.stdin,), daemon=True).start()
+    cams = [x["name"] for x in c.get("cameras", [])]
+    policy = PolicySource(c["checkpoint_path"], cams) if cfg.mode == "policy" else None  # before touching the arm
     robot = connect_follower(c, cfg.max_step_deg)
-    if cfg.mode != "teleop":
-        robot.disconnect()
-        raise ValueError(f"unsupported mode {cfg.mode}")
-    leader = connect_leader(c)
+    leader = connect_leader(c) if cfg.mode == "teleop" else None
     recorder = Recorder(Path(c["dataset_root"]), c["repo_id"], cfg.fps, robot, c.get("task", "")) \
         if c.get("record") else None
-    emit(type="ready", mode=cfg.mode, cameras=[x["name"] for x in c.get("cameras", [])])
+    emit(type="ready", mode=cfg.mode, cameras=cams)
     try:
-        out = control(robot, lambda obs: joints(leader.get_action()), ctl, cfg, safety, recorder)
+        if policy is not None:
+            out = control(robot, policy, ctl, cfg, safety, recorder, reset_source=policy.reset)
+        else:
+            out = control(robot, lambda obs: joints(leader.get_action()), ctl, cfg, safety, recorder)
     finally:
-        leader.disconnect()
+        if leader is not None:
+            leader.disconnect()
     emit(type="result", **out, dataset_root=c.get("dataset_root") if recorder else None)
 
 

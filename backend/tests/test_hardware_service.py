@@ -33,11 +33,17 @@ cfg = aw.RunConfig(**c["run"], first_deadman_wait_s=10)
 ctl = aw.Controls(aw.Deadman())
 threading.Thread(target=ctl.read, args=(sys.stdin,), daemon=True).start()
 arm = FakeArm()
-rec = aw.Recorder(Path(c["dataset_root"]), c["repo_id"], cfg.fps, arm, c["task"])
-aw.emit(type="ready", mode="teleop", cameras=["front"])
 safety = SafetyController(SafetyLimits(max_deg_per_tick=cfg.max_step_deg * 1.001))
-out = aw.control(arm, lambda obs: aw.joints(obs) + np.r_[0.5, 0, 0, 0, 0, 0], ctl, cfg, safety, rec)
-aw.emit(type="result", **out, dataset_root=c["dataset_root"])
+if cfg.mode == "policy":
+    src = aw.PolicySource(c["checkpoint_path"], ["front"])
+    aw.emit(type="ready", mode="policy", cameras=["front"])
+    out = aw.control(arm, src, ctl, cfg, safety, reset_source=src.reset)
+    aw.emit(type="result", **out, dataset_root=None)
+else:
+    rec = aw.Recorder(Path(c["dataset_root"]), c["repo_id"], cfg.fps, arm, c["task"])
+    aw.emit(type="ready", mode="teleop", cameras=["front"])
+    out = aw.control(arm, lambda obs: aw.joints(obs) + np.r_[0.5, 0, 0, 0, 0, 0], ctl, cfg, safety, rec)
+    aw.emit(type="result", **out, dataset_root=c["dataset_root"])
 """
 
 
@@ -97,4 +103,46 @@ def test_not_ready_lists_what_is_missing(tmp_path, monkeypatch):
             await hs.start_teleop(ctx, p, hs.TeleopRequest(operator_confirmed=True))
         with pytest.raises(HardwareRefused, match="No hardware run"):
             await hs.send("heartbeat")
+    asyncio.run(run())
+
+
+def test_policy_run_checks_the_checkpoint_warns_and_runs_under_the_deadman(tmp_path, ready):
+    from tiny_act import make_tiny_act
+
+    from cortex.models import (
+        Checkpoint, Condition, DatasetEpisodeLink, DatasetVersion, Episode, EpisodeSource, ResourceEstimate,
+        TrainingJob,
+    )
+
+    async def run():
+        ctx = await build_ctx(Settings(data_dir=tmp_path, cortex_enable_hardware=True, _env_file=None))
+        p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
+        with pytest.raises(KeyError):
+            await hs.start_policy(ctx, p, hs.PolicyRunRequest(checkpoint_id="ck_nope", operator_confirmed=True))
+        ep = Episode(project_id=p.id, index=0, source=EpisodeSource.sim_scripted, seed=1, num_frames=10, fps=30,
+                     condition=Condition(), success=True)
+        await ctx.repo.save("episodes", ep)
+        ds = DatasetVersion(project_id=p.id, name="v1", links=[DatasetEpisodeLink(episode_id=ep.id, split="train",
+                                                                                     lerobot_episode_index=0)])
+        await ctx.repo.save("dataset_versions", ds, status="ready")
+        tj = TrainingJob(project_id=p.id, dataset_version_id=ds.id, policy_type="act", backend="manual", config={},
+                         rationale="test", estimate=ResourceEstimate(gpu="cpu", gpu_hours=0.0, est_cost_usd=0.0, paid=False,
+                                                                   notes=""))
+        await ctx.repo.save("training_jobs", tj)
+        ghost = Checkpoint(project_id=p.id, training_job_id=tj.id, policy_type="act", step=1, path=str(tmp_path / "x"))
+        await ctx.repo.save("checkpoints", ghost)
+        with pytest.raises(FileNotFoundError, match="not on this machine"):
+            await hs.start_policy(ctx, p, hs.PolicyRunRequest(checkpoint_id=ghost.id, operator_confirmed=True))
+        ck = Checkpoint(project_id=p.id, training_job_id=tj.id, policy_type="act", step=1,
+                        path=str(make_tiny_act(tmp_path / "ck")))
+        await ctx.repo.save("checkpoints", ck)
+        short = hs.PolicyRunRequest.model_construct(checkpoint_id=ck.id, episodes=1, episode_s=0.5,
+                                                    operator_confirmed=True)
+        snap = await hs.start_policy(ctx, p, short)
+        assert snap["kind"] == "policy" and "only on simulator demos" in snap["warnings"][0]
+        await until(lambda: hs.snapshot()["state"] == "holding", tick=lambda: hs.send("heartbeat"))
+        await hs.send("release")
+        await until(lambda: hs.snapshot()["state"] == "finished")
+        res = hs.snapshot()["result"]
+        assert res["ok"] and res["ticks"] > 5 and res["reason"] == "run complete" and not hs.snapshot()["import_job_id"]
     asyncio.run(run())

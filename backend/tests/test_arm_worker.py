@@ -150,3 +150,23 @@ def test_teleop_recording_writes_a_lerobot_dataset(tmp_path):
     ds = LeRobotDataset("local/teleop_test", root=tmp_path / "ds")
     assert ds.meta.total_episodes == 2 and ds.meta.total_frames == sum(out["episodes_saved"])
     assert "observation.images.front" in ds.meta.features and ds.meta.robot_type == "so101_follower"
+
+
+def test_a_trained_policy_drives_the_arm_under_the_same_rules(tmp_path):
+    from tiny_act import make_tiny_act
+
+    from cortex.errors import UserError
+
+    ck = make_tiny_act(tmp_path / "ck", cameras=("front",))
+    with pytest.raises(UserError, match=r"needs camera\(s\) \['front'\].*\['wrist'\]"):
+        aw.PolicySource(str(ck), ["wrist"])  # refused before the arm is touched
+    src = aw.PolicySource(str(ck), ["front"])
+    arm, ctl = FakeArm(camera=True), aw.Controls(aw.Deadman())  # 48x64 camera, resized to the policy's 96x128
+    a = src(arm.get_observation())
+    assert a.shape == (6,) and np.all(np.isfinite(a))
+    beat(ctl, 0.6)
+    release_on_hold(ctl, after=1.0)
+    out = aw.control(arm, src, ctl, cfg(), safety(), reset_source=src.reset)
+    assert out["ticks"] > 5 and out["reason"] == "deadman released"
+    steps = np.abs(np.diff(np.array([HOME] + [q for _, q in arm.sent]), axis=0))
+    assert steps[:, :5].max() <= 2.0 + 1e-6  # the policy's targets are rate-limited like any other source
