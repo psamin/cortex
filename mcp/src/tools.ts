@@ -95,7 +95,11 @@ const TOOLS: Def[] = [
     description:
       "Record scripted-expert demonstrations in the MuJoCo simulator for the given conditions. Simulation projects only: " +
       "on a 'real' project the backend refuses and a human must record with the physical robot. " +
-      "Starts a background job; pass wait_s to block, otherwise poll cortex_get_job with the returned job id.",
+      "Starts a background job; pass wait_s to block, otherwise poll cortex_get_job with the returned job id.\n" +
+      "USE WHEN: you want scripted-expert (oracle) demos for specific condition cells on a cortex_create_project project.\n" +
+      "USE INSTEAD: cortex_create_policy_project / cortex_start_agent_collection for agent-planned demos (the golden path); " +
+      "cortex_import_demonstrations for an existing Hugging Face dataset.\n" +
+      "NEXT: cortex_create_dataset_version, then cortex_propose_training_job (training needs a dataset version).",
     inputSchema: z.object({
       project_id: projectId,
       conditions: z.array(z.object({
@@ -282,7 +286,11 @@ const TOOLS: Def[] = [
       "through validated tools (observe, point at the cube, move, grip, verify, place); collector='oracle': the scripted IK " +
       "expert on the same kind of scenes (for A/B). Pass conditions to target weak cells, e.g. [{cube_region:'left', " +
       "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex_get_collection_progress. Each attempt takes " +
-      "~5 s of sim plus model latency. A 403 means the project's planner budget is exhausted: ask the human to raise it.",
+      "~5 s of sim plus model latency. A 403 means the project's planner budget is exhausted: ask the human to raise it.\n" +
+      "USE WHEN: the project already exists (e.g. after cortex_build_simulation, or to add demos for weak cells).\n" +
+      "USE INSTEAD: cortex_create_policy_project, which creates the project and starts this collection in one call; " +
+      "cortex_improve_policy to target the weakest measured condition automatically.\n" +
+      "NEXT: cortex_get_collection_progress, then cortex_train_from_agent_demonstrations.",
     inputSchema: z.object({
       project_id: projectId,
       num_demos: z.number().int().min(1).max(50).optional().describe("Attempts to run (default 6)"),
@@ -304,7 +312,10 @@ const TOOLS: Def[] = [
     title: "Get collection progress",
     description:
       "Status of an agent collection: successes, failed attempts, model calls, USD spent vs cap, recoveries, per-cell " +
-      "coverage, and the underlying job's progress.",
+      "coverage, and the underlying job's progress.\n" +
+      "USE WHEN: polling a collection started by cortex_create_policy_project, cortex_start_agent_collection or cortex_improve_policy.\n" +
+      "NEXT: once it is done with enough successes, cortex_train_from_agent_demonstrations (builds the dataset and proposes training). " +
+      "Use cortex_get_demonstration_results for per-attempt details.",
     inputSchema: z.object({ collection_id: z.string().describe("Collection id (ac_...)") }),
     annotations: READ,
   },
@@ -371,7 +382,11 @@ const TOOLS: Def[] = [
     description:
       "Import existing demonstrations from a LeRobot dataset on the Hugging Face Hub (e.g. the user's own SO-101 " +
       "recordings or 'lerobot/svla_so101_pickplace'). Episodes get quality checks and videos and become a dataset " +
-      "version that can be trained on; they are kept separate from simulation demos. Returns job_id.",
+      "version that can be trained on; they are kept separate from simulation demos. Returns job_id.\n" +
+      "USE WHEN: the user already has SO-101 demonstrations on the Hugging Face Hub.\n" +
+      "USE INSTEAD: cortex_create_policy_project to generate new demonstrations in simulation.\n" +
+      "NEXT: poll cortex_get_job; the import produces a dataset version, so go to cortex_propose_training_job with its id " +
+      "(from cortex_get_project_state).",
     inputSchema: z.object({
       project_id: projectId,
       repo_id: z.string().describe("Hugging Face dataset repo id"),
