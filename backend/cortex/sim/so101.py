@@ -171,8 +171,19 @@ class PickPlaceEnv:
         lifted = 0.25 if self.max_cube_z > 0.045 else 0.0
         return lifted + 0.5 * max(0.0, 1 - np.linalg.norm(c[:2] - b[:2]) / 0.3) * (lifted > 0)
 
-    def step(self, action: np.ndarray) -> tuple[dict[str, Any], float, bool, bool, dict[str, Any]]:
-        obs, _, _, _, _ = self.env.step(np.asarray(action, dtype=np.float32))
+    def step(self, action: np.ndarray, render: bool = True) -> tuple[dict[str, Any] | None, float, bool, bool,
+                                                                      dict[str, Any]]:
+        """One control period. ``render=False`` runs the same physics without rendering the observation cameras
+        (obs is None). Policies that read simulator state, such as the oracles, don't need the pixels, and the
+        renders dominate the step's cost (~0.1 s each on this machine)."""
+        if render:
+            obs, _, _, _, _ = self.env.step(np.asarray(action, dtype=np.float32))
+        else:
+            obs = None
+            w = self.world
+            w.data.ctrl[w.actuators] = w.to_ctrl(np.asarray(action, dtype=np.float32))
+            mujoco.mj_step(w.model, w.data, nstep=w.substeps)
+            self.env._steps += 1  # keep the upstream env's own step counter in sync
         self.steps += 1
         self.max_cube_z = max(self.max_cube_z, float(self.cube_pos()[2]))
         success = self.in_box()
