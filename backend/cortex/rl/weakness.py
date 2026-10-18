@@ -11,7 +11,8 @@ from collections import Counter
 from typing import Any
 
 from ..models import FailureCluster
-from .types import Weakness
+from .stats import start_bin, start_xy
+from .types import StartCluster, Weakness
 
 
 class NoPolicyEvaluation(ValueError):
@@ -42,6 +43,14 @@ def find_weaknesses(evals: list[dict[str, Any]], clusters: list[FailureCluster],
             continue
         modes = Counter(e.failure_mode or "other" for e in r.episodes if not e.success)
         width = r.ci95[1] - r.ci95[0]
+        gap_hi = max(0.0, target - r.ci95[1])  # the gap that holds even at the optimistic end
+        bins: dict[tuple[str, str], list[int]] = {}
+        for e in r.episodes:
+            if not e.success:
+                x, y = start_xy(b.spec.condition.cube_region, tuple(b.spec.cube_offset), e.seed)
+                bins.setdefault((start_bin(x, y), e.failure_mode or "other"), []).append(e.seed)
+        starts = sorted((StartCluster(start_bin=k[0], failure_mode=k[1], count=len(v), seeds=v)
+                           for k, v in bins.items()), key=lambda c: -c.count)
         refs = {f"{run.id}/{b.id}/seed{e.seed}" for e in r.episodes}
         vlm = [ev_text for cl in clusters if cl.source == "vlm"
                and (b.spec.condition.key in cl.conditions or refs & set(cl.episode_ids))
@@ -52,7 +61,9 @@ def find_weaknesses(evals: list[dict[str, Any]], clusters: list[FailureCluster],
             light_scale=b.spec.light_scale, n=r.n, successes=r.successes, success_rate=r.success_rate,
             ci95=tuple(r.ci95), target=target, gap=round(gap, 4), failure_modes=dict(modes),
             dominant_failure=modes.most_common(1)[0][0] if modes else None,
-            score=round(gap * max(0.0, 1.0 - width), 4), vlm_hypotheses=vlm[:4],
+            gap_at_upper=round(gap_hi, 4), start_clusters=starts[:6],
+            # Confident gap first, then the raw gap as a small tie-break.
+            score=round(gap_hi * max(0.0, 1.0 - width) + 0.01 * gap, 4), vlm_hypotheses=vlm[:4],
             evidence=[f"{run.id}/{b.id}"]))
     out.sort(key=lambda w: (-w.score, w.success_rate))
     return out
