@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CircleDashed, Cpu, Sparkles, Square } from "lucide-react";
 import { api, resolveMediaUrl, type ApiError } from "../api/client";
 import type { LivePolicyStatus, PhysicalSkill } from "../api/types";
-import { Badge, Button, EmptyState, ErrorState, Skeleton } from "../components/ui";
+import { Badge, Button, EmptyState, ErrorState, plainText, Skeleton } from "../components/ui";
 import { GlowEdge } from "../components/ui/spotlight-card";
 import { cn } from "../lib/format";
 import { runAction, scoreBadge, scoreWhere, trainedLine } from "./skillView";
@@ -156,7 +156,7 @@ export function GpuControl({ compact = false }: { compact?: boolean }) {
           )
         )}
       </div>
-      {err ? <p className="max-w-md text-right text-xs text-fault">{err.message}</p> : st?.error && !busy && <p className="max-w-md text-right text-xs text-fault">{st.error}</p>}
+      {err && err.message !== st?.error ? <p className="max-w-md text-right text-xs text-ink-3">Couldn't reach the GPU server. Try again.</p> : st?.error && !busy && plainText(st.error) && <p className="max-w-md text-right text-xs text-ink-3">{plainText(st.error)}</p>}
     </div>
   );
 }

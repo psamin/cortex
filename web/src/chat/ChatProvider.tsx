@@ -70,6 +70,7 @@ function toEvent(event: string, d: Record<string, unknown>): ChatEvent | null {
     case "status":
       return { type: "status", state: String(d.state ?? "thinking"), tool: d.tool as string | undefined, text: typeof d.text === "string" ? d.text : undefined };
     case "error":
+      console.warn("[cortex] agent error", d); // not shown in the chat (#328)
       return { type: "error", message: String(d.message ?? d.detail ?? "Agent error") };
     case "todos":
       return Array.isArray(d.items) ? { type: "todos", items: d.items as TodoItem[] } : null;
@@ -140,7 +141,10 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
           setItems([]);
           if (threadRef.current) setThreadId(null); // a remembered thread that no longer exists
         }
-        else setLoadError(e);
+        else {
+          console.warn("[cortex] chat history", e);
+          setLoadError(e);
+        }
       })
       .finally(() => latest() && setLoading(false));
     // reads threadRef so a `thread` event mid-stream never triggers a reload
@@ -150,6 +154,13 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
     load();
     return () => abort.current?.abort();
   }, [load]);
+
+  // a history load that failed tries again by itself; the chat only says it's retrying (#328)
+  useEffect(() => {
+    if (!loadError) return;
+    const t = setTimeout(load, 5000);
+    return () => clearTimeout(t);
+  }, [loadError, load]);
 
   const runRef = useRef<(text: string) => Promise<void>>(async () => {});
 
@@ -248,8 +259,10 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         }
       } catch (e) {
         if ((e as Error).name !== "AbortError") {
+          console.warn("[cortex] agent turn", e); // the chat leaves it out (#328)
           const msg = e instanceof ApiError && e.unreachable ? "The Cortex backend is not responding." : splitError(e, undefined, "The agent request failed.").text;
-          setItems((xs) => applyEvent(xs, { type: "error", message: msg }));
+          // the error item stays out of the chat; the turn still ends with the plain "Stopped" line
+          setItems((xs) => applyEvent(applyEvent(xs, { type: "error", message: msg }), { type: "done", is_error: true }));
         }
       } finally {
         setItems((xs) => xs.map((it) => (it.kind === "tool" && it.status === "running" ? { ...it, status: "ok" } : it)));

@@ -70,7 +70,7 @@ export function CollectPage() {
       ) : mode === "manual" || !project ? (
         <ManualCollect pid={pid} />
       ) : project.mode !== "sim" ? (
-        <ErrorState error={new Error("Autonomous collection is sim-only. Use Manual for the real robot.")} compact />
+        <p className="rounded border border-line bg-plate p-2.5 text-xs text-ink-3">Autonomous collection is sim-only. Use Manual for the real robot.</p>
       ) : (
         <AgentCollect key={mode} project={project} collector={mode === "agent" ? "agent" : "oracle"} onUseOracle={() => setMode("oracle")} />
       )}

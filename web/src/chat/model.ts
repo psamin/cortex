@@ -305,6 +305,8 @@ export type Block =
   /** consecutive tool calls between two messages; cards render after the group, outside the collapse */
   | { type: "tools"; tools: ToolItem[]; cards: string[]; budgetError: string | null; key: string };
 
+const TURN_ERROR = /^(This turn failed \(|Claude Code exited with an error:)/m;
+
 /**
  * Deterministic layout: consecutive tool rows form one group; every result card renders once, at the
  * first mention of its id (so a live card stays put and updates in place); one training approval at most.
@@ -314,17 +316,28 @@ export function buildBlocks(items: ChatItem[]): Block[] {
   const seen = new Set<string>();
   let trainingApproval = false;
   for (const it of items) {
+    // Only what went right is shown: failed calls, turn errors and failed jobs stay in the backend's logs (#328).
+    if (it.kind === "error" || (it.kind === "job_done" && it.status === "failed")) continue;
+    if (it.kind === "assistant") {
+      // the backend's own "This turn failed (…)" / "Claude Code exited with an error: …" lines stay in its logs
+      const text = it.text.split(/\n{2,}/).filter((p) => !TURN_ERROR.test(p)).join("\n\n").trim();
+      if (text) out.push({ type: "item", item: { ...it, text }, key: `i${it.id}` });
+      continue;
+    }
     if (it.kind === "tool") {
+      // a spent planner budget still asks you to raise it (its call row is not shown)
+      const budgetError = it.status === "error" && /budget/i.test(it.summary) ? it.summary : null;
+      if (it.status === "error" && !budgetError) continue;
+      const shown = it.status === "error" ? [] : [it];
       const last = out[out.length - 1];
       const group = last?.type === "tools" ? last : null;
-      const refs = it.refIds.filter((r) => isCardRef(r) && !seen.has(r));
+      const refs = shown.length ? it.refIds.filter((r) => isCardRef(r) && !seen.has(r)) : [];
       refs.forEach((r) => seen.add(r));
-      const budgetError = it.status === "error" && /budget/i.test(it.summary) ? it.summary : null;
       if (group) {
-        group.tools.push(it);
+        group.tools.push(...shown);
         group.cards.push(...refs);
         group.budgetError = budgetError ?? group.budgetError;
-      } else out.push({ type: "tools", tools: [it], cards: refs, budgetError, key: `t${it.id}` });
+      } else out.push({ type: "tools", tools: shown, cards: refs, budgetError, key: `t${it.id}` });
       if (refs.some((r) => prefixOf(r) === "tj")) trainingApproval = true;
       continue;
     }

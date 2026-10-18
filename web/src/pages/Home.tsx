@@ -94,7 +94,7 @@ export function HomePage() {
         )}
 
         <div className="mt-auto pt-16">
-          {projects.error ? (
+          {projects.error && !projects.data ? (
             <ErrorState error={projects.error} compact onRetry={() => projects.refetch()} />
           ) : recent.length > 0 ? (
             <>

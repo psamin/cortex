@@ -92,7 +92,7 @@ export function ImportRow({ it, pid }: { it: Extract<ChatItem, { kind: "import" 
             </div>
           )}
           {it.status === "uploading" && it.total === 0 && <p className="mt-1 text-xs text-ink-3">Starting…</p>}
-          {it.status === "error" && <InlineError error={it.error} detail={it.errorDetail} className="mt-1.5 rounded-sm border border-fault/30 px-2.5 py-1.5" />}
+          {it.status === "error" && <InlineError error={it.error} detail={it.errorDetail} fallback="The import didn't start. Try again." className="mt-1.5" />}
         </div>
       </div>
       {it.status === "started" && it.jobId && <ResultCard pid={pid} refId={it.jobId} />}

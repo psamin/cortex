@@ -4,7 +4,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, ArrowUpRight, Check, CircleDashed, Cpu, Film, Play, Radio, Shuffle, Square, VideoOff } from "lucide-react";
 import { api, resolveMediaUrl, type ApiError } from "../api/client";
 import type { PhysicalSkill } from "../api/types";
-import { Badge, Button, EmptyState, ErrorState, Skeleton } from "../components/ui";
+import { Badge, Button, EmptyState, ErrorState, plainText, Skeleton } from "../components/ui";
 import { cn } from "../lib/format";
 import { LiveFrame } from "../chat/LivePolicy";
 import { GpuControl, Thumb, useGpu } from "./SkillsPage";
@@ -132,7 +132,7 @@ function Live({ s, view, seed, setSeed }: { s: PhysicalSkill; view: View; seed: 
       <div className="flex h-full flex-col items-center justify-center gap-4 px-6">
         {busy ? <CircleDashed className="h-6 w-6 animate-spin text-ink-3" /> : <Cpu className="h-6 w-6 text-ink-3" />}
         <p className="max-w-md text-center text-[13px] leading-6 text-ink-2">
-          {start.isPending && !st?.step ? "Requesting a GPU on Georgia Tech's Futurama cluster…" : (st?.reason ?? "The GPU server isn't running.")}
+          {start.isPending && !st?.step ? "Requesting a GPU on Georgia Tech's Futurama cluster…" : (st?.reason && plainText(st.reason)) || "The GPU server isn't running."}
         </p>
         {at >= 0 && (
           <ol className="space-y-1 text-xs">
@@ -158,7 +158,7 @@ function Live({ s, view, seed, setSeed }: { s: PhysicalSkill; view: View; seed: 
           )}
         </div>
         {!busy && <p className="max-w-md text-center text-[11.5px] leading-5 text-ink-3">Attaches to a GPU server already running on Futurama, or asks Slurm for one. Nothing starts until you click.</p>}
-        {err && err.message !== st?.reason && <p className="text-xs text-fault">{err.message}</p>}
+        {err && err.message !== st?.reason && <p className="text-xs text-ink-3">Couldn't reach the GPU server. Try again.</p>}
       </div>
     );
   }
