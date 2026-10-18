@@ -17,7 +17,7 @@ import asyncio
 import io
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote
@@ -178,7 +178,7 @@ def keep_skill_replay(data_dir: Path, task: str, seed: int, jpegs: list[bytes]) 
     if not skills_service.TASK.match(task):
         raise ValueError(f"bad task name {task!r}")
     d = data_dir / skills_service.REPLAYS / task
-    name = f"live_{datetime.now(timezone.utc):%Y%m%d-%H%M%S}_seed{seed}.mp4"
+    name = f"live_{datetime.now(UTC):%Y%m%d-%H%M%S}_seed{seed}.mp4"
     tmp = d / f".{name}"  # replay_urls and replay_file skip dot files
     try:
         encode_mp4(jpegs, tmp, 30 // KEEP_EVERY)
