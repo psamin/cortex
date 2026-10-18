@@ -8,8 +8,7 @@ export function HeroCopy() {
     <div className="flex h-full flex-col px-6 pb-4 pt-24 sm:px-10 sm:pt-28 lg:justify-center lg:pb-16 lg:pl-[clamp(2.5rem,5.5vw,6rem)] lg:pr-0 lg:pt-24">
       <div className="reveal flex items-center gap-3 kn-mono text-[10.5px] uppercase tracking-[0.18em] text-ink-3" style={{ animationDelay: "80ms" }}>
         <span className="h-px w-9 bg-ink" />
-        <span className="text-ink">FIG.00</span>
-        <span>MCP server for agent-trained robots</span>
+        <span className="text-ink">MCP server for agent-trained robots</span>
       </div>
 
       <h1

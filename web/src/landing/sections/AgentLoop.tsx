@@ -18,11 +18,11 @@ function Arrow() {
   );
 }
 
-/** FIG.04: agents call tools; tools run physics; physics fills the dataset; the dataset trains the policy. */
+/** agents call tools; tools run physics; physics fills the dataset; the dataset trains the policy. */
 export function AgentLoop() {
   return (
     <section id="loop" aria-labelledby="loop-title" className="kn-gutter border-t border-line py-24 lg:py-32">
-      <SectionHead titleId="loop-title" fig="FIG.04" label="The agent loop" first="Your agent drives." second="Cortex keeps it honest.">
+      <SectionHead titleId="loop-title" label="The agent loop" first="Your agent drives." second="Cortex keeps it honest.">
         The agent describes the arm and the task, calls Cortex tools and reads the results back. The
         physics, the datasets and the training run on the Cortex side.
       </SectionHead>
