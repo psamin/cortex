@@ -42,7 +42,7 @@ if [ "$MODE" = demos ]; then  # SHARDS recorders in parallel, then one dataset
   for i in $(seq 0 $((N - 1))); do
     g=$((K * N + i))
     rm -rf "$OUTS/shard$g"
-    ex=(); [ "$g" = 0 ] && ex=(--examples "$T/examples")
+    ex=(); [ "$g" = 0 ] && [ "$P" = 1 ] && ex=(--examples "$T/examples")  # multi-part: use examples.sbatch
     python -m cortex.sim.tasks.run demos "$TASK" "$OUTS/shard$g" --episodes "${EPISODES:-200}" \
       --size "${SIZE:-240x320}" --shard "$g" --shards $((N * P)) --noise-deg "${NOISE_DEG:-2.0}" "${ex[@]}" \
       > "$OUTS/shard$g.log" 2>&1 &
