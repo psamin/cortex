@@ -82,14 +82,47 @@ def _short_tool(name: str) -> str:
     return name.split("__")[-1].removeprefix("cortex_")
 
 
+def _content_text(content: Any) -> str:
+    if isinstance(content, list):
+        return "\n".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
+    return content if isinstance(content, str) else ""
+
+
+def _approval_detail(content: Any) -> str:
+    """The backend's reason from an approval-required result: structuredContent `detail`,
+    or the "Backend: ..." line of the text form (mcp/src/backend.ts approvalRequired)."""
+    text = _content_text(content)
+    try:
+        data = json.loads(text)
+        if isinstance(data, dict) and data.get("detail"):
+            return str(data["detail"])
+    except ValueError:
+        pass
+    return next((ln.strip().removeprefix("Backend:").strip() for ln in text.splitlines()
+                 if ln.strip().startswith("Backend:")), "")
+
+
+def _result_events(name: str, block: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """SSE events for one Cortex tool_result. Only a refused training launch becomes an approval
+    card (the studio approves that job by id); any other refusal, e.g. the planner budget, is a
+    failed step that carries the backend's reason (the studio offers a budget raise for those)."""
+    content = block.get("content")
+    summary, refs, needs_approval = _summarize_result(content)
+    result = {"tool": name, "summary": summary, "ref_ids": refs, "ok": not block.get("is_error")}
+    if not needs_approval:
+        return [("tool_result", result)]
+    tj = next((r for r in refs if r.startswith("tj_")), None)
+    if tj:
+        return [("tool_result", result), ("approval_required", {
+            "kind": "training", "ref_id": tj, "training_job_id": tj, "summary": summary, "args": {}})]
+    detail = _approval_detail(content)
+    return [("tool_result", {**result, "summary": (detail or summary)[:240], "ok": False})]
+
+
 def _summarize_result(content: Any) -> tuple[str, list[str], bool]:
     """(one-line summary, ref ids, approval_required) from a tool_result content block.
     The Cortex MCP server writes "<summary>\nref_ids: a, b" as its text content."""
-    text = ""
-    if isinstance(content, list):
-        text = "\n".join(c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text")
-    elif isinstance(content, str):
-        text = content
+    text = _content_text(content)
     try:  # Claude Code hands the model our structuredContent as JSON text
         data = json.loads(text)
         if isinstance(data, dict) and "summary" in data:
@@ -153,13 +186,8 @@ async def chat(ctx: Ctx, pid: str, message: str, sse) -> AsyncIterator[str]:
                         if block.get("tool_use_id", "") not in pending:
                             continue
                         name = pending.pop(block.get("tool_use_id", ""))
-                        summary, refs, needs_approval = _summarize_result(block.get("content"))
-                        yield sse("tool_result", {"tool": name, "summary": summary, "ref_ids": refs,
-                                                  "ok": not block.get("is_error")})
-                        if needs_approval:
-                            tj = next((r for r in refs if r.startswith("tj_")), None)
-                            yield sse("approval_required", {"kind": "training", "ref_id": tj or pid,
-                                                            "training_job_id": tj, "summary": summary, "args": {}})
+                        for event, data in _result_events(name, block):
+                            yield sse(event, data)
                 yield sse("status", {"state": "thinking"})
             elif t == "result":
                 result = ev
