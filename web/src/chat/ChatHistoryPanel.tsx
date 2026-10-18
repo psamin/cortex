@@ -13,7 +13,12 @@ import { groupThreads } from "./threadGroups";
 export const ChatHistoryPanelCtx = createContext<{ open: boolean; setOpen: (open: boolean) => void }>({ open: false, setOpen: () => {} });
 export const useChatHistoryPanel = () => useContext(ChatHistoryPanelCtx);
 
-/** Every chat of this project, like ChatGPT's sidebar: "New chat" on top, then past chats by recency. */
+/**
+ * Every chat of this project, like ChatGPT's sidebar, then past chats by recency.
+ * "New task" opens the studio prompt, which creates a new project: a different thing to train gets its own
+ * demos, datasets and policies instead of mixing into (and training on) this project's. "New chat on this
+ * task" keeps the project and starts a fresh conversation about it.
+ */
 export function ChatHistoryPanel({ pid, onClose }: { pid: string; onClose: () => void }) {
   const chat = useChat();
   const nav = useNavigate();
@@ -33,14 +38,23 @@ export function ChatHistoryPanel({ pid, onClose }: { pid: string; onClose: () =>
       <div className="shrink-0 px-2 pt-2">
         <button
           type="button"
+          onClick={() => nav("/studio")}
+          title="Train something new: a new project with its own demos, datasets and policies"
+          className="flex w-full items-center gap-2.5 rounded px-2.5 py-2 text-left text-sm text-ink hover:bg-rail"
+        >
+          <SquarePen className="h-4 w-4 shrink-0" strokeWidth={1.5} /> New task
+        </button>
+        <button
+          type="button"
           onClick={() => {
             // an empty chat is already a new chat: just go to it
             if (chat.items.length > 0) void chat.newChat().catch(() => {});
             toChat();
           }}
-          className="flex w-full items-center gap-2.5 rounded px-2.5 py-2 text-left text-sm text-ink hover:bg-rail"
+          title="A fresh conversation about this project's task, with the same demos and policies"
+          className="flex w-full items-center gap-2.5 rounded px-2.5 py-1.5 text-left text-xs text-ink-3 hover:bg-rail hover:text-ink"
         >
-          <SquarePen className="h-4 w-4 shrink-0" strokeWidth={1.5} /> New chat
+          <span className="w-4 shrink-0" /> New chat on this task
         </button>
       </div>
       <nav aria-label="Past chats" className="min-h-0 flex-1 overflow-y-auto px-2 pb-4 scroll-thin">
