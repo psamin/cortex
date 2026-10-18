@@ -137,15 +137,57 @@ def test_stop_discards_the_partial_episode_and_holds_until_release(tmp_path, mon
     assert out["reason"] == "stopped by the operator" and out["episodes_saved"] == [] and arm.disconnected
 
 
+def test_a_missing_video_encoder_names_ffmpeg(monkeypatch):
+    from cortex.errors import UserError
+
+    def boom():
+        raise RuntimeError("Could not load libtorchcodec. FFmpeg is not properly installed")
+
+    monkeypatch.setattr(aw, "_load_torchcodec", boom)
+    with pytest.raises(UserError, match="FFmpeg"):
+        aw.require_video_encoder()
+
+
+def test_a_slow_video_save_is_not_a_stalled_control_loop():
+    class SlowSave:
+        frames = 0
+
+        def add(self, obs, action):
+            self.frames += 1
+
+        def save_episode(self):
+            time.sleep(0.6)  # longer than stale_timeout_s; encoding, not the control loop
+            n, self.frames = self.frames, 0
+            return n
+
+        def discard(self):
+            n, self.frames = self.frames, 0
+            return n
+
+        def finalize(self):
+            pass
+
+    arm, ctl = FakeArm(camera=True), aw.Controls(aw.Deadman())
+    beat(ctl, 3.0)
+    release_on_hold(ctl, after=2.0)
+    out = aw.control(arm, lambda obs: HOME, ctl, cfg(episodes=1, episode_s=0.3), safety(), recorder=SlowSave())
+    assert out["reason"] == "run complete" and out["episodes_saved"] == [out["ticks"]] and arm.disconnected
+
+
 def test_teleop_recording_writes_a_lerobot_dataset(tmp_path):
+    from cortex.errors import UserError
     from lerobot.datasets import LeRobotDataset
 
     arm, ctl = FakeArm(camera=True), aw.Controls(aw.Deadman())
     rec = aw.Recorder(tmp_path / "ds", "local/teleop_test", 30, arm, "pick up the cube")  # slow on Windows: build first
     beat(ctl, 3.0)
     release_on_hold(ctl, after=1.5)
-    out = aw.control(arm, lambda obs: HOME + np.r_[1, 0, 0, 0, 0, 0], ctl, cfg(episodes=2, episode_s=0.3), safety(),
-                     recorder=rec)
+    try:
+        out = aw.control(arm, lambda obs: HOME + np.r_[1, 0, 0, 0, 0, 0], ctl, cfg(episodes=2, episode_s=0.3),
+                         safety(), recorder=rec)
+    except UserError as e:
+        assert "FFmpeg" in str(e) and arm.disconnected
+        pytest.skip(str(e))
     assert out["reason"] == "run complete" and len(out["episodes_saved"]) == 2
     try:
         ds = LeRobotDataset("local/teleop_test", root=tmp_path / "ds")

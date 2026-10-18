@@ -65,9 +65,18 @@ class Watchdog(threading.Thread):
         self.reason: str | None = None
         self.last_tick = time.monotonic()
         self._halt = threading.Event()
+        self._paused = threading.Event()
 
     def tick(self) -> None:
         self.last_tick = time.monotonic()
+
+    def pause(self) -> None:
+        """Encoding a video is not the control loop. Don't call a slow save a stall."""
+        self._paused.set()
+
+    def resume(self) -> None:
+        self.last_tick = time.monotonic()
+        self._paused.clear()
 
     def trip(self, reason: str) -> None:
         if not self.tripped.is_set():
@@ -78,7 +87,7 @@ class Watchdog(threading.Thread):
         while not self._halt.wait(0.005):
             if self.deadman.age() > self.deadman_timeout:
                 self.trip("deadman released")
-            elif time.monotonic() - self.last_tick > self.stale_timeout:
+            elif not self._paused.is_set() and time.monotonic() - self.last_tick > self.stale_timeout:
                 self.trip("control loop stalled")
 
     def halt(self) -> None:
@@ -185,7 +194,15 @@ def control(robot, source: Callable[[dict[str, Any]], np.ndarray], ctl: Controls
             if cut_short:  # an interrupted demonstration is not a demonstration
                 emit(type="episode_discarded", frames=recorder.discard(), reason=wd.reason or "stopped")
             else:
-                n = recorder.save_episode()
+                wd.pause()
+                try:
+                    n = recorder.save_episode()
+                except Exception:
+                    wd.resume()
+                    wd.halt()
+                    robot.disconnect()
+                    raise
+                wd.resume()
                 saved.append(n)
                 emit(type="episode_saved", index=len(saved) - 1, frames=n)
         if cut_short:
@@ -203,6 +220,30 @@ def control(robot, source: Callable[[dict[str, Any]], np.ndarray], ctl: Controls
         time.sleep(0.02)
     robot.disconnect()  # disable_torque_on_disconnect: the arm goes limp now
     return {"ok": True, "reason": reason, "tripped": wd.tripped.is_set(), "ticks": ticks, "episodes_saved": saved}
+
+
+def _load_torchcodec() -> None:
+    import torchcodec  # noqa: F401  LeRobot encodes videos through this; the import loads FFmpeg
+
+
+def require_video_encoder() -> None:
+    """Fail clearly when FFmpeg is missing, before the control watchdog is running.
+
+    Importing torchcodec without FFmpeg tries several shared libraries and can take
+    tens of seconds. Inside the control loop that looks like a stall.
+    """
+    from ..errors import UserError
+
+    try:
+        _load_torchcodec()
+    except (ImportError, OSError, RuntimeError) as e:
+        text = str(e).lower()
+        if isinstance(e, ImportError) and "torchcodec" not in text and "ffmpeg" not in text:
+            raise
+        raise UserError(
+            "Recording needs FFmpeg. Install the full-shared FFmpeg build and make sure it is on PATH "
+            "(torchcodec could not load its libraries)."
+        ) from e
 
 
 class Recorder:
@@ -228,6 +269,7 @@ class Recorder:
         self.frames += 1
 
     def save_episode(self) -> int:
+        require_video_encoder()
         n, self.frames = self.frames, 0
         self.ds.save_episode(parallel_encoding=False)
         return n
@@ -326,8 +368,12 @@ def main() -> None:
     threading.Thread(target=ctl.read, args=(sys.stdin,), daemon=True).start()
     cams = [x["name"] for x in c.get("cameras", [])]
     policy = PolicySource(c["checkpoint_path"], cams) if cfg.mode == "policy" else None  # before touching the arm
+    leader = None
+    if c.get("record"):
+        require_video_encoder()  # before the arm is connected, so a missing FFmpeg never looks like a stall
     robot = connect_follower(c, cfg.max_step_deg)
-    leader = connect_leader(c) if cfg.mode == "teleop" else None
+    if cfg.mode == "teleop":
+        leader = connect_leader(c)
     recorder = Recorder(Path(c["dataset_root"]), c["repo_id"], cfg.fps, robot, c.get("task", "")) \
         if c.get("record") else None
     emit(type="ready", mode=cfg.mode, cameras=cams)
