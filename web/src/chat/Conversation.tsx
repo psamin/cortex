@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { ArrowDown, ArrowUp, Ban, Bot, Check, ChevronRight, CircleDashed, Download, Hand, History, Info, Paperclip, Plus, Square, X } from "lucide-react";
 import { api } from "../api/client";
@@ -31,6 +31,7 @@ const STICK_PX = 48;
 
 export function Conversation({ pid }: { pid: string }) {
   const chat = useChat();
+  const nav = useNavigate();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
@@ -112,12 +113,11 @@ export function Conversation({ pid }: { pid: string }) {
           <HistoryToggle />
           <button
             type="button"
-            onClick={() => void chat.newChat().catch(() => {})}
-            disabled={chat.items.length === 0}
-            title={chat.items.length === 0 ? "This chat is already empty" : "Start an empty chat; this one stays in History"}
-            className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink disabled:opacity-40"
+            onClick={() => nav("/studio")}
+            title="Train something new: a new project with its own demos, datasets and policies (this chat stays in History)"
+            className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink"
           >
-            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">New chat</span>
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">New task</span>
           </button>
         </div>
       </div>
