@@ -120,9 +120,9 @@ _locks: dict[str, asyncio.Lock] = {}
 _watchers: dict[int, asyncio.Task] = {}
 
 
-async def touch_session(ctx: Ctx, caller: Caller, tool: str, project_id: str | None) -> None:
+async def touch_session(ctx: Ctx, caller: Caller, tool: str, project_id: str | None) -> dict[str, Any] | None:
     if not caller.session_id:
-        return
+        return None
     async with _locks.setdefault(caller.session_id, asyncio.Lock()):
         row = await ctx.store.get("agent_sessions", caller.session_id)
         at = now().isoformat()
@@ -141,6 +141,19 @@ async def touch_session(ctx: Ctx, caller: Caller, tool: str, project_id: str | N
     if row is None or row["status"] != "live":
         ctx.bus.publish(channel(caller.owner), "session_start", _session_view(data, "live"))
     _ensure_watcher(ctx)
+    return data
+
+
+async def name_session(ctx: Ctx, session_id: str, name: str, purpose: str | None) -> dict[str, Any] | None:
+    """The agent's chosen name (cortex.register_agent): shown on its session, its calls and the Agent log."""
+    async with _locks.setdefault(session_id, asyncio.Lock()):
+        row = await ctx.store.get("agent_sessions", session_id)
+        if not row:
+            return None
+        row["data"].update(agent_name=name, purpose=purpose)
+        await ctx.store.put("agent_sessions", row)
+    ctx.bus.publish(channel(row["owner_id"]), "session_start", _session_view(row["data"], row["status"]))
+    return row["data"]
 
 
 async def _add_project(ctx: Ctx, caller: Caller, project_id: str) -> None:
@@ -231,7 +244,9 @@ async def observe(ctx: Ctx, caller: Caller | None, tool: str, raw_args: dict[str
             "owner": caller.owner if caller else None, "started_at": now().isoformat(),
             "created_at": now().isoformat()}
     if caller:
-        await touch_session(ctx, caller, tool, pid)
+        sess = await touch_session(ctx, caller, tool, pid)
+        if sess and sess.get("agent_name"):
+            base["agent_name"] = sess["agent_name"]
     await _write(ctx, caller, base, "running", "tool_start")
     token = CURRENT_CALL.set(call)
     t0 = time.perf_counter()

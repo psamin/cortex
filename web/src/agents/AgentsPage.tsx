@@ -50,10 +50,15 @@ function SessionCard({ s, names }: { s: AgentSession; names: Record<string, stri
       <GlowEdge />
       <div className="flex items-center gap-2">
         <span className={cn("h-2 w-2 shrink-0 rounded-full", s.live ? "live-dot bg-pass" : "bg-ink-4")} title={s.live ? "live" : "idle"} />
-        <span className="truncate text-[14px] text-ink">{s.client ?? "unknown client"}</span>
-        {s.client_version && <span className="font-mono text-[11px] text-ink-3">{s.client_version}</span>}
+        <span className="truncate text-[14px] text-ink">{s.agent_name ?? s.client ?? "unknown client"}</span>
+        {s.agent_name ? (
+          <span className="truncate font-mono text-[11px] text-ink-3">{s.client ?? "agent"}{s.client_version ? ` ${s.client_version}` : ""}</span>
+        ) : (
+          s.client_version && <span className="font-mono text-[11px] text-ink-3">{s.client_version}</span>
+        )}
         <span className={cn("ml-auto shrink-0 text-ink-3", label)}>{s.live ? "live" : "idle"}</span>
       </div>
+      {s.purpose && <p className="mt-1 text-[13px] text-ink-2">{s.purpose}</p>}
       <p className="mt-1.5 text-xs text-ink-3">
         {s.last_tool ? <span className="font-mono text-ink-2">{s.last_tool}</span> : "no calls yet"} · {ago(s.last_seen)} · {s.call_count} calls
       </p>

@@ -256,3 +256,17 @@ def test_agent_decisions_land_in_the_project_log(client):
     calls = client.get(f"/api/agents/projects/{pid}/calls").json()
     note = [c for c in calls if c["tool"] == "log_decision"]
     assert len(note) == 1 and note[0]["args"]["kind"] == "plan" and "10 demos" in note[0]["args"]["text"]
+
+
+def test_agent_names_itself_and_is_labelled_everywhere(client):
+    """cortex.register_agent: the agent picks a name; its session, later calls and the reply to its user carry it."""
+    r = client.post("/api/tools/register_agent", json={"name": "  Atlas ", "purpose": "train the mug task"},
+                    headers=agent(session="named-1"))
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["name"] == "Atlas" and body["session_named"] and body["tell_user"].startswith("Connected to Cortex as Atlas")
+    pid = client.post("/api/tools/start_intake", json={"prompt": "pick up the cube"}, headers=agent(session="named-1")).json()["project_id"]
+    (s,) = [x for x in client.get("/api/agents/sessions").json() if x["agent_name"] == "Atlas"]
+    assert s["purpose"] == "train the mug task"
+    calls = client.get(f"/api/agents/projects/{pid}/calls").json()
+    assert calls and calls[-1]["agent_name"] == "Atlas"
