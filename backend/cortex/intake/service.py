@@ -4,7 +4,7 @@ Pure functions (no I/O). The tool layer persists the spec on the project.
 
 Patch semantics (``apply_patch``):
   * dicts merge recursively; scalars and plain lists replace;
-  * ``objects``, ``zones``, ``cameras`` and ``environment.obstacles`` are lists keyed by
+  * ``objects``, ``zones``, ``cameras``, ``environment.obstacles`` and ``environment.conveyors`` are lists keyed by
     ``name``: an item merges into the existing item with that name (object names also
     match through the catalogue, so "bottle" updates ``water_bottle``),
     ``{"name": n, "_delete": true}`` removes it, and an unknown name is added (objects
@@ -25,7 +25,7 @@ from pydantic import ValidationError
 from . import catalogue
 from .spec import SO101_JOINTS, TEXT, IntakeSpec, IntakeStatus, Question
 
-KEYED_LISTS = {"objects", "zones", "cameras", "environment.obstacles"}
+KEYED_LISTS = {"objects", "zones", "cameras", "environment.obstacles", "environment.conveyors"}
 MAX_PATCH_CHARS = 20_000
 BASE_CLEARANCE = 0.09  # m around the arm base that obstacles must leave free
 # so101 actuator ctrlrange from the Menagerie model, in so101_follower units.
@@ -331,10 +331,21 @@ def _check_refs(spec: IntakeSpec) -> None:
         if not (x0 <= x <= x1 and y0 <= y <= y1):
             raise IntakeError(f"zone '{z.name}' at ({x}, {y}) is outside the workspace x {spec.workspace.x}, "
                               f"y {spec.workspace.y} (metres, table frame)")
-    for o in spec.objects:
-        if o.start is not None and not (x0 <= o.start[0] <= x1 and y0 <= o.start[1] <= y1):
+    for o in spec.objects:  # an object on a conveyor may start upstream, outside the reach box
+        if o.start is not None and o.on is None and not (x0 <= o.start[0] <= x1 and y0 <= o.start[1] <= y1):
             raise IntakeError(f"object '{o.name}' start {o.start} is outside the workspace")
     _check_obstacles(spec)
+    _check_conveyors(spec)
+
+
+def _check_conveyors(spec: IntakeSpec) -> None:
+    """A belt may not run through the arm base."""
+    for c in spec.environment.conveyors:
+        (sx, sy), (ex, ey) = c.start, c.end
+        ax, ay = ex - sx, ey - sy
+        t = max(0.0, min(1.0, -(sx * ax + sy * ay) / (ax * ax + ay * ay)))  # nearest point to the base
+        if ((sx + t * ax) ** 2 + (sy + t * ay) ** 2) ** 0.5 < c.width / 2 + BASE_CLEARANCE:
+            raise IntakeError(f"conveyor '{c.name}' runs within {BASE_CLEARANCE} m of the arm base; move it")
 
 
 def _footprint(shape: str, size: list[float]) -> tuple[float, float]:

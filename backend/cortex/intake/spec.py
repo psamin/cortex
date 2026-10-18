@@ -29,7 +29,7 @@ class Strict(BaseModel):
 
 SUPPORTED_ARMS = ("so101",)
 # Limits that keep scene builds fast and bounded (they run on the single GL thread).
-MAX_OBJECTS, MAX_ZONES, MAX_OBSTACLES, MAX_CAMERAS = 8, 12, 16, 4
+MAX_OBJECTS, MAX_ZONES, MAX_OBSTACLES, MAX_CAMERAS, MAX_CONVEYORS = 8, 12, 16, 4, 4
 NAME = r"^[a-z0-9_]{1,40}$"  # names are slugged by the intake service before validation
 TEXT = 500
 # The EnvHub env's HOME: arm folded above the table, gripper half open.
@@ -81,6 +81,9 @@ class ObjectSpec(Strict):
     mass_kg: float = Field(gt=0, le=5)
     rgba: tuple[float, float, float, float] = (0.85, 0.15, 0.12, 1.0)
     start: Vec2 | None = None  # nominal start on the table; None = Cortex picks one
+    # The name of a conveyor (environment.conveyors) the object starts on and rides. Its start, if given,
+    # must be over that belt; None = the belt's upstream end.
+    on: str | None = Field(None, pattern=NAME)
     start_jitter_m: float = Field(0.015, ge=0, le=0.1)
     assumed: set[str] = Field(default_factory=set)
 
@@ -133,6 +136,34 @@ class Obstacle(Strict):
     rgba: tuple[float, float, float, float] = (0.5, 0.5, 0.5, 1.0)
 
 
+class Conveyor(Strict):
+    """A straight moving belt (issue #255). It runs from ``start`` to ``end`` (the direction of travel,
+    table frame, metres). ``width`` is across the belt (m), ``height`` is its top surface above the table (m),
+    and ``speed_mps`` is the belt speed (m/s). Objects resting on it ride at that speed and fall off the end."""
+
+    name: str = Field(pattern=NAME)
+    start: Vec2
+    end: Vec2
+    width: float = Field(gt=0.02, le=0.5)
+    height: float = Field(ge=0.005, le=0.3)
+    speed_mps: float = Field(gt=0, le=0.3)
+
+    @model_validator(mode="after")
+    def _length(self) -> Conveyor:
+        length = ((self.end[0] - self.start[0]) ** 2 + (self.end[1] - self.start[1]) ** 2) ** 0.5
+        if not 0.1 <= length <= 2.0:
+            raise ValueError(f"conveyor '{self.name}' is {length:.3f} m long; it must be 0.1-2.0 m (start to end)")
+        return self
+
+    def over(self, xy: Vec2, margin: float = 0.0) -> bool:
+        """``xy`` lies on the belt, at least ``margin`` inside its edges and ends."""
+        ax, ay = self.end[0] - self.start[0], self.end[1] - self.start[1]
+        length = (ax * ax + ay * ay) ** 0.5
+        rx, ry = xy[0] - self.start[0], xy[1] - self.start[1]
+        s, lat = (rx * ax + ry * ay) / length, (ry * ax - rx * ay) / length
+        return margin <= s <= length - margin and abs(lat) <= self.width / 2 - margin
+
+
 class Environment(Strict):
     """Everything around the objects that the sim scene should match."""
 
@@ -140,6 +171,7 @@ class Environment(Strict):
     table_rgba: tuple[float, float, float, float] = (0.80, 0.72, 0.60, 1.0)
     lighting: Literal["dim", "normal", "bright"] = "normal"
     obstacles: list[Obstacle] = Field(default_factory=list, max_length=MAX_OBSTACLES)
+    conveyors: list[Conveyor] = Field(default_factory=list, max_length=MAX_CONVEYORS)
     description: str = Field("", max_length=TEXT)  # free text from the agent, e.g. "white desk by a window, afternoon light"
     assumed: set[str] = Field(default_factory=lambda: {"table_size", "table_rgba", "lighting"})
 
@@ -155,6 +187,25 @@ class IntakeSpec(Strict):
     objects: list[ObjectSpec] = Field(default_factory=list, max_length=MAX_OBJECTS)
     zones: list[PlaceZone] = Field(default_factory=list, max_length=MAX_ZONES)
     task: TaskV2 = Field(default_factory=TaskV2)
+
+    @model_validator(mode="after")
+    def _objects_on_conveyors(self) -> IntakeSpec:
+        belts = {c.name: c for c in self.environment.conveyors}
+        if len(belts) != len(self.environment.conveyors):
+            raise ValueError("conveyor names must be unique")
+        for o in self.objects:
+            if o.on is None:
+                continue
+            belt = belts.get(o.on)
+            if belt is None:
+                raise ValueError(f"object '{o.name}' is on '{o.on}', which is not a conveyor "
+                                 f"({', '.join(sorted(belts)) or 'none'})")
+            if o.grasp_width > belt.width:
+                raise ValueError(f"object '{o.name}' ({o.grasp_width} m wide) does not fit on conveyor '{belt.name}' "
+                                 f"({belt.width} m wide)")
+            if o.start is not None and not belt.over(o.start):
+                raise ValueError(f"object '{o.name}' start {o.start} is not on conveyor '{belt.name}'")
+        return self
 
 
 class Question(BaseModel):
