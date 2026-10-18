@@ -14,6 +14,7 @@ position control, and add on top:
 from __future__ import annotations
 
 import os
+import platform
 from dataclasses import dataclass
 from functools import lru_cache
 from types import ModuleType
@@ -49,6 +50,11 @@ def envhub_module() -> ModuleType:
 
     Sandboxes without LeRobot/torch installed use the same pinned download and
     import steps directly (huggingface_hub + importlib)."""
+    from huggingface_hub import snapshot_download
+
+    # The env only fetches its scene and arm assets when the scene file is missing next to env.py,
+    # so a partially cached snapshot (scene present, arm missing) fails to compile. Fetch it whole.
+    snapshot_download(ENVHUB_REPO, revision=ENVHUB_REVISION)
     try:
         from lerobot.envs.utils import _download_hub_file, _import_hub_module
     except ImportError:
@@ -178,6 +184,6 @@ class PickPlaceEnv:
 
 
 def configure_gl() -> None:
-    """Headless Linux workers need EGL/OSMesa; macOS uses CGL automatically."""
-    if os.uname().sysname == "Linux":
+    """Headless Linux workers need EGL/OSMesa; macOS (CGL) and Windows (WGL via glfw) work as is."""
+    if platform.system() == "Linux":  # os.uname() does not exist on Windows
         os.environ.setdefault("MUJOCO_GL", "egl")
