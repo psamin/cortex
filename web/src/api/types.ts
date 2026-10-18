@@ -725,3 +725,64 @@ export interface Iteration {
   evaluation: { id: string; branches: IterationBranch[] } | null;
   next: { reason: string; conditions: Condition[]; collection_id: string | null } | null;
 }
+
+// ---------------------------------------------------------------- real SO-101 (local studio only)
+export interface HardwarePort {
+  device: string;
+  description: string;
+  usb: boolean;
+}
+
+export interface CameraSpec {
+  name: string;
+  index_or_path: number | string;
+  width: number;
+  height: number;
+  fps: number;
+}
+
+export interface HardwareConfig {
+  follower_port: string | null;
+  follower_id: string;
+  leader_port: string | null;
+  leader_id: string;
+  cameras: CameraSpec[];
+  max_step_deg: number;
+}
+
+export interface HardwareStatus {
+  enabled: boolean;
+  driver_error: string | null;
+  ports: HardwarePort[];
+  config: HardwareConfig;
+  calibration: Record<"follower" | "leader", { id: string; path: string; exists: boolean }>;
+  armed: { operator: string; estop_confirmed: boolean; armed_at: ISODate; expires_at: ISODate } | null;
+  ready_for_motion: boolean;
+  missing: string[];
+  teleop_missing: string[];
+  note: string;
+}
+
+/** lerobot-calibrate subprocess (torque off; the operator moves the joints by hand). */
+export interface HardwareProcess {
+  kind: string;
+  state: "running" | "waiting_for_operator" | "finished" | "failed" | string;
+  prompt: string | null;
+  lines: string[];
+  joint_ranges: Record<string, { min: number; pos: number; max: number }>;
+  error: string | null;
+  returncode: number | null;
+}
+
+export interface HardwareRun {
+  run_id: string;
+  project_id: string;
+  kind: "teleop" | "policy";
+  state: "running" | "holding" | "finished";
+  warnings: string[];
+  live: { joints?: Record<string, number>; target?: Record<string, number>; ticks?: number; episode?: number } | null;
+  holding: { reason?: string; note?: string } | null;
+  events: { type?: string; [k: string]: unknown }[];
+  result: Record<string, unknown> | null;
+  import_job_id: string | null;
+}

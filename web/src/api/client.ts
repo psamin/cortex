@@ -29,6 +29,10 @@ import type {
   LaunchEvaluationRequest,
   NextAction,
   PolicyType,
+  HardwareConfig,
+  HardwareProcess,
+  HardwareRun,
+  HardwareStatus,
   RemoteRollout,
   Iteration,
   Project,
@@ -130,6 +134,22 @@ export const api = {
   job: (id: string) => get<Job>(`/jobs/${id}`),
   /** Resolve a storage key (e.g. EpisodeResult.video_key) to a browser URL. */
   media: (key: string) => get<{ url: string }>(`/media?key=${encodeURIComponent(key)}`),
+
+  // real SO-101 (local studio only; refusals are 403 {detail, code: "hardware_not_ready"})
+  hardware: () => get<HardwareStatus>("/hardware"),
+  saveHardwareConfig: (cfg: HardwareConfig) => put<HardwareStatus>("/hardware/config", cfg),
+  arm: (operator: string) => post<HardwareStatus>("/hardware/arm", { operator, estop_confirmed: true }),
+  disarm: () => post<HardwareStatus>("/hardware/disarm"),
+  calibrate: (device: "follower" | "leader") => post<unknown>("/hardware/calibrate", { device }),
+  hardwareProcess: () => get<HardwareProcess | null>("/hardware/process"),
+  hardwareProcessInput: (text: "" | "c") => post<HardwareProcess | null>("/hardware/process/input", { text }),
+  hardwareProcessStop: () => post<HardwareProcess | null>("/hardware/process/stop"),
+  startTeleop: (pid: string, episodes: number, episode_s: number, task?: string) =>
+    post<HardwareRun>(`/projects/${pid}/hardware/teleop`, { episodes, episode_s, task: task || undefined, operator_confirmed: true }),
+  startPolicyRun: (pid: string, checkpoint_id: string, episodes: number, episode_s: number) =>
+    post<HardwareRun>(`/projects/${pid}/hardware/policy`, { checkpoint_id, episodes, episode_s, operator_confirmed: true }),
+  hardwareRun: () => get<HardwareRun | null>("/hardware/run"),
+  hardwareRunOp: (op: "heartbeat" | "end_episode" | "stop" | "release") => post<unknown>(`/hardware/run/${op}`),
 
   // agent demonstrations
   planner: () => get<PlannerStatus>("/planner"),
