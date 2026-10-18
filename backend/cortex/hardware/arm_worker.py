@@ -144,7 +144,8 @@ def control(robot, source: Callable[[dict[str, Any]], np.ndarray], ctl: Controls
     while ctl.deadman.age() > cfg.deadman_timeout_s:
         if ctl.stop or ctl.studio_gone_at or time.monotonic() - t_wait > cfg.first_deadman_wait_s:
             robot.disconnect()
-            return {"ok": False, "error": "the deadman was never held; nothing moved", "ticks": 0}
+            return {"ok": False, "error": "the deadman was never held; nothing moved", "reason": "deadman never held",
+                    "tripped": False, "ticks": 0, "episodes_saved": []}
         time.sleep(0.01)
     wd = Watchdog(ctl.deadman, cfg.deadman_timeout_s, cfg.stale_timeout_s)
     wd.start()
