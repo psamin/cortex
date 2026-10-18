@@ -388,6 +388,7 @@ class Checkpoint(BaseModel):
     path: str  # local dir or storage key holding pretrained_model/
     metrics: dict[str, float] = {}
     created_at: datetime = Field(default_factory=now)
+    skill_name: str | None = None  # the Physical Skill's name, once saved (cortex.save_physical_skill, #310)
 
 
 # ---------------------------------------------------------------- evaluation
