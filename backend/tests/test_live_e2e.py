@@ -296,9 +296,17 @@ def test_a_backend_restart_while_starting_reattaches(api, futurama):
     assert len(cluster.read()["jobs"]) == 1
 
 
+def _dev_sh_uvicorn_options(port: int) -> list[str]:
+    """scripts/dev.sh's uvicorn options, on another port: the backend runs the way the studio runs it."""
+    sh = (Path(__file__).resolve().parents[2] / "scripts" / "dev.sh").read_text().replace("\\\n", " ")
+    opts = sh.split("uvicorn cortex.api.app:app", 1)[1].split(")", 1)[0].split()
+    return [*opts[:opts.index("--port") + 1], str(port), *opts[opts.index("--port") + 2:]]
+
+
 def test_a_stopped_backend_leaves_no_tunnel_behind(tmp_path, futurama):
-    """uvicorn stopped with SIGTERM (scripts/dev.sh's cleanup, a restart): its `ssh -N` must not live on, or it
-    keeps the local port and the next GPU's tunnel can't open."""
+    """uvicorn stopped with SIGTERM (scripts/dev.sh's cleanup, a restart) while a studio tab holds its event
+    stream: it must exit and take its `ssh -N` with it, or the tunnel keeps the local port and the next GPU's
+    tunnel can't open."""
     cluster, _ = futurama
     cluster.add_job(age=5)
     port, backend = free_port(), Path(__file__).resolve().parents[1]
@@ -306,8 +314,8 @@ def test_a_stopped_backend_leaves_no_tunnel_behind(tmp_path, futurama):
     env.update(CORTEX_DOTENV="0", DATA_DIR=str(tmp_path / "data"), LIVE_POLICY_URL=f"http://127.0.0.1:{free_port()}",
                FUTURAMA_SSH_HOST="futurama", FUTURAMA_PROJECTS_FILE=str(tmp_path / "projects.json"),
                PYTHONPATH=str(backend))
-    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "cortex.api.app:app", "--port", str(port)], cwd=backend,
-                            env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    proc = subprocess.Popen([sys.executable, "-m", "uvicorn", "cortex.api.app:app", *_dev_sh_uvicorn_options(port)],
+                            cwd=backend, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     try:
         with httpx.Client(base_url=f"http://127.0.0.1:{port}/api", timeout=30) as c:
             for _ in range(150):
@@ -316,11 +324,14 @@ def test_a_stopped_backend_leaves_no_tunnel_behind(tmp_path, futurama):
                     break
                 except httpx.HTTPError:
                     time.sleep(0.1)
+            pid_ = _project(c, "Jenga sim", name="Jenga (sim)")
+            tab = threading.Thread(target=_hold_events, args=(port, pid_), daemon=True)  # an open studio tab
+            tab.start()
             c.post("/live-policy/start")
             _until(c, _ready)
         pid = cluster.tunnels()[-1]["pid"]
         proc.terminate()
-        proc.wait(20)
+        proc.wait(20)  # uvicorn waits for open connections; dev.sh caps that
         t0 = time.time()
         while time.time() - t0 < 5 and _alive(pid):
             time.sleep(0.05)
@@ -330,6 +341,15 @@ def test_a_stopped_backend_leaves_no_tunnel_behind(tmp_path, futurama):
         for t in cluster.tunnels():
             if _alive(t["pid"]):
                 os.kill(t["pid"], signal.SIGTERM)
+
+
+def _hold_events(port: int, pid: str) -> None:
+    try:
+        with httpx.stream("GET", f"http://127.0.0.1:{port}/api/projects/{pid}/events", timeout=None) as r:
+            for _ in r.iter_raw():
+                pass
+    except httpx.HTTPError:
+        pass
 
 
 def _alive(pid):
