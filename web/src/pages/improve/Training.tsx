@@ -124,7 +124,7 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
       <div className="grid grid-cols-1 gap-4 p-3.5 lg:grid-cols-[minmax(0,1fr)_260px]">
         <div className="min-w-0 space-y-3">
           {t.rationale && <p className="text-sm text-ink-2">{t.rationale}</p>}
-          <details open={t.status === "proposed"}>
+          <details>
             <summary className="cursor-pointer text-2xs font-medium uppercase tracking-[0.06em] text-ink-3 hover:text-ink-2">Config</summary>
             <dl className="mt-1.5 grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-x-4 gap-y-1 font-mono text-2xs">
               {Object.entries(t.config).map(([k, v]) => (

@@ -17,7 +17,6 @@ export function ImprovePage() {
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
           <h1 className="kn-display text-[36px] leading-tight">Improve</h1>
-          <p className="mt-0.5 text-sm text-ink-3">Plan, version, train, measure.</p>
         </div>
         <Segmented
           value={tab}
