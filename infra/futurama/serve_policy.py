@@ -8,7 +8,9 @@ Loads the newest checkpoint per task from <job_dir>/output/<task>/ and that task
   GET  /policies.json         the same as JSON (GPU name, checkpoint, held-out episodes per task)
   GET  /live/<task>/<ep>      MJPEG: the policy runs on the GPU frame by frame on a held-out episode it
                               never trained on; each frame shows the camera, its joint targets vs the
-                              human's, and the measured inference time
+                              human's, and the measured inference time. Each part also carries those
+                              numbers as headers (X-Inference-Ms, X-Joint-Err-Deg, X-Gripper-Err, X-Frame)
+                              so the studio can save the session
   POST /act                   {task, state:[6], images:{camera: base64 JPEG}} -> {action:[6], ms}
                               for a real SO-101 client
   GET  /sim/<task>/<seed>     MJPEG: a sim-trained policy runs closed loop in MuJoCo on the GPU, on a
@@ -23,6 +25,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import torch
@@ -95,6 +98,14 @@ def frame(img: np.ndarray, pred: np.ndarray, human: np.ndarray, ms: float, task:
     return buf.getvalue()
 
 
+def part_header(jpg: bytes, i: int, n: int, ms: float, err: np.ndarray, instruction: str) -> bytes:
+    """One MJPEG part's headers. Browsers read only Content-Type; Cortex records the rest (#179):
+    inference time, mean |policy - human| over the 5 arm joints (degrees) and on the gripper."""
+    return (f"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: {len(jpg)}\r\nX-Frame: {i}/{n}\r\n"
+            f"X-Inference-Ms: {ms:.2f}\r\nX-Joint-Err-Deg: {float(err[:5].mean()):.4f}\r\n"
+            f"X-Gripper-Err: {float(err[5]):.4f}\r\nX-Instruction: {quote(instruction)}\r\n\r\n").encode()
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # quiet
         pass
@@ -141,10 +152,11 @@ class Handler(BaseHTTPRequestHandler):
                 item = ds[i]
                 obs = {k: v for k, v in item.items() if k.startswith("observation.")}
                 pred, ms = act(p, obs, item["task"])
+                human = item["action"].numpy()
                 img = (item[f"observation.images.{CAMS[p['stage']][0]}"].permute(1, 2, 0).numpy() * 255).astype(np.uint8)
-                jpg = frame(img, pred, item["action"].numpy(), ms, task, i, len(ds))
+                jpg = frame(img, pred, human, ms, task, i, len(ds))
                 try:
-                    self.wfile.write(b"--frame\r\nContent-Type: image/jpeg\r\n\r\n" + jpg + b"\r\n")
+                    self.wfile.write(part_header(jpg, i, len(ds), ms, np.abs(pred - human), item["task"]) + jpg + b"\r\n")
                 except (BrokenPipeError, ConnectionResetError):
                     return
                 time.sleep(max(0.0, 1 / 30 - (time.perf_counter() - t0)))  # real time (30 fps recordings)
