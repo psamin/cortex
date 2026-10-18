@@ -1,9 +1,12 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, Paperclip, RotateCcw, Square, X } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, Download, History, Paperclip, Plus, Square, X } from "lucide-react";
+import { api } from "../api/client";
 import { useTraining } from "../api/hooks";
 import { refRoute } from "../components/refs";
-import { cn, evidenceValue } from "../lib/format";
+import { InlineError } from "../components/ui";
+import { ago, cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
 import { ImportRow, ImportSheet, useImporter } from "./Imports";
@@ -28,7 +31,6 @@ export function Conversation({ pid }: { pid: string }) {
   const chat = useChat();
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
-  const [confirmReset, setConfirmReset] = useState(false);
   const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
   const importer = useImporter(pid);
   const [sheet, setSheet] = useState<{ mode: "file" | "hub"; file: File | null } | null>(null);
@@ -104,22 +106,17 @@ export function Conversation({ pid }: { pid: string }) {
         <span className="kn-label kn-label-rule text-ink">
           <span>Agent</span>
         </span>
-        <div className="ml-auto">
-          {confirmReset ? (
-            <span className="flex items-center gap-1 text-xs text-ink-2">
-              Start over?
-              <button type="button" className="rounded-full px-2 py-0.5 text-ink hover:bg-rail" onClick={() => (setConfirmReset(false), void chat.reset())}>
-                Yes
-              </button>
-              <button type="button" className="rounded-full px-2 py-0.5 hover:bg-rail" onClick={() => setConfirmReset(false)}>
-                No
-              </button>
-            </span>
-          ) : (
-            <button type="button" onClick={() => setConfirmReset(true)} disabled={chat.items.length === 0} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink disabled:opacity-40">
-              <RotateCcw className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">New chat</span>
-            </button>
-          )}
+        <div className="ml-auto flex items-center gap-3">
+          <ChatHistory pid={pid} />
+          <button
+            type="button"
+            onClick={() => void chat.newChat().catch(() => {})}
+            disabled={chat.items.length === 0}
+            title={chat.items.length === 0 ? "This chat is already empty" : "Start an empty chat; this one stays in History"}
+            className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink disabled:opacity-40"
+          >
+            <Plus className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">New chat</span>
+          </button>
         </div>
       </div>
 
@@ -559,5 +556,64 @@ function Composer({
         </button>
       )}
     </form>
+  );
+}
+
+/** Past chats of this project, newest first; picking one opens it and new messages continue it. */
+function ChatHistory({ pid }: { pid: string }) {
+  const chat = useChat();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const threads = useQuery({ queryKey: ["agent-threads", pid], queryFn: () => api.agentThreads(pid), enabled: open, retry: 0 });
+  useEffect(() => {
+    if (!open) return;
+    const off = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const esc = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", off);
+    document.addEventListener("keydown", esc);
+    return () => {
+      document.removeEventListener("mousedown", off);
+      document.removeEventListener("keydown", esc);
+    };
+  }, [open]);
+  const list = threads.data ?? [];
+  const current = chat.threadId ?? list[0]?.id ?? null;
+  return (
+    <div ref={ref} className="relative">
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} className="group inline-flex items-center gap-1.5 py-1 text-xs text-ink-3 hover:text-ink">
+        <History className="h-3.5 w-3.5" strokeWidth={1.5} /> <span className="border-b border-line-strong group-hover:border-ink">History</span>
+      </button>
+      {open && (
+        <div className="enter absolute right-0 top-full z-50 mt-1.5 max-h-[360px] w-72 overflow-y-auto rounded-xl bg-plate p-1.5 shadow-[0_0_0_1px_var(--line-strong),0_16px_32px_-12px_rgba(0,0,0,.5)] scroll-thin">
+          {threads.isLoading ? (
+            <div className="space-y-1.5 p-1.5">
+              <div className="skeleton h-8 w-full rounded-md" />
+              <div className="skeleton h-8 w-full rounded-md" />
+            </div>
+          ) : threads.error ? (
+            <InlineError error={threads.error} fallback="Couldn't load past chats." className="p-2" />
+          ) : list.length === 0 ? (
+            <p className="p-2 text-xs text-ink-3">No past chats yet.</p>
+          ) : (
+            list.map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  chat.openThread(t.id);
+                  setOpen(false);
+                }}
+                className={cn("flex w-full items-baseline gap-2 rounded-lg px-2.5 py-2 text-left hover:bg-rail", t.id === current && "bg-rail")}
+              >
+                <span className="min-w-0 flex-1 truncate text-sm text-ink" title={t.title}>
+                  {t.title || "Untitled chat"}
+                </span>
+                <span className="shrink-0 text-[11px] text-ink-4">{t.id === current ? "current" : ago(t.updated_at)}</span>
+              </button>
+            ))
+          )}
+        </div>
+      )}
+    </div>
   );
 }
