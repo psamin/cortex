@@ -26,7 +26,7 @@ except TypeError:  # Pillow < 10.1
 
 TITLES = {"jenga": "Jenga: extract the marked block", "screwdriver": "Factory: unscrew a screw with a screwdriver",
           "unscrew": "Factory: unscrew the bolt", "unscrew_black": "Factory: unscrew the bolt (policy 2)", "palletize": "Factory: unload boxes from the forklift",
-          "suture": "Suture: pass the needle through the eyelets"}
+          "suture": "Suture: pass the needle through the eyelets", "pick_place": "Pick and place the cube"}
 CAMERAS = {"smolvla": {"camera1": "front", "camera2": "wrist"}}  # smolvla_base's camera names -> the sim's
 
 
