@@ -3,7 +3,7 @@ import { Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "rec
 import { AlertTriangle, Check, ChevronDown, CircleDashed, Play, X } from "lucide-react";
 import { isJobActive, useJobs } from "../api/events";
 import { useAutopilot, useEpisodes, useEvaluations, useHealth, usePlannerBudget, useTraining } from "../api/hooks";
-import type { AutopilotRun, EvaluationWithBranches, Iteration } from "../api/types";
+import { isImported, type AutopilotRun, type EvaluationWithBranches, type Iteration } from "../api/types";
 import { cn, pct } from "../lib/format";
 import { iterationSuccess, useIterations, wilson } from "./rollouts";
 import type { ViewerSelection } from "./Viewer";
@@ -49,7 +49,11 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
   return useMemo<Stage[]>(() => {
     const active = Object.values(jobs).filter((j) => j.project_id === pid && isJobActive(j));
     const has = (re: RegExp) => active.some((j) => re.test(j.kind));
-    const accepted = (episodes.data ?? []).filter((e) => e.status === "accepted").length;
+    const acceptedEps = (episodes.data ?? []).filter((e) => e.status === "accepted");
+    const accepted = acceptedEps.length;
+    const importedN = acceptedEps.filter(isImported).length;
+    // only simulator work counts as "Simulate": imported human demos were recorded on a real robot
+    const simulated = (episodes.data ?? []).some((e) => !isImported(e)) || (evals.data ?? []).length > 0;
     const evs = evals.data ?? [];
     const tjs = training.data ?? [];
     const proposed = tjs.filter((t) => t.status === "proposed").length;
@@ -70,8 +74,16 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
     }
     // no active autopilot: derive from what exists, plus live jobs
     return [
-      { name: "Simulate", state: has(/record|collect|eval|sim/) ? "running" : (episodes.data?.length ?? 0) > 0 || evs.length > 0 ? "succeeded" : "waiting" },
-      { name: "Demonstrate", state: has(/record|collect/) ? "running" : accepted > 0 ? "succeeded" : "waiting", note: accepted ? `${accepted} demos` : undefined },
+      {
+        name: "Simulate",
+        state: has(/record|collect|eval|sim/) ? "running" : simulated ? "succeeded" : "waiting",
+        note: !simulated && importedN ? "no sim runs yet" : undefined,
+      },
+      {
+        name: "Demonstrate",
+        state: has(/record|collect|import/) ? "running" : accepted > 0 ? "succeeded" : "waiting",
+        note: accepted ? `${accepted} demos${importedN ? ` (${importedN} imported)` : ""}` : undefined,
+      },
       {
         name: "Train",
         state: trainRunning || has(/dataset/) ? "running" : trained ? "succeeded" : proposed ? "attention" : "waiting",
@@ -180,7 +192,10 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
   const ci = policy ? wilson(policy.k, policy.n) : null;
   const accepted = (episodes.data ?? []).filter((e) => e.status === "accepted");
   const evalN = (evals.data ?? []).map(evalTotals).reduce((s, x) => s + x.n, 0);
-  const avgLen = accepted.length ? accepted.reduce((s, e) => s + e.num_frames / (e.fps || 30), 0) / accepted.length : null;
+  // simulated and recorded (imported) time are different things: report them separately
+  const meanLen = (xs: typeof accepted) => (xs.length ? xs.reduce((s, e) => s + e.num_frames / (e.fps || 30), 0) / xs.length : null);
+  const simLen = meanLen(accepted.filter((e) => !isImported(e)));
+  const recLen = meanLen(accepted.filter(isImported));
   const loss = [...iterations].reverse().find((i) => i.training?.loss_curve?.length)?.training?.loss_curve ?? null;
   // a version counts only once it has a checkpoint; planned iterations are "(pending)"
   const trainedIt = [...iterations].reverse().find((i) => i.checkpoint_id);
@@ -209,7 +224,11 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
           </div>
         )}
       </Tile>
-      <Tile label="Avg demo length" value={avgLen ? `${avgLen.toFixed(1)}s` : "—"} sub="per accepted demo" />
+      <Tile
+        label="Avg demo length"
+        value={simLen !== null ? `${simLen.toFixed(1)}s` : recLen !== null ? `${recLen.toFixed(1)}s` : "—"}
+        sub={simLen !== null ? (recLen !== null ? `simulated · imported ${recLen.toFixed(1)}s recorded` : "simulated time") : recLen !== null ? "recorded time (imported)" : "no demos yet"}
+      />
       <Tile label="Policy version" value={version ?? "—"} sub={trainedIt?.checkpoint_id ?? "none trained yet"} />
       <Tile label="Model spend" value={budget.data ? `$${budget.data.spent_usd.toFixed(2)}` : "—"} sub={budget.data ? `of $${budget.data.budget_usd.toFixed(0)} approved` : undefined} />
     </div>

@@ -5,7 +5,7 @@ import { isJobActive, useJobs } from "../api/events";
 import type { Job } from "../api/types";
 import { LightGlyph } from "../components/Workcell";
 import { cn } from "../lib/format";
-import { useRolloutVideo, useRollouts, type Camera, type Rollout } from "./rollouts";
+import { useRolloutVideo, useRollouts, type Camera, type CameraInfo, type Rollout } from "./rollouts";
 
 export type RolloutFilter = "all" | "demo" | "eval" | "failed";
 
@@ -49,11 +49,12 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
     const sameCond = pool.find((r) => r.condition && current.condition && r.condition.cube_region === current.condition.cube_region && r.condition.lighting === current.condition.lighting);
     return sameCond ?? pool.find((r) => r.kind === current.kind) ?? pool[0] ?? null;
   }, [current, rollouts.data]);
-  // robot cameras are rendered from recorded trajectories, so they exist for demonstrations only
-  const robotCams = !!current?.episodeId;
+  // only the cameras this rollout actually has (backend wording); fall back to its first camera
+  const cams = current?.cameras ?? [];
+  const cam = cams.find((c) => c.id === camera) ?? cams[0] ?? null;
   useEffect(() => {
-    if (camera !== "presentation" && !robotCams) setCamera("presentation");
-  }, [robotCams, camera]);
+    if (cam && cam.id !== camera) setCamera(cam.id);
+  }, [cam, camera]);
 
   const counts = useMemo(() => {
     const xs = rollouts.data ?? [];
@@ -105,18 +106,18 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
         {!showLive && current && (
           <div className="ml-auto flex items-center gap-1.5">
             <select
-              value={camera}
+              value={cam?.id ?? "presentation"}
               onChange={(e) => setCamera(e.target.value as Camera)}
-              className="h-7 rounded-md bg-white/[.06] px-2 text-xs text-white/80 outline-none"
+              disabled={cams.length < 2}
+              title={cam?.detail || cam?.label}
+              className="h-7 max-w-[240px] rounded-md bg-white/[.06] px-2 text-xs text-white/80 outline-none disabled:opacity-70"
               aria-label="Camera"
             >
-              <option value="presentation">Presentation camera</option>
-              <option value="front" disabled={!robotCams}>
-                Robot front camera{robotCams ? "" : " (demos only)"}
-              </option>
-              <option value="wrist" disabled={!robotCams}>
-                Robot wrist camera{robotCams ? "" : " (demos only)"}
-              </option>
+              {cams.map((c) => (
+                <option key={c.id} value={c.id} title={c.detail}>
+                  {c.label}
+                </option>
+              ))}
             </select>
             <button
               type="button"
@@ -134,7 +135,7 @@ export function Viewer({ pid, goal, activity, sel }: { pid: string; goal: string
         )}
       </div>
 
-      <Hud goal={goal} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} />
+      <Hud goal={goal} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={showLive || compare ? null : current} cam={showLive ? null : cam} />
 
       {/* stage */}
       <div className="relative min-h-0 flex-1">
@@ -242,8 +243,9 @@ function SingleStage({ r, camera }: { r: Rollout; camera: Camera }) {
 }
 
 function CompareStage({ a, b, camera }: { a: Rollout; b: Rollout; camera: Camera }) {
-  const va = useRolloutVideo(a, camera);
-  const vb = useRolloutVideo(b, camera);
+  const has = (r: Rollout) => (r.cameras.some((c) => c.id === camera) ? camera : r.cameras[0]?.id ?? "presentation");
+  const va = useRolloutVideo(a, has(a));
+  const vb = useRolloutVideo(b, has(b));
   const ra = useRef<HTMLVideoElement>(null);
   const rb = useRef<HTMLVideoElement>(null);
   const [ok, bad] = a.success ? [a, b] : [b, a];
@@ -347,7 +349,19 @@ function Controls({ refs, url }: { refs: React.RefObject<HTMLVideoElement>[]; ur
 }
 
 /** Heads-up band above the stage: the task and what is happening now, plus what is on screen. */
-function Hud({ goal, activity, liveJob, rollout }: { goal: string; activity: { label: string; busy: boolean } | null; liveJob?: Job; rollout: Rollout | null }) {
+function Hud({
+  goal,
+  activity,
+  liveJob,
+  rollout,
+  cam,
+}: {
+  goal: string;
+  activity: { label: string; busy: boolean } | null;
+  liveJob?: Job;
+  rollout: Rollout | null;
+  cam: CameraInfo | null;
+}) {
   return (
     <div className="flex items-start justify-between gap-4 px-5 pt-3">
       <div className="min-w-0">
@@ -356,7 +370,9 @@ function Hud({ goal, activity, liveJob, rollout }: { goal: string; activity: { l
         <div className="mt-0.5 flex items-center gap-1.5 text-xs text-white/60">
           {liveJob ? (
             <>
-              <span className="h-1.5 w-1.5 rounded-full bg-[#ec6060] live-dot" /> Live · {liveJob.message || liveJob.kind.replace(/_/g, " ")}
+              <span className="h-1.5 w-1.5 rounded-full bg-[#ec6060] live-dot" />
+              <span title="Rendered for people; not what the policy sees">Live · studio view</span>
+              <span className="text-white/40">· {liveJob.message || liveJob.kind.replace(/_/g, " ")}</span>
             </>
           ) : activity?.busy ? (
             <>
@@ -395,6 +411,12 @@ function Hud({ goal, activity, liveJob, rollout }: { goal: string; activity: { l
                 cube {rollout.condition.cube_region} · {rollout.condition.lighting} light
               </span>
               {rollout.seed !== null && <span className="font-mono text-white/35">seed {rollout.seed}</span>}
+            </span>
+          )}
+          {cam && (
+            <span className="max-w-[360px] truncate text-white/40" title={cam.detail}>
+              {cam.label}
+              {cam.detail ? ` · ${cam.detail}` : ""}
             </span>
           )}
         </div>

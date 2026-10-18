@@ -25,6 +25,34 @@ export interface Rollout {
   imported: boolean;
   source: string | null;
   task: string | null;
+  /** cameras this rollout actually has, in the backend's order and wording */
+  cameras: CameraInfo[];
+}
+
+export type Camera = "presentation" | "front" | "wrist";
+export interface CameraInfo {
+  id: Camera;
+  label: string;
+  detail: string;
+}
+
+const CAMERA_IDS: Camera[] = ["presentation", "front", "wrist"];
+/** Used only when the backend sends no camera list (older backends). */
+const FALLBACK_DEMO_CAMERAS: CameraInfo[] = [
+  { id: "presentation", label: "Studio view", detail: "Rendered for people; the policy never sees it." },
+  { id: "front", label: "Front camera", detail: "" },
+  { id: "wrist", label: "Wrist camera", detail: "" },
+];
+const FALLBACK_STUDIO_ONLY = FALLBACK_DEMO_CAMERAS.slice(0, 1);
+
+function parseCameras(raw: unknown, hasEpisode: boolean): CameraInfo[] {
+  if (Array.isArray(raw) && raw.length && typeof raw[0] === "object") {
+    const cams = (raw as { id?: string; label?: string; detail?: string }[])
+      .filter((c): c is { id: Camera; label?: string; detail?: string } => CAMERA_IDS.includes(c.id as Camera))
+      .map((c) => ({ id: c.id, label: c.label || c.id, detail: c.detail ?? "" }));
+    if (cams.length) return cams;
+  }
+  return hasEpisode ? FALLBACK_DEMO_CAMERAS : FALLBACK_STUDIO_ONLY;
 }
 
 function parseCondition(c: Condition | string | null | undefined): Condition | null {
@@ -74,6 +102,7 @@ function fromEpisodes(eps: Episode[]): Rollout[] {
       policy: e.provenance?.planner === "gpt-6-astra" ? "GPT-6 Astra" : "Scripted oracle",
       iteration: null,
       createdAt: e.created_at,
+      cameras: FALLBACK_DEMO_CAMERAS,
       ...importedFields(e),
     }));
 }
@@ -100,6 +129,7 @@ function fromEvaluations(evs: EvaluationWithBranches[]): Rollout[] {
           iteration: null,
           createdAt: run.created_at,
           imported: false,
+          cameras: FALLBACK_STUDIO_ONLY,
           source: null,
           task: null,
         });
@@ -124,6 +154,7 @@ export function useRollouts(pid: string) {
         condition: parseCondition(r.condition),
         seed: r.seed ?? null,
         videoUrl: r.video_url ?? null,
+        cameras: parseCameras(r.cameras, r.kind === "demo"),
         episodeId: r.kind === "demo" ? r.id : null,
         videoKey: null,
         evaluationId: r.evaluation_id ?? null,
@@ -137,8 +168,6 @@ export function useRollouts(pid: string) {
   }, [remote.data, remote.isLoading, episodes.data, evals.data]);
   return { data, isLoading: data === undefined && !remote.error, error: remote.error ?? episodes.error ?? evals.error, fromApi: !!remote.data };
 }
-
-export type Camera = "presentation" | "front" | "wrist";
 
 /** Resolve a playable URL for a rollout and camera. Robot cameras exist only for recorded episodes. */
 export function useRolloutVideo(r: Rollout | null, camera: Camera) {
