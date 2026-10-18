@@ -22,7 +22,7 @@ import logging
 
 from ..context import Ctx
 from ..models import (
-    AutopilotRun, AutopilotStep, Checkpoint, Condition, CreateDatasetVersionRequest, DatasetVersion,
+    Augmentation, AutopilotRun, AutopilotStep, Checkpoint, Condition, CreateDatasetVersionRequest, DatasetVersion,
     EpisodeStatus, JobStatus, LaunchEvaluationRequest, Mode, PolicyRef, Project,
     StartAgentCollectionRequest, TrainingJob,
 )
@@ -30,7 +30,8 @@ from . import (
     agent_collection_service, analysis_service, dataset_service, experiment_comparison, recommendation_service,
     recording_service, simulation_runner, training_service,
 )
-from .augment import PRESETS
+from .augment import LIGHTING_GAP, AugmentEvidence, describe, plan_augmentation
+from .experiment_comparison import two_proportion_p
 
 log = logging.getLogger(__name__)
 ACTOR = "autopilot"
@@ -200,13 +201,12 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
                                 "collecting more before training")
                     await _goto(ctx, run, "SCENARIO_PLANNED")
                     continue
-                augment = bool(c.get("augment_next"))
+                plan = [Augmentation.model_validate(a) for a in c.get("augment_plan") or []]
                 job = await dataset_service.create_version(ctx, project, CreateDatasetVersionRequest(
-                    name=f"autopilot-it{run.iteration}", augmentations=PRESETS["lighting_robustness"] if augment else []),
-                    actor=ACTOR)
+                    name=f"autopilot-it{run.iteration}", augmentations=plan), actor=ACTOR)
                 c["dataset_job_id"] = job.id
                 await _step(ctx, run, "validate", f"{len(accepted)} accepted demos (simulator-verified, quality "
-                            f"checked); versioning dataset" + (" with lighting augmentation" if augment else ""))
+                            f"checked); versioning dataset" + (f" with augmentation: {describe(plan)}" if plan else ""))
                 await _goto(ctx, run, "DATASET_VERSIONED")
 
             elif st == "DATASET_VERSIONED":
@@ -251,6 +251,11 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
                 await _step(ctx, run, "evaluate", "Measured: " + ", ".join(
                     f"{k} {b.result.successes}/{b.result.n}" for k, (_, b) in rates.items()) + f". {cmp.summary}",
                     [c["evaluation_id"]])
+                if c.get("augment_trial"):  # this policy was trained on an augmented dataset version
+                    verdict, strength, why = judge_augmentation(
+                        c.pop("augment_trial"), {k: (b.result.successes, b.result.n) for k, (_, b) in rates.items()})
+                    c.update(augment_verdict=verdict, augment_strength=strength)
+                    await _step(ctx, run, "evaluate", why, [c["evaluation_id"]])
                 worst = min((r for r, _ in rates.values()), default=0.0)
                 if not run.best or worst > run.best.get("min_rate", -1):
                     run.best = {"checkpoint_id": c["checkpoint_id"], "evaluation_id": c["evaluation_id"],
@@ -278,10 +283,18 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
                     continue
                 ev = await simulation_runner.get_evaluation(ctx, c["evaluation_id"])
                 rec = await recommendation_service.recommend(ctx, project, actor=ACTOR)
-                c["augment_next"] = any(r.action == "augment" for r in rec)
                 measured = [b for b in ev["branches"] if b.result]  # type: ignore[index]
                 if not measured:  # e.g. resumed into this state after the branches failed
                     raise Stop(_no_results(ev))
+                aug = next((r for r in rec if r.action == "augment" and r.support == "evidence_backed"), None)
+                plan = (plan_augmentation(AugmentEvidence.from_components(aug.components), c.get("augment_strength", 1.0))
+                        if aug and c.get("augment_verdict") != "drop" else [])
+                c["augment_plan"] = [a.model_dump() for a in plan]
+                if plan:  # judged after the next evaluation
+                    c["augment_trial"] = {
+                        "target": "changed_lighting" if aug.components.get("lighting_gap", 0) >= LIGHTING_GAP else None,  # type: ignore[union-attr]
+                        "strength": c.get("augment_strength", 1.0),
+                        "before": {b.spec.name: [b.result.successes, b.result.n] for b in measured}}  # type: ignore[union-attr]
                 worst_b = min(measured, key=lambda b: b.result.success_rate)  # type: ignore[union-attr]
                 region = recommendation_service.region_of(worst_b.spec.condition.cube_region, worst_b.spec.cube_offset)
                 cell = Condition(cube_region=region, lighting=worst_b.spec.condition.lighting)  # type: ignore[arg-type]
@@ -295,8 +308,10 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
                 c["next_reason"] = (f"ACT failed {r.n - r.successes} of {r.n} trials in '{worst_b.spec.name}' "
                                     f"-> generate {pol.demos_per_round} agent demonstrations in {cell.key}"
                                     + (f" and {gap.condition.key} (coverage gap: {gap.title})" if gap else ""))
-                await _step(ctx, run, "select", c["next_reason"] + (" (+ lighting augmentation: measured lighting gap)"
-                                                                     if c["augment_next"] else ""), [worst_b.id])
+                note = (f" (+ augmentation sized from measurements: {describe(plan)})" if plan else
+                        " (augmentation dropped: it did not help last time)" if aug and c.get("augment_verdict") == "drop"
+                        else "")
+                await _step(ctx, run, "select", c["next_reason"] + note, [worst_b.id] + ([aug.id] if aug else []))
                 run.iteration += 1
                 for k in ("collection_id", "collection_job_id", "dataset_job_id", "dataset_id", "training_job_id",
                           "checkpoint_id", "evaluation_id", "evaluation_job_id", "top_up_rounds"):
@@ -315,6 +330,37 @@ async def _loop(ctx: Ctx, project_id: str, run: AutopilotRun) -> None:
         await _step(ctx, run, run.phase, f"Error: {run.error}", status="failed")
     finally:
         _running.pop(project_id, None)
+
+
+REGRESSION = 0.15  # a drop this large on a non-target condition, with p < 0.1, drops augmentation
+
+
+def judge_augmentation(trial: dict, after: dict[str, tuple[int, int]]) -> tuple[str, float, str]:
+    """(keep | strengthen | drop, next strength, reason) for a round trained on an augmented dataset,
+    from the evaluation before it and the one after (successes, n per branch). The round also added
+    targeted demos, so the change is evidence about the whole round, not augmentation alone."""
+    before = {k: tuple(v) for k, v in trial["before"].items()}
+    strength = trial.get("strength", 1.0)
+    caveat = " (this round also added targeted demos, so it is not augmentation alone)"
+    for name, (k2, n2) in after.items():
+        if name == trial.get("target") or name not in before:
+            continue
+        k1, n1 = before[name]
+        drop, p = k1 / n1 - k2 / n2, two_proportion_p(k1, n1, k2, n2)
+        if drop >= REGRESSION and p < 0.1:
+            return "drop", strength, (f"Augmentation dropped: '{name}' fell {k1}/{n1} -> {k2}/{n2} (p={p:.2f}) after "
+                                      f"the augmented round{caveat}")
+    names = [trial["target"]] if trial.get("target") in after else [n for n in after if n in before]
+    deltas = {n: (before[n], after[n]) for n in names if n in before}
+    rate = lambda kn: kn[0] / kn[1] if kn[1] else 0.0  # noqa: E731
+    gain = min((rate(a) - rate(b) for b, a in deltas.values()), default=0.0)
+    shown = ", ".join(f"'{n}' {b[0]}/{b[1]} -> {a[0]}/{a[1]} (p={two_proportion_p(*b, *a):.2f})"
+                      for n, (b, a) in deltas.items())
+    if gain > 0:
+        return "keep", strength, f"Augmentation kept: {shown}{caveat}"
+    if strength <= 1.0:
+        return "strengthen", 1.5, f"Augmentation strengthened (x1.5) for the next round: no gain on {shown}{caveat}"
+    return "drop", strength, f"Augmentation dropped: still no gain after strengthening on {shown}{caveat}"
 
 
 def _no_results(ev: dict | None) -> str:

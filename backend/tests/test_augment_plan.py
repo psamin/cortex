@@ -1,17 +1,20 @@
 """Adaptive augmentation (#102): transforms, evidence-sized plans, the augmented-share cap, and the
 recommendation built from stored evaluations, demos and VLM clusters."""
 
+import asyncio
+
 import numpy as np
 import pytest
 
 from cortex.config import Settings
 from cortex.context import build_ctx
 from cortex.models import (
-    Augmentation, BranchResult, BranchSpec, Condition, CreateProjectRequest, Episode, EpisodeSource, EpisodeStatus,
+    Augmentation, AutopilotPolicy, AutopilotRun, BranchResult, BranchSpec, Condition, CreateProjectRequest, Episode,
+    EpisodeSource, EpisodeStatus,
     EvaluationRun, FailureCluster, JobStatus, PolicyRef, QualityReport, SimulationBranch,
 )
 from cortex.services import agent_orchestrator as orch
-from cortex.services import augment, recommendation_service
+from cortex.services import augment, autopilot, recommendation_service
 from cortex.services.augment import MAX_AUGMENTED_SHARE, AugmentEvidence, plan_augmentation
 from cortex.services.dataset_service import allocate_views
 
@@ -149,3 +152,44 @@ def test_view_allocation():
     assert allocate_views([0.25, 0.25, 0.25], 10) == [3, 2, 2]  # budget floor(7.5) = 7, largest remainder
     assert allocate_views([0.1] * 8, 3) == [1, 1, 0, 0, 0, 0, 0, 0]  # tiny dataset: budget 2, no overshoot
     assert allocate_views([0.3], 0) == [0]
+
+
+# ------------------------------------------------------------------ Autopilot keeps, strengthens or drops it
+
+TRIAL = {"target": "changed_lighting", "strength": 1.0, "before": {"baseline": [9, 10], "changed_lighting": [3, 10]}}
+
+
+@pytest.mark.parametrize("after,strength,verdict,next_strength", [
+    ({"baseline": (9, 10), "changed_lighting": (7, 10)}, 1.0, "keep", 1.0),
+    ({"baseline": (9, 10), "changed_lighting": (3, 10)}, 1.0, "strengthen", 1.5),
+    ({"baseline": (9, 10), "changed_lighting": (2, 10)}, 1.5, "drop", 1.5),
+    ({"baseline": (3, 10), "changed_lighting": (8, 10)}, 1.0, "drop", 1.0),  # regression elsewhere wins
+])
+def test_judge_augmentation(after, strength, verdict, next_strength):
+    got, s, why = autopilot.judge_augmentation({**TRIAL, "strength": strength}, after)
+    assert (got, s) == (verdict, next_strength)
+    assert "p=" in why and "not augmentation alone" in why
+
+
+async def test_autopilot_strengthens_augmentation_that_did_not_help(tmp_path):
+    ctx, p = await project_with_eval(tmp_path, base_k=9, dim_k=3)  # after the augmented round: no gain
+    p.autopilot = AutopilotPolicy(collector="oracle", max_iterations=3, target_success_rate=0.9, demos_per_round=1)
+    await ctx.repo.save("projects", p, status="active")
+    ev = (await ctx.repo.list("evaluation_runs", EvaluationRun, project_id=p.id))[0]
+    await ctx.repo.save("autopilot_runs", AutopilotRun(
+        project_id=p.id, collector="oracle", state="POLICY_EVALUATED", iteration=1,
+        context={"evaluation_id": ev.id, "checkpoint_id": "ck_1", "augment_trial": TRIAL}))
+    assert await autopilot.resume_all(ctx) == 1
+    for _ in range(200):
+        run = await autopilot.current(ctx, p.id)
+        if run.context.get("augment_plan") is not None or run.status != "running":
+            break
+        await asyncio.sleep(0.1)
+    await autopilot.stop(ctx, p.id)
+    assert run.context["augment_verdict"] == "strengthen" and run.context["augment_strength"] == 1.5
+    assert any("Augmentation strengthened" in s.message for s in run.steps)
+    plan = [Augmentation.model_validate(a) for a in run.context["augment_plan"]]
+    default = plan_augmentation(AugmentEvidence(lighting_gap=0.6, dim_brightness_ratio=0.4))
+    assert min(brightness(plan)) < min(brightness(default))  # strengthened and still sized from measurements
+    assert run.context["augment_trial"]["strength"] == 1.5
+    assert any("augmentation sized from measurements" in s.message for s in run.steps)
