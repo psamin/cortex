@@ -128,7 +128,6 @@ class Project(BaseModel):
     # Spec v2: what the calling agent described (intake) and the sim scene built from it.
     intake: IntakeSpec | None = None
     scene: dict[str, Any] | None = None  # SceneInfo.to_dict() plus the feasibility report
-)
     created_at: datetime = Field(default_factory=now)
 
 
