@@ -45,6 +45,7 @@ import type {
   RecommendationStatus,
   TrainingJob,
   DatasetVersion,
+  RLSandboxView,
 } from "./types";
 
 export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ||
@@ -241,6 +242,9 @@ export const api = {
   compare: (pid: string, evaluation_ids: string[]) =>
     post<ExperimentComparison>(`/projects/${pid}/comparisons`, { evaluation_ids }),
   nextActions: (pid: string) => get<NextAction[]>(`/projects/${pid}/next-actions`),
+
+  // RL sandboxes (#80): status views include the estimate, live curve, live frame and measured result
+  rlSandboxes: (pid: string) => get<RLSandboxView[]>(`/projects/${pid}/rl/sandboxes`),
 
   // agent
   agentHistory: (pid: string, thread?: string | null) =>
