@@ -87,6 +87,9 @@ export interface Project {
   spec: TaskSpec;
   plan: CollectionPlan;
   autopilot: AutopilotPolicy;
+  /** Spec v2 intake (guided chat projects); null for classic projects. */
+  intake?: Record<string, unknown> | null;
+  scene?: Record<string, unknown> | null;
   created_at: ISODate;
 }
 
@@ -496,14 +499,76 @@ export type AgentEvent =
   | { type: "tool_call"; tool: string; args: Record<string, unknown> }
   | { type: "tool_result"; tool: string; summary: string; ref_ids: string[] }
   | { type: "approval_required"; kind: string; ref_id: string; summary: string; args: Record<string, unknown> }
+  | { type: "card"; card: ChatCard }
+  | { type: "step"; step: StepInfo }
   | { type: "done" }
   | { type: "error"; message: string };
 
 export interface AgentHistoryItem {
   role: string;
-  content: string;
+  content?: string;
   tool?: string | null;
+  /** role "event": a card, approval, step or tool result kept so a reload can redraw it. */
+  event?: string;
+  data?: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------- guided chat cards (event: card)
+export interface PatchOption {
+  label: string;
+  patch: Record<string, unknown>;
+}
+export interface StepInfo {
+  step: string;
+  index: number;
+  label: string;
+  steps: string[];
+}
+export interface FeasCheck {
+  ok: boolean;
+  detail: string;
+  value?: number | null;
+  limit?: number | null;
+}
+export interface FeasObject {
+  name: string;
+  ok: boolean;
+  grasp: FeasCheck;
+  payload: FeasCheck;
+  tall: boolean;
+  grasp_mode: string;
+}
+export interface FeasPlace {
+  name: string;
+  kind: "start" | "zone";
+  ok: boolean;
+  grasp_err_mm: number;
+  carry_err_mm: number;
+}
+export interface ResultRow {
+  name: string;
+  n: number;
+  successes: number;
+  success_rate: number;
+  ci95: [number, number];
+}
+export type ChatCard =
+  | { type: "question"; path: string; prompt: string; why: string; question_type: string; options: PatchOption[]; allow_text: boolean }
+  | { type: "image"; label: string; camera: string; url?: string | null; key?: string | null; scene?: string | null; image_jpeg_base64?: string | null }
+  | { type: "feasibility"; ok: boolean; summary: string; jaw_opening_m?: number | null; objects: FeasObject[]; places: FeasPlace[]; suggestions: PatchOption[] }
+  | { type: "job"; job_id: string; kind: string; title: string; job: Job }
+  | {
+      type: "training_manual";
+      training_job_id: string;
+      backend: string;
+      command: string;
+      checkpoint_hint: string;
+      smoke_available: boolean;
+      smoke_reason?: string | null;
+      smoke_steps: number;
+    }
+  | { type: "results"; evaluation_id: string; policy: string; checkpoint_id: string; checkpoint_step: number; smoke: boolean; branches: ResultRow[] }
+  | { type: "actions"; actions: { label: string; message: string }[] };
 
 // ---------------------------------------------------------------- lineage graph
 export type GraphNodeType =
@@ -711,4 +776,14 @@ export interface PlannerBudget {
   budget_usd: number;
   spent_usd: number;
   remaining_usd: number;
+}
+
+// ---------------------------------------------------------------- intake (spec v2), loosely typed
+export interface IntakeStatus {
+  spec: Record<string, unknown>;
+  questions: { path: string; type: string; prompt: string; why: string; options: string[]; required: boolean; patch?: Record<string, unknown> | null }[];
+  complete: boolean;
+  notes: string[];
+  changed: string[];
+  still_assumed: string[];
 }

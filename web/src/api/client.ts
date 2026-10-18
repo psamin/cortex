@@ -9,6 +9,9 @@ import type {
   PlannerStatus,
   StartAgentCollectionRequest,
   AgentEvent,
+  ChatCard,
+  IntakeStatus,
+  StepInfo,
   AgentHistoryItem,
   Analysis,
   AuditRow,
@@ -199,6 +202,10 @@ export const api = {
     post<ExperimentComparison>(`/projects/${pid}/comparisons`, { evaluation_ids }),
   nextActions: (pid: string) => get<NextAction[]>(`/projects/${pid}/next-actions`),
 
+  // intake (spec v2)
+  startIntake: (prompt: string, mode: "sim" | "real" = "sim") =>
+    post<IntakeStatus & { project_id: string }>("/intake", { prompt, mode }),
+
   // agent
   agentHistory: (pid: string) => get<AgentHistoryItem[]>(`/projects/${pid}/agent/history`),
 };
@@ -207,13 +214,18 @@ export const api = {
  * POST /projects/{pid}/agent streams SSE over a POST body, so EventSource can't be used.
  * Parses `event:` / `data:` frames from a ReadableStream and yields typed events.
  */
-export async function* streamAgent(pid: string, message: string, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+export async function* streamAgent(
+  pid: string,
+  message: string,
+  signal?: AbortSignal,
+  patch?: Record<string, unknown>,
+): AsyncGenerator<AgentEvent> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/projects/${pid}/agent`, {
       method: "POST",
       headers: { ...ACTOR_HEADER, "Content-Type": "application/json", Accept: "text/event-stream" },
-      body: JSON.stringify({ message }),
+      body: JSON.stringify(patch ? { message, patch } : { message }),
       signal,
     });
   } catch (e) {
@@ -287,6 +299,10 @@ function parseFrame(frame: string): AgentEvent | null {
         summary: String(payload.summary ?? ""),
         args: (payload.args as Record<string, unknown>) ?? {},
       };
+    case "card":
+      return { type: "card", card: payload as unknown as ChatCard };
+    case "step":
+      return { type: "step", step: payload as unknown as StepInfo };
     case "done":
       return { type: "done" };
     case "error":
