@@ -54,3 +54,5 @@ comments (the `Claim:` convention on #20 and the owning issue) remain the source
 | #25 policy runs on the real arm | `25-policy-runs` | Claude Code, driven by @psamin | `backend/cortex/hardware/arm_worker.py`, `backend/cortex/services/hardware_service.py`, `backend/cortex/api/app.py`, tests |
 | #26 Setup panel (infra choices UI) | `26-setup-panel` | Claude Code, driven by @psamin | `[new] web/src/pages/Setup.tsx` (or a chat-header sheet), `web/src/api/*` |
 | P5/P6: sessions and collection on intake scenes | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py` and `backend/cortex/services/robot_session_service.py`, coordinated on #16 |
+| #70 failure diagnosis by Claude Code | `70-claude-code-diagnosis` | Claude Code, driven by @Suhas0723 | `[new] backend/cortex/services/claude_code_diagnosis.py`, `backend/cortex/services/analysis_service.py`, `[new] backend/tests/test_claude_code_diagnosis.py` |
+| #67 Windows calibration test | `67-windows-calibrate-test` | Claude Code, driven by @Suhas0723 | `backend/tests/test_hardware_calibrate.py` |
