@@ -3,22 +3,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, CircleDashed, Cpu, Square } from "lucide-react";
 import { ApiError, api } from "../api/client";
 import { cn } from "../lib/format";
+import { initialPick, SIM_TITLE, type Pick } from "./livePick";
 
 /** Trained policies running on a Futurama GPU over held-out episodes they never trained on (#157).
  *  "Request a GPU" (one click; never automatic) attaches to a running server or submits one, then narrates each
  *  Slurm step until it's live. */
-const SIM_TITLE: Record<string, string> = {
-  jenga: "Jenga", screwdriver: "Screwdriver", unscrew: "Unscrew (grip)", palletize: "Palletizing", suture: "Suture",
-};
-// which sim task a project opens on, from its name/goal; earlier entries win ("Screwdriver" before "Unscrew")
-const SIM_MATCH: [string, RegExp][] = [
-  ["jenga", /jenga/i], ["screwdriver", /screwdriver/i], ["palletize", /pallet|forklift|box/i],
-  ["unscrew", /unscrew|bolt/i], ["suture", /sutur/i],
-];
-type Pick = { kind: "sim"; task: string; seed: number } | { kind: "replay"; task: string; ep: number };
 
-/** `hint`: the project's goal, to open on its own task (e.g. "Jenga (sim)" opens the Jenga policy). */
-export function GpuStage({ hint = "" }: { hint?: string }) {
+/** Opens on project `pid`'s own policy: from the server's projects map, else from `hint` (the project's name and
+ *  prompt, e.g. "Screwdriver (sim)"). */
+export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
   const qc = useQueryClient();
   const st = useQuery({
     queryKey: ["live-policy"],
@@ -54,23 +47,30 @@ export function GpuStage({ hint = "" }: { hint?: string }) {
             ))}
           </ol>
         )}
-        {!busy && (
-          <button type="button" onClick={() => start.mutate()}
-            className="h-8 rounded-full bg-ink px-4 text-xs font-medium text-bench">
-            {s?.error ? "Try again" : "Request a GPU"}
-          </button>
-        )}
-        {err && <p className="max-w-sm text-center text-xs text-fault">{err.message}</p>}
+        <div className="flex items-center gap-2">
+          {!busy && (
+            <button type="button" onClick={() => start.mutate()}
+              className="h-8 rounded-full bg-ink px-4 text-xs font-medium text-bench">
+              {s?.error ? "Try again" : "Request a GPU"}
+            </button>
+          )}
+          {s?.job && (
+            // a queued or starting job can be cancelled here: otherwise it holds a GPU for its walltime
+            <button type="button" onClick={() => stop.mutate()} disabled={stop.isPending}
+              className="inline-flex h-8 items-center gap-1 rounded-full border border-line-strong px-3 text-xs text-ink-3 hover:text-ink">
+              <Square className="h-3 w-3" /> Cancel GPU job {s.job}
+            </button>
+          )}
+        </div>
+        {err && err.message !== s?.reason && <p className="max-w-sm text-center text-xs text-fault">{err.message}</p>}
       </div>
     );
   }
 
   const sims = Object.entries(s.sim ?? {});
   const run = (task: string) => setPick({ kind: "sim", task, seed: 100_000 + Math.floor(Math.random() * 900_000) });
-  const own = SIM_MATCH.find(([t, re]) => s.sim?.[t] && re.test(hint))?.[0];
-  const cur: Pick | null =
-    pick ?? (own ? { kind: "sim", task: own, seed: 100_000 } : sims[0] ? { kind: "sim", task: sims[0][0], seed: 100_000 }
-      : policies[0] ? { kind: "replay", task: policies[0][0], ep: policies[0][1].held_out[0] } : null);
+  const first = initialPick(s, pid, hint);
+  const cur: Pick | null = pick ?? first.pick;
   const curSim = cur?.kind === "sim" ? s.sim?.[cur.task] : undefined;
   return (
     <div className="relative flex h-full flex-col">
@@ -97,6 +97,7 @@ export function GpuStage({ hint = "" }: { hint?: string }) {
           <Square className="h-3 w-3" /> Stop GPU
         </button>
       </div>
+      {!pick && first.note && <p className="px-4 pt-2 text-xs text-ink-3">{first.note}</p>}
       {curSim && cur?.kind === "sim" && (
         <div className="flex items-center gap-3 px-4 pt-2 text-xs text-ink-2">
           <span>{curSim.instruction}</span>

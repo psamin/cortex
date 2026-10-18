@@ -124,7 +124,8 @@ export function ProjectChatPage() {
         </div>
         <div className="min-w-0 flex-1">
           <Viewer pid={pid} goal={project?.spec.goal ?? project?.task_prompt ?? "…"} asked={asked} building={building}
-            sceneDigest={project?.scene?.digest ?? null} activity={activity} sel={sel} />
+            sceneDigest={project?.scene?.digest ?? null} activity={activity} sel={sel}
+            taskHint={project ? `${project.name} ${project.task_prompt}` : ""} />
         </div>
       </div>
       <Pipeline pid={pid} open={pipelineOpen} onToggle={() => setPipelineOpen(!pipelineOpen)} sel={sel} />

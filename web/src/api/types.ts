@@ -853,6 +853,8 @@ export interface LivePolicyStatus {
   policies?: Record<string, { checkpoint: string; stage: string; held_out: number[] }>;
   /** sim-trained policies, run closed loop in MuJoCo on the GPU (best evaluated checkpoint per task) */
   sim?: Record<string, { variant: string; step: number; success_rate: number; eval_episodes: number; eval_seeds: string; instruction: string }>;
+  /** the project holding each served task (<task>, or sim_<task>), from infra/futurama/projects.json */
+  projects?: Record<string, string>;
 }
 
 // ------------------------------------------------------------------ RL sandboxes (#80)

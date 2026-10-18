@@ -60,6 +60,7 @@ export function Viewer({
   goal,
   asked,
   building,
+  taskHint = "",
   sceneDigest,
   activity,
   sel,
@@ -70,6 +71,8 @@ export function Viewer({
   asked?: string | null;
   /** a new task's scene is being set up (this is its request): show only that, nothing of another scene */
   building?: string | null;
+  /** the project's name and prompt: the Inference tab opens on the project's own policy */
+  taskHint?: string;
   /** the scene built from the user's prompt, shown until there are videos */
   sceneDigest?: string | null;
   activity: { label: string; busy: boolean } | null;
@@ -216,7 +219,7 @@ export function Viewer({
         {setup ? (
           <BuildingStage />
         ) : showGpu ? (
-          <GpuStage hint={goal} />
+          <GpuStage pid={pid} hint={`${taskHint} ${goal}`} />
         ) : showLive ? (
           // a new run is a new stream: never carry the last run's frame or its "unavailable" state over
           <LiveStage key={liveJob?.id ?? "none"} pid={pid} job={liveJob} />
