@@ -10,6 +10,7 @@ policy trained on them fairly.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import shutil
 import tarfile
@@ -103,17 +104,25 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
                         "ok", f"{len(res['episodes'])} episodes imported as {ds.id}")
         return ds.id
 
-    return ctx.jobs.submit("import", project.id, run, idempotency_key=f"import:{project.id}:{label}:{max_episodes}")
+    return ctx.jobs.submit("import", project.id, run, idempotency_key=dedup_key(project.id, source, max_episodes))
 
 
-def save_upload(ctx: Ctx, project_id: str, filename: str, data: bytes) -> Path:
+def dedup_key(project_id: str, source: dict[str, Any], max_episodes: int) -> str:
+    """The same Hub repo or the same archive bytes (not merely the same folder name) imports once."""
+    what = f"hf:{source['hub']}@{source.get('revision') or 'main'}" if "hub" in source else \
+        f"upload:{source.get('sha256') or source['path']}"
+    return f"import:{project_id}:{what}:{max_episodes}"
+
+
+def save_upload(ctx: Ctx, project_id: str, filename: str, data: bytes) -> dict[str, str]:
+    """Store and unpack an uploaded archive; returns the import source (dataset path + archive hash)."""
     imp = new_id("upl")
     base = ctx.local(import_key(project_id, imp))
     base.mkdir(parents=True, exist_ok=True)
     archive = base / Path(filename).name
     archive.write_bytes(data)
     try:
-        return extract_archive(archive, base / "raw")
+        return {"path": str(extract_archive(archive, base / "raw")), "sha256": hashlib.sha256(data).hexdigest()}
     except Exception:
         shutil.rmtree(base, ignore_errors=True)
         raise

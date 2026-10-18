@@ -561,8 +561,8 @@ async def import_upload(pid: str, request: Request, max_episodes: int = 10):
     data = await up.read()  # type: ignore[union-attr]
     if len(data) > 2 * 1024 ** 3:
         raise ValueError("archive larger than 2 GB; use a Hugging Face repo id instead")
-    root = import_service.save_upload(ctx(), pid, up.filename or "upload.zip", data)  # type: ignore[union-attr]
-    job = await import_service.start_import(ctx(), await orch.get_project(ctx(), pid), {"path": str(root)},
+    src = import_service.save_upload(ctx(), pid, up.filename or "upload.zip", data)  # type: ignore[union-attr]
+    job = await import_service.start_import(ctx(), await orch.get_project(ctx(), pid), src,
                                             max(1, min(max_episodes, 50)), actor(request))
     return job.model_dump()
 

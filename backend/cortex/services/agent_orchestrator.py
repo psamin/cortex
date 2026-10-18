@@ -74,7 +74,7 @@ async def project_state(ctx: Ctx, project: Project) -> ProjectState:
     counts["total"] = len(eps)
     accepted_by_cell: dict[str, int] = {}
     for e in eps:
-        if e.status == EpisodeStatus.accepted:
+        if e.status == EpisodeStatus.accepted and e.source != "imported":  # real demos don't cover sim cells
             accepted_by_cell[e.condition.key] = accepted_by_cell.get(e.condition.key, 0) + 1
     for cell in project.plan.cells:
         cell.collected = accepted_by_cell.get(cell.condition.key, 0)
