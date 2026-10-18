@@ -36,6 +36,22 @@ def project_for_task(ctx: Ctx, task: str) -> str | None:
     return pid if isinstance(pid, str) and pid.startswith("prj_") else None
 
 
+async def project_for(ctx: Ctx, key: str) -> str | None:
+    """project_for_task, and for a sim task (sim_<task>) without an entry, the project scripts/import_sim_task.py
+    named for it ("Jenga (sim)"): projects.json gets that entry only on the machine that ran the import."""
+    pid = project_for_task(ctx, key)
+    if pid or not key.startswith("sim_"):
+        return pid
+    from . import project_cleanup
+    from .sim_import_service import project_name
+
+    name = project_name(key.removeprefix("sim_"))
+    rows = sorted((r for r in await ctx.store.list("projects")
+                   if r["data"].get("name") == name and r.get("status") != project_cleanup.DELETED),
+                  key=lambda r: str(r.get("created_at")))
+    return rows[0]["id"] if rows else None
+
+
 def file_key(pid: str, replay_id: str, name: str) -> str:
     return f"projects/{pid}/replays/{replay_id}/{name}"
 
