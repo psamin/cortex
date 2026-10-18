@@ -193,7 +193,7 @@ def _ssh(cluster: Cluster, args: list[str]) -> int:
         f.write(json.dumps(["ssh", *args]) + "\n")
     st = cluster.read()
     if "-G" in args:
-        print(f"user pi34\nhostname planetexpress-login.cc.gatech.edu\nport 22")
+        print("user pi34\nhostname planetexpress-login.cc.gatech.edu\nport 22")
         return 0
     if st["hang_s"]:
         time.sleep(st["hang_s"])

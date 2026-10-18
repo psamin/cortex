@@ -244,3 +244,15 @@ def test_project_log_shows_every_agent_on_the_project(client):
     assert all("image_urls" in c for c in calls)
     assert any(ev == "entity" and d.get("table") == "tool_audit_logs" for ev, d in drain(q))
     assert client.get("/api/agents/projects/prj_missing/calls").json() == []
+
+
+def test_agent_decisions_land_in_the_project_log(client):
+    """log_decision: the agent narrates its plan; the note is a call row in the project's Agent log."""
+    pid = client.post("/api/tools/start_intake", json={"prompt": "pick up the cube"}, headers=agent()).json()["project_id"]
+    r = client.post("/api/tools/log_decision", headers=agent(),
+                    json={"project_id": pid, "kind": "plan", "text": "Collect 10 demos first, then train ACT."})
+    assert r.status_code == 200 and r.json()["kind"] == "plan", r.text
+    assert client.post("/api/tools/log_decision", headers=agent(), json={"project_id": "prj_nope", "text": "x"}).status_code == 404
+    calls = client.get(f"/api/agents/projects/{pid}/calls").json()
+    note = [c for c in calls if c["tool"] == "log_decision"]
+    assert len(note) == 1 and note[0]["args"]["kind"] == "plan" and "10 demos" in note[0]["args"]["text"]
