@@ -31,8 +31,15 @@ CAMERAS = {"smolvla": {"camera1": "front", "camera2": "wrist"}}  # smolvla_base'
 
 
 def best_checkpoints(sim_dir: Path) -> dict[str, dict[str, Any]]:
-    """Per task, the evaluated checkpoint with the highest closed-loop success rate."""
+    """Per task, the evaluated checkpoint with the highest closed-loop success rate; a task whose runs are
+    trained but not evaluated yet serves its newest checkpoint, marked score pending (success_rate None)."""
     best: dict[str, dict[str, Any]] = {}
+    for ck in sorted(sim_dir.glob("*/runs/*/checkpoints/*/pretrained_model"), key=lambda c: c.stat().st_mtime):
+        if (ck / "config.json").exists():
+            task, variant, step = ck.parts[-6], ck.parts[-4], ck.parts[-2]
+            best[task] = {"task": task, "variant": variant, "step": int(step), "checkpoint": str(ck),
+                          "success_rate": None, "eval_episodes": 0, "eval_seeds": ""}
+    unscored = set(best)
     for m in sim_dir.glob("*/runs/*/eval/*/metrics.json"):
         task, variant, step = m.parts[-6], m.parts[-4], m.parts[-2]
         r = json.loads(m.read_text())
@@ -41,8 +48,9 @@ def best_checkpoints(sim_dir: Path) -> dict[str, dict[str, Any]]:
             continue
         cand = {"task": task, "variant": variant, "step": int(step), "checkpoint": str(ck),
                 "success_rate": r["success_rate"], "eval_episodes": r["episodes"], "eval_seeds": r["seeds"]}
-        if task not in best or (cand["success_rate"], cand["step"]) > (best[task]["success_rate"], best[task]["step"]):
+        if task in unscored or (cand["success_rate"], cand["step"]) > (best[task]["success_rate"], best[task]["step"]):
             best[task] = cand
+            unscored.discard(task)
     return best
 
 
@@ -56,8 +64,9 @@ def load(sim_dir: Path) -> dict[str, dict[str, Any]]:
         policy = LeRobotPolicy(info["checkpoint"], device="cuda", task=env.instruction,
                                cameras=CAMERAS.get(info["variant"]))
         out[task] = {**info, "env": env, "policy": policy, "instruction": env.instruction}
-        print(f"[serve] sim {task}: {info['variant']} step {info['step']}, "
-              f"{info['success_rate']:.0%} on {info['eval_episodes']} unseen layouts", flush=True)
+        score = (f"{info['success_rate']:.0%} on {info['eval_episodes']} unseen layouts"
+                 if info["success_rate"] is not None else "score pending")
+        print(f"[serve] sim {task}: {info['variant']} step {info['step']}, {score}", flush=True)
     return out
 
 
