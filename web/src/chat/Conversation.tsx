@@ -1,11 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { ArrowUp, Check, ChevronRight, CircleDashed, RotateCcw, Square, X } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Link } from "react-router-dom";
+import { ArrowDown, ArrowUp, Ban, Check, ChevronRight, CircleDashed, RotateCcw, Square, X } from "lucide-react";
 import { useTraining } from "../api/hooks";
+import { refRoute } from "../components/refs";
 import { cn, evidenceValue } from "../lib/format";
 import { ApprovalItem, BudgetCard, ResultCards, TrainingApproval } from "./cards";
 import { useChat } from "./ChatProvider";
 import { Markdown } from "./Markdown";
-import { isCardRef, prefixOf, toolLabel, type ChatItem } from "./model";
+import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
 
 const SUGGESTIONS = [
   "Where does this project stand?",
@@ -14,43 +16,46 @@ const SUGGESTIONS = [
   "Test the policy in 3 conditions and tell me what failed",
 ];
 
+/** Within this many px of the end counts as "at the bottom". */
+const STICK_PX = 48;
+
 export function Conversation({ pid }: { pid: string }) {
   const chat = useChat();
   const scroller = useRef<HTMLDivElement>(null);
+  const content = useRef<HTMLDivElement>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
 
-  // stick to the bottom while new content streams in
-  const atBottom = useRef(true);
-  useEffect(() => {
+  // Scroll: follow new content only while the reader is at the bottom; otherwise offer a pill.
+  const stuck = useRef(true);
+  const [showJump, setShowJump] = useState(false);
+  const [unseen, setUnseen] = useState(false);
+  const toBottom = (smooth = false) => {
     const el = scroller.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: smooth ? "smooth" : "auto" });
+  };
+  useLayoutEffect(() => {
+    if (stuck.current) toBottom();
+    else setUnseen(true);
   }, [chat.items, chat.busy]);
-
-  // Which result cards render where: each ref at its latest mention; a training approval only once (latest).
-  const plan = useMemo(() => {
-    const cards = new Map<number, string[]>();
-    const approvalShown = new Map<number, boolean>();
-    const seen = new Set<string>();
-    let trainingApproval = false;
-    for (let i = chat.items.length - 1; i >= 0; i--) {
-      const it = chat.items[i];
-      if (it.kind === "tool") {
-        const refs = it.refIds.filter((r) => isCardRef(r) && !seen.has(r));
-        refs.forEach((r) => seen.add(r));
-        if (refs.length) cards.set(it.id, refs);
-        if (refs.some((r) => prefixOf(r) === "tj")) {
-          approvalShown.set(it.id, !trainingApproval);
-          trainingApproval = true;
-        }
-      } else if (it.kind === "approval") {
-        const isTraining = it.approvalKind !== "evaluation";
-        approvalShown.set(it.id, isTraining ? !trainingApproval : true);
-        if (isTraining) trainingApproval = true;
-      }
+  useEffect(() => {
+    // cards load their data after mounting and grow: keep following while stuck
+    const el = content.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => stuck.current && toBottom());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+  useEffect(() => {
+    if (!chat.loading) {
+      stuck.current = true;
+      toBottom();
     }
-    return { cards, approvalShown, anyTrainingApproval: trainingApproval };
-  }, [chat.items]);
+  }, [chat.loading]);
 
+  const trainingApprovalInChat = blocks.some(
+    (b) => (b.type === "tools" && b.cards.some((r) => prefixOf(r) === "tj")) || (b.type === "item" && b.item.kind === "approval" && b.item.approvalKind !== "evaluation"),
+  );
   const empty = !chat.loading && chat.items.length === 0;
   const lastRunning = [...chat.items].reverse().find((i) => i.kind === "tool" && i.status === "running");
 
@@ -77,38 +82,58 @@ export function Conversation({ pid }: { pid: string }) {
         </div>
       </div>
 
-      <div
-        ref={scroller}
-        onScroll={(e) => {
-          const el = e.currentTarget;
-          atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-        }}
-        className="min-h-0 flex-1 overflow-y-auto scroll-thin"
-      >
-        <div className="mx-auto max-w-[680px] space-y-4 px-5 py-6">
-          {chat.loading && (
-            <div className="space-y-3">
-              <div className="skeleton ml-auto h-10 w-2/3 rounded-2xl" />
-              <div className="skeleton h-16 w-full rounded-xl" />
-            </div>
-          )}
-          {!!chat.loadError && <p className="text-sm text-fault">Couldn't load the conversation. Is the backend running?</p>}
-          {empty && (
-            <div className="pt-6">
-              <p className="text-xl font-semibold tracking-[-0.015em]">What should we do next?</p>
-              <p className="mt-1.5 text-sm text-ink-3">The agent collects demonstrations, trains, tests, and improves the policy. It asks before anything costs money or needs a GPU.</p>
-            </div>
-          )}
-          {chat.items.map((it) => (
-            <Item key={it.id} it={it} pid={pid} cards={plan.cards.get(it.id)} showApproval={plan.approvalShown.get(it.id) ?? true} />
-          ))}
-          {chat.busy && !lastRunning && <Thinking startedAt={chat.turnStartedAt} />}
+      <div className="relative min-h-0 flex-1">
+        <div
+          ref={scroller}
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+            stuck.current = atEnd;
+            setShowJump(!atEnd);
+            if (atEnd) setUnseen(false);
+          }}
+          className="h-full overflow-y-auto overscroll-contain scroll-thin"
+        >
+          <div ref={content} className="mx-auto max-w-[680px] space-y-4 px-5 py-6">
+            {chat.loading && (
+              <div className="space-y-3">
+                <div className="skeleton ml-auto h-10 w-2/3 rounded-2xl" />
+                <div className="skeleton h-16 w-full rounded-xl" />
+              </div>
+            )}
+            {!!chat.loadError && <p className="text-sm text-fault">Couldn't load the conversation. Is the backend running?</p>}
+            {empty && (
+              <div className="pt-6">
+                <p className="text-xl font-semibold tracking-[-0.015em]">What should we do next?</p>
+                <p className="mt-1.5 text-sm text-ink-3">The agent collects demonstrations, trains, tests, and improves the policy. It asks before anything costs money or needs a GPU.</p>
+              </div>
+            )}
+            {blocks.map((b) => (
+              <BlockView key={b.key} b={b} pid={pid} />
+            ))}
+            {chat.busy && !lastRunning && <Thinking startedAt={chat.turnStartedAt} />}
+          </div>
         </div>
+        {showJump && (
+          <button
+            type="button"
+            onClick={() => {
+              stuck.current = true;
+              setUnseen(false);
+              toBottom(true);
+            }}
+            className="enter absolute bottom-3 left-1/2 inline-flex -translate-x-1/2 items-center gap-1.5 rounded-full bg-plate px-3 py-1.5 text-xs text-ink shadow-[0_0_0_1px_var(--line-strong),0_8px_20px_-8px_rgba(0,0,0,.5)] hover:bg-rail"
+          >
+            <ArrowDown className="h-3.5 w-3.5" />
+            {unseen ? "New activity" : "Jump to latest"}
+            {unseen && <span className="h-1.5 w-1.5 rounded-full bg-servo" />}
+          </button>
+        )}
       </div>
 
-      <div className="shrink-0 px-4 pb-4">
+      <div className="shrink-0 px-4 pb-4 pt-2">
         <div className="mx-auto max-w-[680px]">
-          {!plan.anyTrainingApproval && <PendingApproval pid={pid} />}
+          {!trainingApprovalInChat && <PendingApproval pid={pid} />}
           {empty && (
             <div className="mb-2.5 flex flex-wrap gap-1.5">
               {SUGGESTIONS.map((s) => (
@@ -125,7 +150,16 @@ export function Conversation({ pid }: { pid: string }) {
   );
 }
 
-function Item({ it, pid, cards, showApproval }: { it: ChatItem; pid: string; cards?: string[]; showApproval: boolean }) {
+function BlockView({ b, pid }: { b: Block; pid: string }) {
+  if (b.type === "tools")
+    return (
+      <div className="space-y-2.5">
+        {b.tools.length === 1 ? <ToolRow it={b.tools[0]} /> : <ToolGroup tools={b.tools} />}
+        {b.budgetError && <BudgetCard pid={pid} message={b.budgetError} />}
+        {b.cards.length > 0 && <ResultCards pid={pid} refs={b.cards} />}
+      </div>
+    );
+  const it = b.item;
   switch (it.kind) {
     case "user":
       return (
@@ -139,16 +173,10 @@ function Item({ it, pid, cards, showApproval }: { it: ChatItem; pid: string; car
           <Markdown text={it.text} />
         </div>
       );
-    case "tool":
-      return (
-        <div className="space-y-2.5">
-          <ToolRow it={it} />
-          {it.status === "error" && /budget/i.test(it.summary) && <BudgetCard pid={pid} message={it.summary} />}
-          {cards && cards.length > 0 && (showApproval ? <ResultCards pid={pid} refs={cards} /> : <ResultCards pid={pid} refs={cards.filter((r) => prefixOf(r) !== "tj")} />)}
-        </div>
-      );
     case "approval":
-      return showApproval ? <ApprovalItem pid={pid} kind={it.approvalKind} refId={it.refId} summary={it.summary} args={it.args} /> : null;
+      return <ApprovalItem pid={pid} kind={it.approvalKind} refId={it.refId} summary={it.summary} args={it.args} />;
+    case "job_done":
+      return <JobDoneRow it={it} pid={pid} />;
     case "meta":
       return (
         <div className="flex items-center gap-2 text-[11px] text-ink-4" title={it.costUsd ? `agent cost $${it.costUsd.toFixed(2)}` : undefined}>
@@ -162,8 +190,96 @@ function Item({ it, pid, cards, showApproval }: { it: ChatItem; pid: string; car
   }
 }
 
+function StatusIcon({ status }: { status: "running" | "ok" | "error" | "cancelled" }) {
+  if (status === "running") return <CircleDashed className="h-4 w-4 animate-spin text-servo" />;
+  if (status === "cancelled")
+    return (
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-rail text-ink-3">
+        <Ban className="h-2.5 w-2.5" />
+      </span>
+    );
+  if (status === "error")
+    return (
+      <span className="flex h-4 w-4 items-center justify-center rounded-full bg-fault/15 text-fault">
+        <X className="h-2.5 w-2.5" />
+      </span>
+    );
+  return (
+    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-pass/15 text-pass">
+      <Check className="h-2.5 w-2.5" />
+    </span>
+  );
+}
+
+/** Several tool calls in a row collapse into one expandable "n tool calls" row. */
+function ToolGroup({ tools }: { tools: ToolItem[] }) {
+  const [open, setOpen] = useState(false);
+  const running = tools.find((t) => t.status === "running");
+  const failed = tools.some((t) => t.status === "error");
+  const calls = tools.reduce((n, t) => n + t.count, 0);
+  const labels = [...new Set(tools.map((t) => toolLabel(t.tool, t.args)))];
+  return (
+    <div className="enter">
+      <button type="button" onClick={() => setOpen((o) => !o)} className="group flex w-full items-center gap-2.5 rounded-lg py-1 text-left" aria-expanded={open}>
+        <span className="flex h-5 w-5 shrink-0 items-center justify-center">
+          <StatusIcon status={running ? "running" : failed ? "error" : "ok"} />
+        </span>
+        <span className={cn("shrink-0 text-sm", running ? "text-ink" : "text-ink-2")}>
+          {running ? `${toolLabel(running.tool, running.args)}…` : `${calls} tool calls`}
+        </span>
+        {!open && <span className="min-w-0 flex-1 truncate text-xs text-ink-3">{running ? `${calls} tool calls` : labels.join(" · ")}</span>}
+        <ChevronRight className={cn("ml-auto h-3.5 w-3.5 shrink-0 text-ink-4 transition-transform group-hover:text-ink-3", open && "rotate-90")} />
+      </button>
+      {open && (
+        <div className="ml-[10px] mt-1 border-l border-line pl-4">
+          {tools.map((t) => (
+            <ToolRow key={t.id} it={t} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const REF_NOUN: Record<string, string> = { ds: "dataset", ev: "evaluation", ac: "collection", tj: "training job", an: "analysis", ep: "demo", ck: "checkpoint", rec: "recommendation" };
+
+/** A background job finished: one fixed line written by Cortex, with links to what it produced. */
+function JobDoneRow({ it, pid }: { it: Extract<ChatItem, { kind: "job_done" }>; pid: string }) {
+  const status = it.status === "succeeded" ? "ok" : it.status === "cancelled" ? "cancelled" : "error";
+  return (
+    <div className="enter flex items-start gap-2.5 py-1">
+      <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center">
+        <StatusIcon status={status} />
+      </span>
+      <div className="min-w-0 flex-1">
+        <p className={cn("text-sm leading-snug", status === "error" ? "text-fault" : "text-ink-2")}>{it.text}</p>
+        {it.refIds.length > 0 && (
+          <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5">
+            {it.refIds.map((r) => {
+              const to = refRoute(pid, r);
+              const label = `Open ${REF_NOUN[prefixOf(r)] ?? r}`;
+              return to ? (
+                <Link key={r} to={to} className="text-xs text-servo hover:underline" title={r}>
+                  {label}
+                </Link>
+              ) : (
+                <span key={r} className="font-mono text-[11px] text-ink-3">
+                  {r}
+                </span>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      <span className="shrink-0 pt-0.5 text-[10px] uppercase tracking-wide text-ink-4" title="Written by Cortex when the job finished">
+        {it.jobKind.replace(/_/g, " ")}
+      </span>
+    </div>
+  );
+}
+
 /** A tool call as a human status row: label, state, collapsed details (never raw JSON). */
-function ToolRow({ it }: { it: Extract<ChatItem, { kind: "tool" }> }) {
+function ToolRow({ it }: { it: ToolItem }) {
   const [open, setOpen] = useState(false);
   const args = Object.entries(it.args).filter(([k]) => k !== "project_id");
   const hasDetails = !!it.summary || args.length > 0;
@@ -171,17 +287,7 @@ function ToolRow({ it }: { it: Extract<ChatItem, { kind: "tool" }> }) {
     <div className="enter">
       <button type="button" onClick={() => hasDetails && setOpen((o) => !o)} className={cn("group flex w-full items-center gap-2.5 rounded-lg py-1 text-left", hasDetails && "cursor-pointer")}>
         <span className="flex h-5 w-5 shrink-0 items-center justify-center">
-          {it.status === "running" ? (
-            <CircleDashed className="h-4 w-4 animate-spin text-servo" />
-          ) : it.status === "error" ? (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-fault/15 text-fault">
-              <X className="h-2.5 w-2.5" />
-            </span>
-          ) : (
-            <span className="flex h-4 w-4 items-center justify-center rounded-full bg-pass/15 text-pass">
-              <Check className="h-2.5 w-2.5" />
-            </span>
-          )}
+          <StatusIcon status={it.status} />
         </span>
         <span className={cn("text-sm", it.status === "running" ? "text-ink" : "text-ink-2")}>
           {toolLabel(it.tool, it.args)}

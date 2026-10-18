@@ -40,6 +40,8 @@ const MAX_LOG_LINES = 2000;
 class ProjectEventStore {
   private snap: Snapshot = { status: "connecting", jobs: {}, logs: {}, lastEntityAt: 0, agent: {} };
   private listeners = new Set<() => void>();
+  /** SSE `chat` lines (e.g. job_done) are pushed to subscribers, not kept in the snapshot. */
+  chatListeners = new Set<(entry: Record<string, unknown>) => void>();
   subscribe = (fn: () => void) => {
     this.listeners.add(fn);
     return () => this.listeners.delete(fn);
@@ -201,6 +203,10 @@ export function ProjectEventsProvider({ pid, children }: { pid: string; children
       const run = parse<AutopilotRun>(e as MessageEvent);
       if (run) qcRef.current.setQueryData(["autopilot", pid], run);
     });
+    es.addEventListener("chat", (e) => {
+      const entry = parse<Record<string, unknown>>(e as MessageEvent);
+      if (entry) store.chatListeners.forEach((fn) => fn(entry));
+    });
     es.addEventListener("agent_step", (e) => {
       const ev = parse<AgentStepEvent>(e as MessageEvent);
       if (ev) store.agentStep(ev);
@@ -272,6 +278,20 @@ export function useHydrateLive() {
 export function useAgentLive(collectionId: string | null | undefined): LiveCollection | undefined {
   const s = useStore();
   return useSyncExternalStore(s.subscribe, () => (collectionId ? s.get().agent[collectionId] : undefined));
+}
+
+/** Subscribe to Cortex-written chat lines arriving on the project stream (SSE `chat`). */
+export function useChatStream(fn: (entry: Record<string, unknown>) => void) {
+  const s = useStore();
+  const ref = useRef(fn);
+  ref.current = fn;
+  useEffect(() => {
+    const h = (e: Record<string, unknown>) => ref.current(e);
+    s.chatListeners.add(h);
+    return () => {
+      s.chatListeners.delete(h);
+    };
+  }, [s]);
 }
 
 export const isJobActive = (j?: Job) => !!j && (j.status === "queued" || j.status === "running");

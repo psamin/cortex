@@ -25,7 +25,9 @@ export type ChatItem =
       args: Record<string, unknown>;
     }
   | { kind: "meta"; id: number; turns?: number | null; durationMs?: number | null; costUsd?: number | null; isError?: boolean | null }
-  | { kind: "error"; id: number; text: string };
+  | { kind: "error"; id: number; text: string }
+  /** Written by Cortex (not the LLM) when a background job finishes. */
+  | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[] };
 
 export type ChatEvent =
   | { type: "user"; text: string }
@@ -35,7 +37,8 @@ export type ChatEvent =
   | { type: "approval_required"; kind: string; ref_id: string; summary: string; args: Record<string, unknown> }
   | { type: "done"; turns?: number | null; cost_usd?: number | null; duration_ms?: number | null; is_error?: boolean | null }
   | { type: "status"; state: string; tool?: string }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "job_done"; job_id: string; job_kind: string; status: string; text: string; ref_ids: string[] };
 
 // ------------------------------------------------------------------ friendly labels
 const LABELS: Record<string, string> = {
@@ -60,8 +63,6 @@ const LABELS: Record<string, string> = {
   get_next_actions: "Reading the project",
   create_policy_project: "Setting up the project",
   create_project: "Setting up the project",
-  robot_start_episode: "Driving the arm: starting an episode",
-  robot_finish_episode: "Driving the arm: finishing the episode",
 };
 
 export const POLL_TOOLS = new Set(["get_collection_progress", "get_job"]);
@@ -85,8 +86,26 @@ const ROBOT_PHASES: Record<string, string> = {
   check_task_success: "checking task success",
 };
 
+/** robot_<verb> tools drive the simulated arm step by step. */
+const ROBOT_VERBS: Record<string, string> = {
+  start_episode: "starting an episode",
+  finish_episode: "finishing the episode",
+  observe: "looking at the scene",
+  state: "reading robot state",
+  propose_grasp: "choosing a grasp",
+  move: "moving the gripper",
+  verify_grasp: "checking the grasp",
+  place: "placing the cube",
+  check_success: "checking task success",
+};
+
 export function toolLabel(tool: string, args?: Record<string, unknown>): string {
   const t = normalizeTool(tool);
+  if (t.startsWith("robot_") && t !== "robot_act") {
+    const verb = t.slice(6);
+    if (verb === "gripper") return `Driving the arm: ${args?.state === "closed" ? "closing" : "opening"} the gripper`;
+    return `Driving the arm: ${ROBOT_VERBS[verb] ?? verb.replace(/_/g, " ")}`;
+  }
   if (t === "robot_act") {
     const inner = typeof args?.tool === "string" ? args.tool : "";
     if (inner === "set_gripper" && typeof args?.args === "object" && args.args && "state" in (args.args as object))
@@ -167,6 +186,10 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
     }
     case "error":
       return [...items, { kind: "error", id: id(), text: ev.message }];
+    case "job_done":
+      // the same line can arrive live (SSE) and again from history: one row per job
+      if (items.some((it) => it.kind === "job_done" && it.jobId === ev.job_id)) return items;
+      return [...items, { kind: "job_done", id: id(), jobId: ev.job_id, jobKind: ev.job_kind, status: ev.status, text: ev.text, refIds: ev.ref_ids ?? [] }];
     case "status":
       return items;
   }
@@ -183,8 +206,15 @@ export function historyToEvents(rows: Record<string, unknown>[]): ChatEvent[] {
     else if (k === "tool_result")
       out.push({ type: "tool_result", tool: String(r.tool ?? ""), summary: String(r.summary ?? ""), ref_ids: (r.ref_ids as string[]) ?? [], ok: r.ok as boolean | undefined });
     else if (k === "approval_required" || ((k === "training" || k === "evaluation") && "ref_id" in r))
-      // the backend log writes {kind: ev, **card}, so the card's own kind ("training") overwrites "approval_required"
-      out.push({ type: "approval_required", kind: k === "approval_required" ? "training" : String(k), ref_id: String(r.ref_id ?? ""), summary: String(r.summary ?? ""), args: (r.args as Record<string, unknown>) ?? {} });
+      // card type is `card_kind`; older logs stored it in `kind` itself
+      out.push({
+        type: "approval_required",
+        kind: String(r.card_kind ?? (k === "approval_required" ? "training" : k)),
+        ref_id: String(r.training_job_id ?? r.ref_id ?? ""),
+        summary: String(r.summary ?? ""),
+        args: (r.args as Record<string, unknown>) ?? {},
+      });
+    else if (k === "job_done") out.push(jobDoneEvent(r));
     else if (k === "done") out.push({ type: "done", turns: r.turns as number, cost_usd: r.cost_usd as number, duration_ms: r.duration_ms as number, is_error: r.is_error as boolean });
   }
   return out;
@@ -198,3 +228,56 @@ export const isCardRef = (ref: string) => (CARD_PREFIXES as readonly string[]).i
 
 /** Priority for the preview pane's "latest result". */
 export const PREVIEW_PREFIXES = ["ev", "ac", "ds", "tj", "an", "rec"];
+
+/** A job_done payload (history row or live SSE `chat` event) as a chat event. */
+export function jobDoneEvent(r: Record<string, unknown>): ChatEvent {
+  return {
+    type: "job_done",
+    job_id: String(r.job_id ?? ""),
+    job_kind: String(r.job_kind ?? "job"),
+    status: String(r.status ?? "succeeded"),
+    text: String(r.text ?? ""),
+    ref_ids: Array.isArray(r.ref_ids) ? r.ref_ids.map(String) : [],
+  };
+}
+
+// ------------------------------------------------------------------ render plan
+export type ToolItem = Extract<ChatItem, { kind: "tool" }>;
+
+export type Block =
+  | { type: "item"; item: Exclude<ChatItem, { kind: "tool" }>; key: string }
+  /** consecutive tool calls between two messages; cards render after the group, outside the collapse */
+  | { type: "tools"; tools: ToolItem[]; cards: string[]; budgetError: string | null; key: string };
+
+/**
+ * Deterministic layout: consecutive tool rows form one group; every result card renders once, at the
+ * first mention of its id (so a live card stays put and updates in place); one training approval at most.
+ */
+export function buildBlocks(items: ChatItem[]): Block[] {
+  const out: Block[] = [];
+  const seen = new Set<string>();
+  let trainingApproval = false;
+  for (const it of items) {
+    if (it.kind === "tool") {
+      const last = out[out.length - 1];
+      const group = last?.type === "tools" ? last : null;
+      const refs = it.refIds.filter((r) => isCardRef(r) && !seen.has(r));
+      refs.forEach((r) => seen.add(r));
+      const budgetError = it.status === "error" && /budget/i.test(it.summary) ? it.summary : null;
+      if (group) {
+        group.tools.push(it);
+        group.cards.push(...refs);
+        group.budgetError = budgetError ?? group.budgetError;
+      } else out.push({ type: "tools", tools: [it], cards: refs, budgetError, key: `t${it.id}` });
+      if (refs.some((r) => prefixOf(r) === "tj")) trainingApproval = true;
+      continue;
+    }
+    if (it.kind === "approval") {
+      const training = it.approvalKind !== "evaluation";
+      if (training && (trainingApproval || seen.has(it.refId))) continue;
+      if (training) trainingApproval = true;
+    }
+    out.push({ type: "item", item: it, key: `i${it.id}` });
+  }
+  return out;
+}
