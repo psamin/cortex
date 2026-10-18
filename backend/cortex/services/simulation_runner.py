@@ -75,7 +75,10 @@ async def resolve_policy(ctx: Ctx, req: LaunchEvaluationRequest) -> tuple[dict[s
 
 async def launch_evaluation(ctx: Ctx, project: Project, req: LaunchEvaluationRequest,
                             actor: str = "gui") -> EvaluationRun:
+    from .intake_service import scene_payload
+
     policy_cfg, label = await resolve_policy(ctx, req)
+    scene = scene_payload(ctx, project)  # evaluate in the project's intake scene when it has one
     executor = "local"
     specs = req.branches or DEFAULT_BRANCHES
     run = EvaluationRun(project_id=project.id, policy=req.policy, policy_label=label, executor=executor,
@@ -95,7 +98,7 @@ async def launch_evaluation(ctx: Ctx, project: Project, req: LaunchEvaluationReq
                      "executor": executor, "env": ENVHUB_URI}, "ok", f"evaluation {run.id} started")
 
     async def run_all(job: Job) -> str:
-        results = await asyncio.gather(*(run_branch(ctx, job, run, b, policy_cfg) for b in branches),
+        results = await asyncio.gather(*(run_branch(ctx, job, run, b, policy_cfg, scene) for b in branches),
                                        return_exceptions=True)
         failed = [r for r in results if isinstance(r, Exception)]
         run.status = JobStatus.failed if len(failed) == len(branches) else JobStatus.succeeded
@@ -112,13 +115,14 @@ async def launch_evaluation(ctx: Ctx, project: Project, req: LaunchEvaluationReq
 
 
 async def run_branch(ctx: Ctx, job: Job, run: EvaluationRun, b: SimulationBranch,
-                     policy_cfg: dict[str, Any]) -> SimulationBranch:
+                     policy_cfg: dict[str, Any], scene: dict[str, Any] | None = None) -> SimulationBranch:
     key = branch_dir(run.project_id, run.id, b.id)
     cfg = {
         "mode": "evaluate", "seeds": b.seeds, "policy": policy_cfg, "max_steps": 300, "max_videos": 2,
         "variation": {**b.spec.condition.model_dump(), "cube_offset": list(b.spec.cube_offset),
                       "light_scale": b.spec.light_scale},
         "env_revision": ENVHUB_REVISION,
+        "scene": scene,
     }
     b.status = JobStatus.running
     await ctx.repo.save("simulation_branches", b, project_id=run.project_id)
