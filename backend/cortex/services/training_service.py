@@ -65,6 +65,23 @@ def robot_type_of(ds: DatasetVersion) -> str | None:
     return json.loads(info.read_text()).get("robot_type") if ds.lerobot_root and info.exists() else None
 
 
+def train_episodes(ds: DatasetVersion) -> list[int] | None:
+    """The LeRobot episode indices lerobot-train may use: the train split only. The dataset also holds the
+    held-out eval episodes, and training on them would leak the evaluation set. None when the dataset has no
+    split links (an imported dataset), which trains on all of it."""
+    if not ds.links:
+        return None
+    eps = sorted(ln.lerobot_episode_index for ln in ds.links if ln.split == "train")
+    if not eps:
+        raise ValueError(f"dataset {ds.id} has no train-split episodes to train on")
+    return eps
+
+
+def episodes_arg(eps: list[int]) -> str:
+    """``[0,2,5]``: the lerobot-train --dataset.episodes value, without spaces so it survives a shell."""
+    return "[" + ",".join(str(i) for i in eps) + "]"
+
+
 async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_type: str = "act",
                   steps: int | None = None, actor: str = "gui", base_checkpoint_id: str | None = None) -> TrainingJob:
     """Propose training a policy. With `base_checkpoint_id` the run continues fine-tuning that policy (from any
@@ -86,6 +103,7 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
     cfg = {
         "policy.type": policy_type, "steps": steps, "batch_size": 8, "save_freq": steps // 2,
         "dataset.repo_id": f"cortex/{project.id}_{ds.id}", "dataset.root": ds.lerobot_root,
+        "dataset.episodes": train_episodes(ds),
         "fps": FPS, "seed": 1000, "lerobot": "0.6.1",
         "cameras": ["observation.images.front", "observation.images.wrist"],
         "slurm": {"partition": ctx.settings.futurama_partition, "gres": infra.training_gres,
@@ -150,6 +168,10 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
         return tj  # idempotent
     if tj.status != JobStatus.approved:
         raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
+    if "dataset.episodes" not in tj.config:  # proposed before the train-only filter existed
+        ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
+        tj.config["dataset.episodes"] = train_episodes(ds) if ds is not None else None
+        await ctx.repo.save("training_jobs", tj)
     job_dir = ctx.local(f"projects/{tj.project_id}/training/{tj.id}")
     job_dir.mkdir(parents=True, exist_ok=True)
     (job_dir / "command.sh").write_text(manual_command(ctx, tj))
@@ -169,9 +191,12 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
 
 def manual_command(ctx: Ctx, tj: TrainingJob) -> str:
     c = tj.config
-    return (f"# Cortex training job {tj.id} (approved by {tj.approved_by})\n"
+    eps = c.get("dataset.episodes")
+    held_out = "# trains on the train split only; the dataset's eval episodes are held out\n" if eps else ""
+    return (f"# Cortex training job {tj.id} (approved by {tj.approved_by})\n{held_out}"
             f"pip install 'lerobot[dataset,training]==0.6.1'\n"
             f"lerobot-train --dataset.repo_id={c['dataset.repo_id']} --dataset.root={ctx.local(c['dataset.root'])} "
+            + (f"--dataset.episodes={episodes_arg(eps)} " if eps else "") +
             f"--policy.type={c['policy.type']} --policy.device=cuda --policy.push_to_hub=false "
             f"--steps={c['steps']} --batch_size={c['batch_size']} --save_freq={c['save_freq']} --seed={c['seed']} "
             f"--output_dir=outputs/{tj.id} --job_name=cortex_{tj.id} --wandb.enable=false\n"
@@ -261,6 +286,8 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
         rc, out = await _sh("rsync", "-az", f.name, f"{host}:{remote}/rename_map.json")
         if rc != 0:
             raise RuntimeError(f"rsync rename map failed ({rc}): {out[-400:]}")
+    if c.get("dataset.episodes"):  # a list has commas too: ship it as a file the sbatch script reads
+        await _ship_text(f"{host}:{remote}/episodes.txt", episodes_arg(c["dataset.episodes"]), "train episode list")
     slurm = c.get("slurm") or {}  # chosen in the studio; older jobs fall back to the .env defaults
     rc, out = await _sh(*ssh, f"cd {remote} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
                               f"--gres={slurm.get('gres', ctx.settings.futurama_gres)} "
@@ -272,6 +299,17 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     await _save(ctx, tj, f"slurm job {tj.external_id} submitted")
     ctx.jobs.log(job, f"submitted slurm job {tj.external_id}")
     return await poll_slurm(ctx, tj, job)
+
+
+async def _ship_text(dest: str, text: str, what: str) -> None:
+    import tempfile
+
+    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+        f.write(text)
+    rc, out = await _sh("rsync", "-az", f.name, dest)
+    Path(f.name).unlink(missing_ok=True)
+    if rc != 0:
+        raise RuntimeError(f"rsync {what} failed ({rc}): {out[-400:]}")
 
 
 def parse_loss(log: str) -> list[list[float]]:
