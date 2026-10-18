@@ -64,7 +64,7 @@ function Stat({ k, v }: { k: string; v: ReactNode }) {
   );
 }
 
-function Section({ icon, title, count, children }: { icon: IsoIconName; title: string; count: number; children: ReactNode }) {
+function Section({ icon, title, count, children, compact }: { icon: IsoIconName; title: string; count: number; children: ReactNode; compact?: boolean }) {
   return (
     <section>
       <div className="mb-2.5 flex items-center gap-2.5">
@@ -73,7 +73,7 @@ function Section({ icon, title, count, children }: { icon: IsoIconName; title: s
         <span className={cn("text-ink-3", label)}>{count}</span>
         <span aria-hidden className="h-px flex-1 bg-line" />
       </div>
-      <div className="grid gap-3 md:grid-cols-2">{children}</div>
+      <div className={cn("grid gap-3", !compact && "md:grid-cols-2")}>{children}</div>
     </section>
   );
 }
@@ -269,7 +269,7 @@ export function NowBar({ session, calls, work }: { session: AgentSession; calls:
  * Everything these projects are doing: demos, training, evaluations, RL. With `from` (an agent session's
  * start), only work since then, with a toggle for earlier work; without it, all of the projects' work.
  */
-export function WorkBoard({ from, work, loading }: { from?: string; work: (ProjectWork | undefined)[]; loading: boolean }) {
+export function WorkBoard({ from, work, loading, compact }: { from?: string; work: (ProjectWork | undefined)[]; loading: boolean; compact?: boolean }) {
   const [all, setAll] = useState(!from);
   const pick = <T extends { created_at?: string }>(xs: T[]) => (all ? xs : since(xs, from));
   const rows = work.filter(Boolean) as ProjectWork[];
@@ -303,28 +303,28 @@ export function WorkBoard({ from, work, loading }: { from?: string; work: (Proje
       ) : (
         <>
           {(collections.length > 0 || demoJobs.length > 0) && (
-            <Section icon="demonstrate" title="Demonstrations" count={collections.length + demoJobs.length}>
+            <Section compact={compact} icon="demonstrate" title="Demonstrations" count={collections.length + demoJobs.length}>
               {collections.map((c) => <CollectionCard key={c.id} c={c} />)}
               {demoJobs.map((j) => <JobCard key={j.id} j={j} />)}
             </Section>
           )}
           {training.length > 0 && (
-            <Section icon="train" title="Training" count={training.length}>
+            <Section compact={compact} icon="train" title="Training" count={training.length}>
               {training.map(({ t, pid }) => <TrainingCard key={t.id} t={t} pid={pid} />)}
             </Section>
           )}
           {evals.length > 0 && (
-            <Section icon="evaluate" title="Evaluations" count={evals.length}>
+            <Section compact={compact} icon="evaluate" title="Evaluations" count={evals.length}>
               {evals.map((e) => <EvaluationCard key={e.run.id} e={e} />)}
             </Section>
           )}
           {sandboxes.length > 0 && (
-            <Section icon="improve" title="RL sandboxes" count={sandboxes.length}>
+            <Section compact={compact} icon="improve" title="RL sandboxes" count={sandboxes.length}>
               {sandboxes.map((s) => <SandboxBox key={s.id} s={s} />)}
             </Section>
           )}
           {otherJobs.length > 0 && (
-            <Section icon="loop" title="Other background work" count={otherJobs.length}>
+            <Section compact={compact} icon="loop" title="Other background work" count={otherJobs.length}>
               {otherJobs.map((j) => <JobCard key={j.id} j={j} />)}
             </Section>
           )}

@@ -17,6 +17,7 @@ function who(c: AgentCall): string {
   if (c.actor === "agent") return "studio agent";
   if (c.actor === "autopilot") return "autopilot";
   if (c.actor === "gui") return "you";
+  if (c.actor === "mcp") return "MCP agent";
   return c.actor ?? "agent";
 }
 
@@ -64,11 +65,11 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
       <div className="mx-auto max-w-[920px] space-y-6 px-5 py-6">
         <div className={cn("sk-depth relative rounded border bg-plate px-4 py-3", live ? "border-servo/60" : "border-line-strong")}>
           <GlowEdge />
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+          <div className="flex flex-col gap-3">
+            <div className="flex min-w-0 items-center gap-2.5">
               <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", running ? "live-dot bg-servo" : live ? "bg-pass" : "bg-ink-4")} />
               <span className={cn("shrink-0 text-ink-3", label)}>now</span>
-              <span className="min-w-0 truncate text-[14px] text-ink">
+              <span className="min-w-0 text-[14px] leading-5 text-ink [overflow-wrap:anywhere]">
                 {running ? (
                   <>
                     {who(running)} is calling <span className="font-mono">{running.tool}</span>…
@@ -83,13 +84,15 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
                 )}
               </span>
             </div>
-            <div className="min-w-0">
-              <div className={cn("text-ink-3", label)}>agents (10 min)</div>
-              <div className="truncate text-[13px] text-ink">{agents.length ? agents.join(", ") : "none"}</div>
-            </div>
-            <div>
-              <div className={cn("text-ink-3", label)}>background jobs</div>
-              <div className="num text-[13px] text-ink">{busyJobs}</div>
+            <div className="flex flex-wrap gap-x-8 gap-y-2">
+              <div className="min-w-0">
+                <div className={cn("text-ink-3", label)}>agents (10 min)</div>
+                <div className="truncate text-[13px] text-ink">{agents.length ? agents.join(", ") : "none"}</div>
+              </div>
+              <div>
+                <div className={cn("text-ink-3", label)}>background jobs</div>
+                <div className="num text-[13px] text-ink">{busyJobs}</div>
+              </div>
             </div>
           </div>
           {approvals > 0 && (
@@ -104,7 +107,7 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
           )}
         </div>
 
-        <WorkBoard work={work} loading={loading} />
+        <WorkBoard work={work} loading={loading} compact />
 
         <section>
           <div className="mb-2.5 flex items-center gap-2.5">
