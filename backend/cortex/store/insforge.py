@@ -21,6 +21,7 @@ from .base import Store
 from .local import MIGRATIONS
 
 log = logging.getLogger(__name__)
+PAGE = 1000  # rows per records request
 
 
 class InsForgeError(RuntimeError):
@@ -85,12 +86,18 @@ class InsForgeStore(Store):
 
     async def list(self, table: str, project_id: str | None = None,
                    status: str | None = None) -> list[dict[str, Any]]:
-        params: dict[str, Any] = {"order": "created_at.asc", "limit": 1000}
+        params: dict[str, Any] = {"order": "created_at.asc,id.asc", "limit": PAGE}
         if project_id is not None:
             params["project_id"] = f"eq.{project_id}"
         if status is not None:
             params["status"] = f"eq.{status}"
-        return (await self.c.req("GET", f"/api/database/records/{table}", params=params)).json()
+        rows: list[dict[str, Any]] = []
+        while True:  # page until a short page: a single capped request would drop the newest rows
+            page = (await self.c.req("GET", f"/api/database/records/{table}",
+                                     params={**params, "offset": len(rows)})).json()
+            rows += page
+            if len(page) < PAGE:
+                return rows
 
 
 class InsForgeBlobStore:

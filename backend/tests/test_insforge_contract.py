@@ -54,8 +54,10 @@ class FakeInsForge:
                 assert op == "eq"
                 rows = [r for r in rows if str(r.get(col)) == val]
             if "order" in q:
-                rows.sort(key=lambda r: r.get("created_at") or "")
-            return httpx.Response(200, json=rows[: int(q.get("limit", ["100"])[0])])
+                cols = [c.split(".")[0] for c in q["order"][0].split(",")]
+                rows.sort(key=lambda r: tuple(str(r.get(c) or "") for c in cols))
+            off, lim = int(q.get("offset", ["0"])[0]), int(q.get("limit", ["100"])[0])
+            return httpx.Response(200, json=rows[off: off + lim])
         if path == "/api/storage/buckets" and req.method == "POST":
             body = json.loads(req.content)
             assert body["isPublic"] is False
@@ -134,3 +136,18 @@ async def test_rejected_migration_fails_loudly(fake):
     store = InsForgeStore("https://app.insforge.test", KEY, transport=httpx.MockTransport(handler))
     with pytest.raises(Exception, match="ALREADY_EXISTS"):
         await store.init()
+
+
+async def test_list_pages_past_one_request(fake):
+    """More rows than one records request returns: all of them come back, newest included, in order."""
+    store = InsForgeStore("https://app.insforge.test", KEY, transport=httpx.MockTransport(fake))
+    await store.init()
+    fake.tables["tool_audit_logs"] = {
+        f"aud_{i:05d}": {"id": f"aud_{i:05d}", "project_id": "prj_1", "status": "ok", "data": {"i": i},
+                         "created_at": f"2026-10-17T00:00:{i // 1000:02d}.{i % 1000:03d}"}
+        for i in range(2500)}
+    fake.tables["tool_audit_logs"]["aud_other"] = {"id": "aud_other", "project_id": "prj_2", "status": "ok",
+                                                   "data": {}, "created_at": "2026-10-17T00:00:00"}
+    rows = await store.list("tool_audit_logs", project_id="prj_1")
+    assert len(rows) == 2500
+    assert [r["data"]["i"] for r in rows] == list(range(2500))
