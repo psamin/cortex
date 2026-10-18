@@ -4,7 +4,6 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowUpRight,
   BarChart3,
-  Bot,
   Check,
   CircleDashed,
   Database,
@@ -32,12 +31,12 @@ import {
   useRecommendations,
   useTraining,
 } from "../api/hooks";
-import { agentLabel, isAgent, isImported, type AgentAttempt, type TrainingJob } from "../api/types";
-import { AttemptDrawer, ScenarioChip } from "../components/AgentTrace";
+import { agentLabel, isAgent, isImported, type TrainingJob } from "../api/types";
 import { Skeleton, InlineError } from "../components/ui";
 import { refRoute } from "../components/refs";
 import { cn, num, pct, usd } from "../lib/format";
 import { useChat } from "./ChatProvider";
+import { useViewerFocus } from "./focus";
 import { prefixOf } from "./model";
 
 // ------------------------------------------------------------------ shell
@@ -161,71 +160,49 @@ export function ResultCard({ pid, refId, large }: { pid: string; refId: string; 
 }
 
 // ------------------------------------------------------------------ collection (ac_)
-function CollectionCard({ pid, id, large }: { pid: string; id: string; large?: boolean }) {
+function CollectionCard({ pid, id }: { pid: string; id: string; large?: boolean }) {
   const first = useAgentCollection(id);
   const running = !!first.data && ["queued", "running"].includes(first.data.collection.status);
   const q = useAgentCollection(id, running);
-  const [drawer, setDrawer] = useState<string | null>(null);
-  if (q.isLoading) return <Loading large={large} />;
+  if (q.isLoading) return <Loading />;
   if (!q.data) return <Missing what="this collection" />;
   const { collection: c, attempts } = q.data;
   const t = c.totals;
-  const done = t.attempts ?? attempts.length;
-  const total = c.request.num_demos;
-  const recent = [...attempts].sort((a, b) => b.index - a.index).slice(0, large ? 8 : 4);
   const who = isAgent(c.collector) ? agentLabel(c.model) : "Scripted oracle";
+  const demos = attempts.filter((a) => a.episode_id).map((a) => a.episode_id!);
+  const done = t.attempts ?? attempts.length;
   return (
-    <CardShell
+    <DemoRow
       pid={pid}
       refId={id}
-      large={large}
-      icon={isAgent(c.collector) ? <Bot className="h-4 w-4" /> : <Sparkles className="h-4 w-4" />}
-      title="Demonstrations"
-      meta={`${who} · ${total} attempts`}
-      status={
-        running ? (
-          <Pill tone="live">collecting</Pill>
-        ) : c.status === "succeeded" ? (
-          <Pill tone="ok">done</Pill>
-        ) : (
-          <Pill tone={c.status === "failed" ? "bad" : "muted"}>{c.status.replace(/_/g, " ")}</Pill>
-        )
-      }
-    >
-      <div className="flex items-end gap-6">
-        <Stat value={t.successes ?? 0} label="demos" tone="pass" large={large} />
-        <Stat value={t.failures ?? 0} label="failed" large={large} />
-        {isAgent(c.collector) && <Stat value={usd(t.cost_usd ?? 0)} label="model cost" large={large} />}
-      </div>
-      <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-rail">
-        <div className="h-full rounded-full bg-servo transition-[width] duration-500 ease-out" style={{ width: `${total ? (done / total) * 100 : 0}%` }} />
-      </div>
-      <div className="mt-1 text-xs text-ink-3">
-        {done} of {total} attempts · failed attempts are diagnostics, never training data
-      </div>
-      {recent.length > 0 && (
-        <ul className="mt-3 space-y-1">
-          {recent.map((a) => (
-            <AttemptRow key={a.id} a={a} onOpen={() => setDrawer(a.id)} />
-          ))}
-        </ul>
-      )}
-      <AttemptDrawer attemptId={drawer} onClose={() => setDrawer(null)} />
-    </CardShell>
+      live={running}
+      text={`${t.successes ?? 0} demo${t.successes === 1 ? "" : "s"} recorded · ${who} · ${t.successes ?? 0}/${done} succeeded${running ? ` · ${done} of ${c.request.num_demos} attempts` : ""}`}
+      ids={demos}
+    />
   );
 }
 
-function AttemptRow({ a, onOpen }: { a: AgentAttempt; onOpen: () => void }) {
+/** One compact line for demos in the chat; the videos live in the viewer. */
+function DemoRow({ pid, refId, text, ids, live }: { pid: string; refId: string; text: string; ids: string[]; live?: boolean }) {
+  const viewer = useViewerFocus();
+  const to = refRoute(pid, refId);
   return (
-    <li>
-      <button type="button" onClick={onOpen} className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1 text-left hover:bg-rail/60">
-        <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded-full", a.status === "success" ? "bg-pass/15 text-pass" : "bg-fault/15 text-fault")}>
-          {a.status === "success" ? <Check className="h-2.5 w-2.5" /> : <X className="h-2.5 w-2.5" />}
-        </span>
-        <ScenarioChip scenario={a.scenario} className="min-w-0 flex-1" />
-        <Play className="h-3 w-3 shrink-0 text-ink-4" />
-      </button>
-    </li>
+    <div className="enter flex items-center gap-2.5 rounded-lg bg-plate px-3 py-2 shadow-[0_0_0_1px_var(--line)]">
+      {live ? <CircleDashed className="h-4 w-4 shrink-0 animate-spin text-servo" /> : <Play className="h-4 w-4 shrink-0 text-ink-3" />}
+      <span className="min-w-0 flex-1 truncate text-sm text-ink-2" title={text}>
+        {text}
+      </span>
+      {viewer && ids.length > 0 && (
+        <button type="button" onClick={() => viewer.focus(ids)} className="shrink-0 rounded-md px-2 py-1 text-xs font-medium text-servo hover:bg-rail">
+          Watch in viewer
+        </button>
+      )}
+      {to && (
+        <Link to={to} className="shrink-0 rounded-md p-1 text-ink-4 hover:bg-rail hover:text-ink-2" title="Open details" aria-label="Open details">
+          <ArrowUpRight className="h-4 w-4" />
+        </Link>
+      )}
+    </div>
   );
 }
 
@@ -469,24 +446,16 @@ function JobCard({ pid, id, large }: { pid: string; id: string; large?: boolean 
 }
 
 // ------------------------------------------------------------------ episodes (ep_)
-function EpisodesCard({ pid, ids, large }: { pid: string; ids: string[]; large?: boolean }) {
+function EpisodesCard({ pid, ids }: { pid: string; ids: string[]; large?: boolean }) {
   const episodes = useEpisodes(pid);
-  const [open, setOpen] = useState<string | null>(ids.length === 1 ? ids[0] : null);
-  const shown = ids.slice(0, large ? 12 : 6);
-  const first = episodes.data?.find((e) => e.id === ids[0]);
-  const imported = first && isImported(first) ? `Human demo · imported${first.provenance?.source ? ` · ${first.provenance.source}` : ""}` : undefined;
-  return (
-    <CardShell pid={pid} refId={ids[0]} large={large} icon={<Play className="h-4 w-4" />} title={ids.length === 1 ? "Demo" : `${ids.length} demos`} meta={imported ?? (ids.length > shown.length ? `showing ${shown.length}` : undefined)}>
-      {open && <EpisodeVideo id={open} />}
-      {ids.length > 1 && (
-        <div className={cn("grid gap-1.5", large ? "grid-cols-4" : "grid-cols-3", open && "mt-2")}>
-          {shown.map((e) => (
-            <EpisodeThumb key={e} id={e} active={e === open} ok={episodes.data?.find((x) => x.id === e)?.success} onClick={() => setOpen(e === open ? null : e)} />
-          ))}
-        </div>
-      )}
-    </CardShell>
-  );
+  const eps = (episodes.data ?? []).filter((e) => ids.includes(e.id));
+  const first = eps[0];
+  const who = !first ? "" : isImported(first) ? "Human (imported)" : first.source === "real_teleop" ? "Human (real teleop)" : first.source === "sim_scripted" ? "Scripted oracle" : agentLabel(first.provenance?.planner);
+  const judged = eps.filter((e) => e.success !== null);
+  const ok = judged.filter((e) => e.success).length;
+  const n = ids.length;
+  const text = [`${n} demo${n === 1 ? "" : "s"}`, who, judged.length ? `${ok}/${judged.length} succeeded` : first ? "not judged by the simulator" : ""].filter(Boolean).join(" · ");
+  return <DemoRow pid={pid} refId={ids[0]} text={text} ids={ids} />;
 }
 
 export function EpisodeVideo({ id, className }: { id: string; className?: string }) {

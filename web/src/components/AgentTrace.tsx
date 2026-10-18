@@ -82,10 +82,10 @@ export function ScenarioChip({ scenario, condition, seed, className }: { scenari
   const co = off(scenario?.cube_offset);
   const bo = off(scenario?.box_offset);
   return (
-    <span className={cn("inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs capitalize text-ink-2", className)}>
+    <span className={cn("inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-ink-2", className)}>
       <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
         <LightGlyph lighting={c.lighting} />
-        {c.cube_region} · {c.lighting}
+        cube {c.cube_region} · {c.lighting} light
       </span>
       {co && <span className="whitespace-nowrap font-mono text-[10.5px] normal-case text-ink-3">cube Δ({co})</span>}
       {bo && <span className="whitespace-nowrap font-mono text-[10.5px] normal-case text-ink-3">bowl Δ({bo})</span>}
