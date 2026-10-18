@@ -5,6 +5,7 @@ import { ArrowUp, CircleDashed } from "lucide-react";
 import { api } from "../api/client";
 import { useProjects } from "../api/hooks";
 import { ErrorState } from "../components/ui";
+import { DashedOrbit, IsoIcon } from "../sketch";
 import { ago } from "../lib/format";
 
 const PLACEHOLDER = "Teach a robot to pick and place a cube.";
@@ -38,10 +39,20 @@ export function HomePage() {
   const recent = [...(projects.data ?? [])].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)).slice(0, 6);
 
   return (
-    <div className="h-full overflow-y-auto scroll-thin">
-      <div className="mx-auto flex min-h-full max-w-[720px] flex-col px-6 pb-12 pt-[16vh]">
-        <h1 className="text-center text-[40px] font-semibold leading-tight tracking-[-0.03em]">What should your robot learn?</h1>
-        <p className="mt-3 text-center text-[15px] text-ink-3">
+    <div className="relative h-full overflow-y-auto overflow-x-hidden scroll-thin">
+      <DashedOrbit r={260} className="pointer-events-none absolute -right-64 -top-24 hidden opacity-60 xl:block" />
+      <div className="relative mx-auto flex min-h-full max-w-[760px] flex-col px-6 pb-12 pt-[12vh]">
+        <div className="kn-label kn-label-rule">
+          <span>
+            <span className="text-ink">FIG.00</span>&nbsp;&nbsp;New skill · Simulation first
+          </span>
+        </div>
+        <h1 className="kn-display mt-6 text-[clamp(2.4rem,5vw,3.6rem)]">
+          What should your
+          <br />
+          <span className="kn-second">robot learn?</span>
+        </h1>
+        <p className="mt-5 max-w-[34rem] text-[15px] leading-[1.65] text-ink-2">
           Describe a skill. Cortex collects demonstrations in simulation, trains a policy, tests it, and keeps improving it.
         </p>
         <form
@@ -49,7 +60,7 @@ export function HomePage() {
             e.preventDefault();
             submit();
           }}
-          className="mt-9 flex items-end gap-2 rounded-2xl bg-plate p-2.5 pl-5 shadow-[0_0_0_1px_var(--line-strong),0_24px_48px_-24px_rgba(0,0,0,.5)] focus-within:shadow-[0_0_0_1px_rgb(var(--servo)/.6),0_24px_48px_-24px_rgba(0,0,0,.5)]"
+          className="sk-depth sk-depth-lg relative mt-9 flex items-end gap-2 rounded border border-line-strong bg-plate p-2.5 pl-5 transition-colors focus-within:border-ink"
         >
           <textarea
             ref={ref}
@@ -66,14 +77,15 @@ export function HomePage() {
             className="flex-1 resize-none bg-transparent py-2.5 text-lg leading-7 text-ink placeholder:text-ink-4 focus:outline-none"
             aria-label="What should your robot learn?"
           />
-          <button type="submit" disabled={create.isPending} className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-servo text-servo-ink transition-transform active:scale-95 disabled:opacity-60" aria-label="Start">
+          <button type="submit" disabled={create.isPending} className="sk-pill sk-pill-primary flex h-11 w-14 shrink-0 items-center justify-center disabled:opacity-60" aria-label="Start">
             {create.isPending ? <CircleDashed className="h-5 w-5 animate-spin" /> : <ArrowUp className="h-5 w-5" />}
           </button>
         </form>
-        <div className="mt-3 flex flex-wrap justify-center gap-1.5">
+        <div className="mt-5 flex flex-wrap gap-2">
           {EXAMPLES.map((x) => (
-            <button key={x} type="button" onClick={() => setPrompt(x)} className="rounded-full px-3 py-1.5 text-xs text-ink-3 shadow-[0_0_0_1px_var(--line)] hover:text-ink">
+            <button key={x} type="button" onClick={() => setPrompt(x)} className="group inline-flex items-center gap-1.5 rounded-full border border-line-strong bg-plate px-3.5 py-1.5 text-xs text-ink-2 transition-colors hover:border-ink hover:text-ink">
               {x}
+              <span aria-hidden className="text-ink-4 transition-transform group-hover:translate-x-0.5 group-hover:text-ink">→</span>
             </button>
           ))}
         </div>
@@ -88,14 +100,18 @@ export function HomePage() {
             <ErrorState error={projects.error} compact onRetry={() => projects.refetch()} />
           ) : recent.length > 0 ? (
             <>
-              <div className="mb-2 text-xs text-ink-4">Recent</div>
-              <ul className="divide-y divide-[var(--line-soft)]">
+              <div className="kn-label kn-label-rule mb-3">
+                <span>Recent projects</span>
+              </div>
+              <ul className="divide-y divide-[var(--line)] border-y border-line">
                 {recent.map((p) => (
                   <li key={p.id}>
-                    <Link to={`/p/${p.id}`} className="flex items-baseline gap-3 rounded-md px-2 py-2.5 hover:bg-rail/60">
-                      <span className="truncate text-sm text-ink-2">{p.name}</span>
-                      <span className="hidden min-w-0 flex-1 truncate text-xs text-ink-4 sm:block">{p.task_prompt}</span>
-                      <span className="ml-auto shrink-0 text-xs text-ink-4">{ago(p.created_at)}</span>
+                    <Link to={`/p/${p.id}`} className="group flex items-center gap-3 px-1 py-3 hover:bg-rail/50">
+                      <IsoIcon name="cube" size={16} />
+                      <span className="truncate text-sm text-ink">{p.name}</span>
+                      <span className="hidden min-w-0 flex-1 truncate text-xs text-ink-3 sm:block">{p.task_prompt}</span>
+                      <span className="ml-auto shrink-0 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">{ago(p.created_at)}</span>
+                      <span aria-hidden className="text-ink-4 transition-transform group-hover:translate-x-0.5 group-hover:text-ink">→</span>
                     </Link>
                   </li>
                 ))}
