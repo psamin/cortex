@@ -11,6 +11,7 @@ gates (training, budgets, hardware).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import shutil
 from collections.abc import AsyncIterator
@@ -43,11 +44,31 @@ Rules:
 - Scripted-oracle demos read simulator state; say so when you use them."""
 
 
+START_TIMEOUT_S = 60  # spawn -> Claude Code's init event
+IDLE_TIMEOUT_S = 600  # silence between events (a slow model reply or a long Cortex tool call is fine; a hang is not)
+
+
+class Unavailable(RuntimeError):
+    """Claude Code failed before doing anything, so another engine can answer this turn instead."""
+
+
 def available() -> str | None:
-    """None if Claude Code can run here, else why not."""
+    """None if Claude Code can run here, else why not (in words for the studio)."""
     if not shutil.which("claude"):
-        return "the `claude` CLI is not on PATH"
+        return "Claude Code not found"
     return None
+
+
+def _kill(proc) -> None:
+    with contextlib.suppress(ProcessLookupError):  # it may have exited a moment ago
+        proc.kill()
+
+
+def _failure(text: str) -> str:
+    """Claude Code's own error line, in words for the studio."""
+    if "not logged in" in text.lower() or "/login" in text:
+        return "Claude Code is not logged in (run `claude` in a terminal and log in)"
+    return f"Claude Code failed: {text.strip()[:200]}" if text.strip() else "Claude Code failed"
 
 
 async def mcp_up() -> bool:
@@ -143,25 +164,58 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
     if sid := thread.get("session_id"):
         cmd += ["--resume", sid]
     yield sse("status", {"state": "starting", "engine": "claude-code", "text": "Starting Claude Code…"})
-    proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(workdir), stdout=asyncio.subprocess.PIPE,
-                                                stderr=asyncio.subprocess.PIPE, limit=16 * 1024 * 1024)
+    try:  # stdin closed: `claude -p` reads a piped stdin to its end, and the backend's may never end
+        proc = await asyncio.create_subprocess_exec(*cmd, cwd=str(workdir), stdin=asyncio.subprocess.DEVNULL,
+                                                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                                                    limit=16 * 1024 * 1024)
+    except OSError as e:
+        raise Unavailable(f"Claude Code could not start ({e.strerror or e})") from e
+    err_tail = bytearray()
+
+    async def drain_stderr() -> None:  # read as it comes: a full stderr pipe would stall Claude Code mid-turn
+        async for chunk in proc.stderr:
+            err_tail.extend(chunk)
+            del err_tail[:-2000]
+
+    drain = asyncio.create_task(drain_stderr()) if proc.stderr else None
     pending: dict[str, str] = {}  # tool_use id -> tool name
     result: dict[str, Any] = {}
+    started = acted = False  # init seen; a Cortex tool call or an answer shown (then there is no falling back)
+    synthetic = ""  # Claude Code's own error lines ("Not logged in · Please run /login"), not the model's words
+    lines = proc.stdout.__aiter__()
     try:
-        assert proc.stdout
-        async for raw in proc.stdout:
+        while True:
+            limit = IDLE_TIMEOUT_S if started else START_TIMEOUT_S
+            try:
+                raw = await asyncio.wait_for(anext(lines), limit)
+            except StopAsyncIteration:
+                break
+            except TimeoutError:
+                if not started:
+                    raise Unavailable(f"Claude Code did not start within {limit:g} s") from None
+                if not acted:
+                    raise Unavailable(f"Claude Code stopped responding for {limit / 60:g} min") from None
+                yield sse("text", {"delta": f"\n\nClaude Code stopped responding for {limit / 60:g} min, so I "
+                                            "stopped it. What it did so far is above."})
+                result = {"is_error": True}
+                _kill(proc)
+                break
             try:
                 ev = json.loads(raw)
             except json.JSONDecodeError:
                 continue
             t = ev.get("type")
             if t == "system" and ev.get("subtype") == "init":
+                started = True
                 await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
                 yield sse("status", {"state": "thinking", "engine": "claude-code", "model": ev.get("model"),
                                      "text": "Planning…"})
+            elif t == "assistant" and ev.get("message", {}).get("model") == "<synthetic>":
+                synthetic += " ".join(b.get("text", "") for b in ev["message"].get("content", []))
             elif t == "assistant":
                 for block in ev.get("message", {}).get("content", []):
                     if block.get("type") == "text" and block.get("text"):
+                        acted = True
                         yield sse("text", {"delta": block["text"]})
                     elif block.get("type") == "thinking" and (line := thought_line(block.get("thinking", ""))):
                         yield sse("status", {"state": "thinking", "text": line})  # live only, never stored
@@ -179,6 +233,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                             continue  # Claude Code internals are not shown in the chat
                         name = _short_tool(block.get("name", ""))
                         pending[block.get("id", "")] = name
+                        acted = True
                         yield sse("tool_call", {"tool": name, "args": block.get("input", {})})
                         yield sse("status", {"state": "running", "tool": name,
                                              "text": tool_line(name, block.get("input"))})
@@ -195,13 +250,22 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                 result = ev
                 if ev.get("session_id"):
                     await chat_store.set_session(ctx, pid, thread["id"], ev["session_id"])
-        await proc.wait()
+        try:
+            await asyncio.wait_for(proc.wait(), 15)
+        except TimeoutError:
+            _kill(proc)
+        if drain:
+            await asyncio.wait([drain], timeout=2)
+        err = err_tail.decode(errors="replace").strip().splitlines()[-1:] or [f"exit code {proc.returncode}"]
+        if not acted and (result.get("is_error") or (proc.returncode and not result)):
+            raise Unavailable(_failure(synthetic or str(result.get("result") or "") or err[0]))
         if proc.returncode and not result:
-            err = (await proc.stderr.read()).decode(errors="replace")[-400:] if proc.stderr else ""
-            yield sse("text", {"delta": f"Claude Code exited with an error: {err or proc.returncode}"})
+            yield sse("text", {"delta": f"Claude Code exited with an error: {err[0][:300]}"})
     finally:
         if proc.returncode is None:
-            proc.terminate()
+            _kill(proc)
+        if drain:
+            drain.cancel()
     yield sse("done", {"engine": "claude-code", "turns": result.get("num_turns"),
                        "cost_usd": result.get("total_cost_usd"), "duration_ms": result.get("duration_ms"),
                        "is_error": result.get("is_error")})

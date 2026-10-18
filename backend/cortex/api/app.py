@@ -1013,10 +1013,8 @@ async def chat_new_thread(pid: str):
 
 @app.get("/api/agent/engine")
 async def agent_engine():
-    eng = await agent.engine(ctx())
-    label = {"claude_code": "Claude Code (your agent)", "model": ctx().model.label if ctx().model else "",
-             "rules": "rule-based planner"}[eng]
-    return {"engine": eng, "label": label, "model": ctx().settings.claude_code_model}
+    """Which agent answers the studio chat, and `note`: what is missing for a better one (None if nothing)."""
+    return {**await agent.engine_info(ctx()), "model": ctx().settings.claude_code_model}
 
 
 @app.post("/api/projects/{pid}/agent/reset")

@@ -105,8 +105,8 @@ async def chain(tmp_path, monkeypatch, mode: str):
     release = asyncio.Event()
     sent: list[str] = []
 
-    async def fake_engine(_ctx):
-        return "claude_code"
+    async def fake_engine(_ctx):  # engine() and the turn both read engine_info
+        return {"engine": "claude_code", "label": "Claude Code (your agent)", "note": None}
 
     async def fake_claude(ctx_, pid, message, sse, tid=None):
         sent.append(message)
@@ -121,7 +121,7 @@ async def chain(tmp_path, monkeypatch, mode: str):
         yield sse("done", {})
 
     from cortex.services import claude_code_agent
-    monkeypatch.setattr(agent, "engine", fake_engine)
+    monkeypatch.setattr(agent, "engine_info", fake_engine)
     monkeypatch.setattr(claude_code_agent, "chat", fake_claude)
     q = ctx.bus.subscribe(p.id)
     async for _ in agent.chat(ctx, p.id, "teach it to pick up the cube"):
@@ -169,8 +169,8 @@ def test_results_that_land_at_the_end_of_an_automatic_turn_wake_the_agent_again(
         agent.install_job_listener(ctx)
         sent: list[str] = []
 
-        async def fake_engine(_ctx):
-            return "claude_code"
+        async def fake_engine(_ctx):  # engine() and the turn both read engine_info
+            return {"engine": "claude_code", "label": "Claude Code (your agent)", "note": None}
 
         async def fake_claude(ctx_, pid, message, sse, tid=None):
             sent.append(message)
@@ -185,7 +185,7 @@ def test_results_that_land_at_the_end_of_an_automatic_turn_wake_the_agent_again(
             yield sse("done", {})
 
         from cortex.services import claude_code_agent
-        monkeypatch.setattr(agent, "engine", fake_engine)
+        monkeypatch.setattr(agent, "engine_info", fake_engine)
         monkeypatch.setattr(claude_code_agent, "chat", fake_claude)
         async for _ in agent.chat(ctx, p.id, "go"):
             pass
