@@ -22,7 +22,7 @@ function Arrow() {
 export function AgentLoop() {
   return (
     <section id="loop" aria-labelledby="loop-title" className="kn-gutter border-t border-line py-24 lg:py-32">
-      <SectionHead titleId="loop-title" label="The agent loop" first="Your agent drives." second="Cortex keeps it honest.">
+      <SectionHead titleId="loop-title" label="The agent loop" first="The agent runs the loop." second="Cortex keeps it honest.">
         The agent describes the arm and the task, calls Cortex tools and reads the results back. The
         physics, the datasets and the training run on the Cortex side.
       </SectionHead>
