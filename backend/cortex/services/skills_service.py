@@ -3,11 +3,14 @@
 A skill is one trained policy: a finished training job's checkpoint (including Futurama runs whose weights stay
 on the cluster, and imported sim-task runs), or a sim-trained policy the live GPU server serves that was never
 imported here. Each carries its measured score, labelled for what was measured: success on unseen sim layouts
-(the simulator's verdict), "score pending" while its evaluation runs, or mean joint error against held-out real
-human demos, which measures imitation and is never called a success rate. It also says how to run it live on
-the GPU server and lists its past live runs.
+(the simulator's verdict), success on the few practice layouts it trained on (never called unseen), "score
+pending" while its evaluation runs, or mean joint error against held-out real human demos, which measures
+imitation and is never called a success rate. It also says how to run it live on the GPU server and lists its
+past live runs.
 
-The studio's Physical Skills page (GET /api/skills) and the MCP tools read this one list.
+The studio's Physical Skills page (GET /api/skills) and the MCP tools read this one list. It holds only policies
+trained in our physics sim (user rule, #298: the GPU server serves real-demo policies only with SERVE_REAL=1);
+list_skills(ctx, real=True) adds the real-demo ones.
 """
 
 from __future__ import annotations
@@ -35,8 +38,11 @@ SIM_NAMES = {"jenga": "Push a block out of a Jenga tower", "unscrew": "Unscrew a
              "suture": "Pass a needle through a tissue pad", "conveyor": "Pick a moving part off a conveyor"}
 POLICY = {"act": "ACT", "smolvla": "SmolVLA", "diffusion": "Diffusion"}
 GPUS = ("GH200", "H200", "H100", "A100", "L40S", "L40", "L4", "V100", "P40")
-SIM_DETAIL = ("Closed-loop runs in MuJoCo on layouts it never trained on; the simulator judged each one.")
-PENDING_DETAIL = "Its evaluation on unseen layouts is still running, so no score is claimed yet."
+UNSEEN_FROM = 100_000  # cortex/sim/tasks/run.py EVAL_SEED0: layouts from here up were never used in training
+SIM_DETAIL = "Closed-loop runs in MuJoCo on layouts it never trained on; the simulator judged each one."
+PRACTICE_DETAIL = ("Closed-loop runs in MuJoCo on the few practice layouts it trained on (picked for reliable demos), "
+                   "so this is not a test on new layouts; the simulator judged each one.")
+PENDING_DETAIL = "Its evaluation is still running, so no score is claimed yet."
 NONE_DETAIL = "No evaluation or held-out replay has been run for this policy yet."
 DOWN = "The GPU server isn't running. Request a GPU to run it live."
 
@@ -64,12 +70,18 @@ def _task_of(p: Project, keys: dict[str, str]) -> tuple[str | None, bool | None]
     return (sim, True) if sim else (None, None)
 
 
+def _prompt(p: Project) -> str:
+    """The task as the person (or the sim importer) typed it, without the importer's "(MuJoCo sim)" tag. Not
+    spec.goal: a project made from a prompt alone keeps the default cube goal there."""
+    return re.sub(r"\s*\((MuJoCo )?sim[^)]*\)", "", p.task_prompt).strip()
+
+
 def _name(task: str | None, sim: bool, p: Project | None) -> str:
     names = SIM_NAMES if sim else REAL_NAMES
     if task in names:
         return names[task]
-    text = ((p.spec.goal or p.task_prompt) if p else (task or "Trained policy")).strip()
-    text = re.sub(r"\s*\((MuJoCo )?sim[^)]*\)", "", re.split(r"(?<=[.!?])\s", text)[0]).rstrip(".").replace("_", " ")
+    text = _prompt(p) if p else (task or "").replace("_", " ")
+    text = re.split(r"(?<=[.!?])\s", text)[0].rstrip(".")
     return (text[:1].upper() + text[1:])[:80] or "Trained policy"
 
 
@@ -105,22 +117,28 @@ def _eval_score(run: EvaluationRun, branches: dict[str, SimulationBranch]) -> di
         return None
     n = sum(b.result.n for b in bs)
     k = sum(b.result.successes for b in bs)
-    unseen = all(b.executor == "futurama_slurm" for b in bs)  # imported runs: evaluated on seeds never trained on
-    where = f"on {n} unseen sim layouts" if unseen else f"in {n} sim test episodes"
+    seeds = {e.seed for b in bs for e in b.result.episodes}
+    imported = all(b.executor == "futurama_slurm" for b in bs)  # sim_task.sbatch evaluations
+    layouts = len(seeds) if imported and any(x < UNSEEN_FROM for x in seeds) else None  # practice layouts
+    where = (f"on {n} runs over {layouts} practice layouts it trained on" if layouts else
+             f"on {n} unseen sim layouts" if imported else f"in {n} sim test episodes")
     lo, hi = wilson(k, n)
     return {"kind": "sim_success", "value": round(k / n, 4), "n": n, "successes": k, "ci95": [lo, hi],
-            "label": f"{round(100 * k / n)}% success {where}",
-            "detail": f"{SIM_DETAIL} {k} of {n} succeeded (95% interval {round(100 * lo)}–{round(100 * hi)}%).",
+            "layouts": layouts, "label": f"{round(100 * k / n)}% success {where}",
+            "detail": f"{PRACTICE_DETAIL if layouts else SIM_DETAIL} {k} of {n} succeeded "
+                      f"(95% interval {round(100 * lo)}–{round(100 * hi)}%).",
             "evaluation_id": run.id}
 
 
 def _server_score(s: dict[str, Any]) -> dict[str, Any]:
     if s.get("success_rate") is None:
         return {"kind": "pending", "value": None, "n": None, "label": "Score pending", "detail": PENDING_DETAIL}
-    n, rate = int(s.get("eval_episodes") or 0), float(s["success_rate"])
+    n, rate, layouts = int(s.get("eval_episodes") or 0), float(s["success_rate"]), s.get("layouts") or None
+    where = f"on {n} runs over {layouts} practice layouts it trained on" if layouts else f"on {n} unseen sim layouts"
     return {"kind": "sim_success", "value": rate, "n": n, "successes": round(rate * n), "ci95": None,
-            "label": f"{round(100 * rate)}% success on {n} unseen sim layouts",
-            "detail": f"{SIM_DETAIL} Reported by the GPU server (seeds {s.get('eval_seeds') or 'unseen'})."}
+            "layouts": layouts, "label": f"{round(100 * rate)}% success {where}",
+            "detail": f"{PRACTICE_DETAIL if layouts else SIM_DETAIL} Reported by the GPU server "
+                      f"(seeds {s.get('eval_seeds') or 'not given'})."}
 
 
 def _joint_score(rp: PolicyReplay) -> dict[str, Any]:
@@ -139,10 +157,10 @@ async def _runs(ctx: Ctx, rps: list[PolicyReplay]) -> list[dict[str, Any]]:
         sim, partial = rp.kind == "live_sim", rp.status == "partial"
         for e in rp.episodes:
             note = ("Cut off before the end, so not judged." if sim and partial else
-                    "A single closed-loop run on an unseen layout, judged by the simulator; not part of the score."
+                    "A single closed-loop run in MuJoCo, judged by the simulator; not part of the score."
                     if sim else "Open loop on a held-out real demo: joint error vs the human, not a success rate.")
             out.append({"id": f"{rp.id}/{e.episode}", "kind": rp.kind,
-                        "label": f"Unseen layout {e.episode}" if sim else f"Held-out demo {e.episode}",
+                        "label": "Live sim run" if sim else f"Held-out demo {e.episode}",
                         "when": rp.created_at.isoformat(), "partial": partial,
                         "success": e.success if sim and not partial else None, "joint_mae_deg": e.joint_mae_deg,
                         "steps": e.steps, "inference_ms": e.inference_ms.get("mean"), "gpu": rp.gpu,
@@ -157,7 +175,8 @@ async def _evidence(ctx: Ctx, score: dict[str, Any], branches: dict[str, Simulat
     if (run := runs.get(score.get("evaluation_id") or "")) is not None:
         for bid in run.branch_ids:
             for e in (branches[bid].result.episodes if bid in branches and branches[bid].result else []):
-                out.append({"label": f"Unseen layout {e.seed}", "success": e.success, "steps": e.steps,
+                where = "Unseen layout" if e.seed >= UNSEEN_FROM else "Practice layout"
+                out.append({"label": f"{where} {e.seed}", "success": e.success, "steps": e.steps,
                             "video_url": await ctx.media_url(e.video_key) if e.video_key else None})
     elif score["kind"] == "joint_error" and held is not None:
         for e in held.episodes:
@@ -176,7 +195,8 @@ def _run_real(task: str | None, ck: Checkpoint, held: PolicyReplay | None, live:
         return {"kind": "real", "task": task, "episodes": episodes, "live_now": False, "note": DOWN}
     if not served:
         return {"kind": "real", "task": task, "episodes": episodes, "live_now": False,
-                "note": "The GPU server is up but doesn't have this policy loaded."}
+                "note": "The GPU server is up but doesn't have this policy loaded (real-demo policies load only "
+                        "when it starts with SERVE_REAL=1)."}
     if served.get("checkpoint") != _ck_name(ck):
         return {"kind": "real", "task": task, "episodes": episodes, "live_now": False,
                 "note": f"The GPU server is running a different {task} policy ({served.get('checkpoint')})."}
@@ -200,9 +220,9 @@ def _run_sim(task: str | None, variant: str, live: dict | None) -> dict[str, Any
     return {"kind": "sim", "task": task, "episodes": [], "live_now": True, "note": None}
 
 
-async def list_skills(ctx: Ctx) -> list[dict[str, Any]]:
-    """Every trained policy, newest first. Reads the live GPU server's /policies.json (3 s timeout) to say
-    which can run live now."""
+async def list_skills(ctx: Ctx, real: bool = False) -> list[dict[str, Any]]:
+    """Every policy trained in our physics sim (with real=True, also the real-demo ones), newest first. Reads the
+    live GPU server's /policies.json (3 s timeout) to say which can run live now."""
     st = await live_policy_service.status(ctx)
     live = st if st.get("available") else None
     keys = {**(st.get("projects") or {}), **_mapping(ctx)}
@@ -258,13 +278,14 @@ async def list_skills(ctx: Ctx) -> list[dict[str, Any]]:
         evidence = await _evidence(ctx, score, branches, runs, held)
         out.append({
             "id": f"sk_{gid}", "name": _name(task, sim, p), "task": task, "data": "sim" if sim else "real",
-            "instruction": (p.spec.goal or p.task_prompt).strip(), "robot": _robot(tj),
+            "instruction": _prompt(p), "robot": _robot(tj),
             "project_id": p.id, "project_name": p.name, "policy_type": rep.policy_type,
             "policy": _policy(rep.policy_type), "variant": variant, "steps": rep.step,
             "trained_where": _where(tj), "trained_at": rep.created_at.isoformat(),
             "weights": "on the cluster" if is_remote(rep.path) else "on this machine",
             "checkpoint_id": rep.id, "checkpoint": _ck_name(rep), "training_job_id": tj.id if tj else None,
             "dataset_version_id": tj.dataset_version_id if tj else None, "slurm_job": tj.external_id if tj else None,
+            "layouts": score.get("layouts"),
             "score": score, "run": _run_sim(task, variant, live) if sim else _run_real(task, rep, held, live),
             "runs": past, "evidence": evidence,
             "thumbnail_url": next((x["video_url"] for x in [*past, *sorted(evidence, key=lambda e: not e.get(
@@ -284,14 +305,15 @@ async def list_skills(ctx: Ctx) -> list[dict[str, Any]]:
             "variant": variant, "steps": s.get("step"), "trained_where": "Futurama", "trained_at": None,
             "weights": "on the cluster", "checkpoint_id": None, "checkpoint": f"{variant}@{s.get('step')}",
             "training_job_id": None, "dataset_version_id": None, "slurm_job": None, "score": _server_score(s),
+            "layouts": s.get("layouts") or None,
             "run": _run_sim(task, variant, live), "runs": [], "evidence": [], "thumbnail_url": None,
         })
     out.sort(key=lambda s: s["trained_at"] or "", reverse=True)
-    return out
+    return out if real else [s for s in out if s["data"] == "sim"]
 
 
-async def get_skill(ctx: Ctx, skill_id: str) -> dict[str, Any]:
-    for s in await list_skills(ctx):
+async def get_skill(ctx: Ctx, skill_id: str, real: bool = False) -> dict[str, Any]:
+    for s in await list_skills(ctx, real):
         if s["id"] == skill_id:
             return s
     raise NotFound(f"No physical skill {skill_id}.")

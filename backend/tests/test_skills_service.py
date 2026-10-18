@@ -24,8 +24,9 @@ def _write(p, data):
     p.write_text(json.dumps(data))
 
 
-def _mirror(root):
-    """<job_dir>/unscrew as sim_task.sbatch leaves it: ACT trained, step 30000 evaluated on 4 unseen seeds."""
+def _mirror(root, practice: int | None = None):
+    """<job_dir>/unscrew as sim_task.sbatch leaves it: ACT trained, step 30000 evaluated on 4 unseen seeds (or on 4
+    runs over `practice` layouts it trained on: LAYOUTS=N)."""
     _write(root / "dataset" / "meta" / "info.json", {"total_frames": 900})
     _write(root / "dataset" / "meta" / "cortex_sim.json", {"instruction": "unscrew the bolt", "kept_seeds": [0, 1],
                                                            "failed_seeds": [], "oracle_success_rate": 1.0})
@@ -35,9 +36,10 @@ def _mirror(root):
     ev = root / "runs" / "act" / "eval" / "030000"
     (ev / "seed100000_ok.mp4").parent.mkdir(parents=True, exist_ok=True)
     (ev / "seed100000_ok.mp4").write_bytes(b"mp4")
-    res = [{"seed": 100000 + i, "success": i != 3, "steps": 200, "video": "seed100000_ok.mp4" if i == 0 else None}
-           for i in range(4)]
-    _write(ev / "metrics.json", {"policy": "act", "seeds": "100000..100003", "success_rate": 0.75, "results": res})
+    res = [{"seed": i % practice if practice else 100000 + i, "success": i != 3, "steps": 200,
+            "video": "seed100000_ok.mp4" if i == 0 else None} for i in range(4)]
+    _write(ev / "metrics.json", {"policy": "act", "seeds": "100000..100003", "success_rate": 0.75, "results": res,
+                                 "layouts": practice})
     return root
 
 
@@ -97,21 +99,22 @@ async def world(tmp_path):
 
 async def test_every_trained_policy_is_a_skill_with_plain_names(world):
     ctx, real, tj, ck, sim = world
-    skills = await skills_service.list_skills(ctx)
+    skills = await skills_service.list_skills(ctx, real=True)
     by_name = {s["name"]: s for s in skills}
     assert set(by_name) == {"Pull a Jenga block", "Unscrew a bolt with the gripper"}
     j = by_name["Pull a Jenga block"]
     assert j["id"] == f"sk_{tj.id}" and j["project_id"] == real.id and j["checkpoint_id"] == ck.id
     assert j["robot"] == "SO-100" and j["policy"] == "SmolVLA" and j["data"] == "real"
     assert j["trained_where"] == "Futurama H200" and j["weights"] == "on the cluster" and j["steps"] == 10000
+    assert j["instruction"] == "Pull a block out of a Jenga tower"  # the prompt, not the default cube goal
     u = by_name["Unscrew a bolt with the gripper"]
     assert u["policy"] == "ACT" and u["data"] == "sim" and u["robot"] == "SO-101" and u["steps"] == 30000
-    assert u["project_id"] == sim["project_id"]
+    assert u["project_id"] == sim["project_id"] and u["instruction"] == "Unscrew a hex bolt from a fixture with the SO-101"
 
 
 async def test_scores_are_labelled_honestly(world):
     ctx, *_ = world
-    by_name = {s["name"]: s for s in await skills_service.list_skills(ctx)}
+    by_name = {s["name"]: s for s in await skills_service.list_skills(ctx, real=True)}
     j = by_name["Pull a Jenga block"]["score"]
     assert j["kind"] == "joint_error" and j["value"] == 0.11 and j["n"] == 2
     assert j["label"] == "0.11° mean joint error on 2 held-out real demos"
@@ -123,20 +126,20 @@ async def test_scores_are_labelled_honestly(world):
 
 async def test_past_live_runs_and_a_thumbnail(world):
     ctx, *_ = world
-    by_name = {s["name"]: s for s in await skills_service.list_skills(ctx)}
+    by_name = {s["name"]: s for s in await skills_service.list_skills(ctx, real=True)}
     j = by_name["Pull a Jenga block"]
     assert [r["kind"] for r in j["runs"]] == ["live_inference"]
     r = j["runs"][0]
     assert r["video_url"].endswith("/files/r/live58.mp4") and r["joint_mae_deg"] == 0.5 and r["success"] is None
     assert j["thumbnail_url"] == r["video_url"]
     u = by_name["Unscrew a bolt with the gripper"]
-    assert [(r["kind"], r["success"]) for r in u["runs"]] == [("live_sim", True)]
+    assert [(r["kind"], r["label"], r["success"]) for r in u["runs"]] == [("live_sim", "Live sim run", True)]
     assert "not part of the score" in u["runs"][0]["note"]
 
 
 async def test_how_to_run_it_when_the_gpu_server_is_down(world):
     ctx, *_ = world
-    by_name = {s["name"]: s for s in await skills_service.list_skills(ctx)}
+    by_name = {s["name"]: s for s in await skills_service.list_skills(ctx, real=True)}
     run = by_name["Pull a Jenga block"]["run"]
     assert run == {"kind": "real", "task": "jenga", "episodes": [58, 132], "live_now": False,
                    "note": "The GPU server isn't running. Request a GPU to run it live."}
@@ -153,7 +156,7 @@ async def test_with_the_gpu_server_up_skills_run_live_and_unimported_sim_policie
                                     "eval_seeds": "", "instruction": "sort the parts"}}
     ctx.settings.live_policy_url = f"http://127.0.0.1:{srv.port}"
     try:
-        by_name = {s["name"]: s for s in await skills_service.list_skills(ctx)}
+        by_name = {s["name"]: s for s in await skills_service.list_skills(ctx, real=True)}
     finally:
         srv.close()
     j = by_name["Pull a Jenga block"]["run"]
@@ -172,15 +175,42 @@ async def test_a_served_checkpoint_that_is_not_this_one_is_not_run_as_this_skill
     srv.info["policies"]["jenga"]["checkpoint"] = "jenga_020000"
     ctx.settings.live_policy_url = f"http://127.0.0.1:{srv.port}"
     try:
-        j = {s["name"]: s for s in await skills_service.list_skills(ctx)}["Pull a Jenga block"]
+        j = {s["name"]: s for s in await skills_service.list_skills(ctx, real=True)}["Pull a Jenga block"]
     finally:
         srv.close()
     assert j["run"]["live_now"] is False and "jenga_020000" in j["run"]["note"]
 
 
+async def test_only_policies_trained_in_our_sim_by_default(world):
+    """User rule (#298): the studio and agents see sim-trained policies; real-demo ones only when asked for."""
+    ctx, *_ = world
+    assert [s["name"] for s in await skills_service.list_skills(ctx)] == ["Unscrew a bolt with the gripper"]
+    assert {s["data"] for s in await skills_service.list_skills(ctx, real=True)} == {"sim", "real"}
+
+
+async def test_practice_layouts_are_never_called_unseen(tmp_path):
+    ctx = await build_ctx(Settings(data_dir=tmp_path / "data", _env_file=None, futurama_projects_file=tmp_path / "x",
+                                   live_policy_url=f"http://127.0.0.1:{free_port()}"))
+    await sim_import_service.import_task(ctx, "unscrew", _mirror(tmp_path / "m", practice=3), SIM_SRC, [])
+    [u] = await skills_service.list_skills(ctx)
+    assert u["score"]["label"] == "75% success on 4 runs over 3 practice layouts it trained on"
+    assert u["layouts"] == 3 and "not a test on new layouts" in u["score"]["detail"]
+    assert u["evidence"][0]["label"] == "Practice layout 0"
+
+    srv = FakeServe()
+    srv.info["sim"] = {"conveyor": {"variant": "act", "step": 9000, "success_rate": 0.9, "eval_episodes": 10,
+                                    "eval_seeds": "practice layouts 0..4", "instruction": "", "layouts": 5}}
+    ctx.settings.live_policy_url = f"http://127.0.0.1:{srv.port}"
+    try:
+        c = {s["name"]: s for s in await skills_service.list_skills(ctx)}["Pick a moving part off a conveyor"]
+    finally:
+        srv.close()
+    assert c["score"]["label"] == "90% success on 10 runs over 5 practice layouts it trained on" and c["layouts"] == 5
+
+
 async def test_get_skill(world):
     ctx, real, tj, *_ = world
-    s = await skills_service.get_skill(ctx, f"sk_{tj.id}")
+    s = await skills_service.get_skill(ctx, f"sk_{tj.id}", real=True)
     assert s["name"] == "Pull a Jenga block"
     with pytest.raises(NotFound):
         await skills_service.get_skill(ctx, "sk_nope")
