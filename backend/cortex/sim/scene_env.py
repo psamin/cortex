@@ -18,7 +18,9 @@ from .scene import SceneInfo
 from .so101 import LIGHT_SCALE, PickPlaceEnv, Variation
 
 REST_TOL_Z = 0.012  # object centre within this of its resting height
-UPRIGHT_COS = 0.9  # cylinder axis within ~25 degrees of vertical
+UPRIGHT_COS = 0.98  # cylinder axis within ~11 degrees of vertical (a 20 degree lean fails)
+FACE_DOWN_COS = 0.9  # a box rests on some face
+SETTLED_SPEED = 0.02  # m/s: faster is falling or being carried, not resting
 ZONE_MARGIN = 0.005
 
 
@@ -31,7 +33,9 @@ class SceneEnv(PickPlaceEnv):
         self.target: tuple[tuple[float, float], tuple[float, float]] | None = (
             info.zones[info.place[0]] if info.place else None)
         self.target_name = info.place[0] if info.place else None
+        self.base_target = self.target  # reset offsets apply to this, so they never accumulate
         self.obj_h = info.heights[self.pick]
+        self.shape = info.shapes.get(self.pick, "box")
 
     # -------------------------------------------------------------- binding
     def _bind(self) -> None:
@@ -40,6 +44,9 @@ class SceneEnv(PickPlaceEnv):
         self.cube = mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, self.info.objects[self.pick])
         self.cube_qadr = w._free_qadr(self.cube)
         self.parked = []  # the upstream cubes are parked by the generated scene itself
+        grip = {mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, b) for b in ("gripper", "moving_jaw_so101_v1")}
+        self.gripper_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] in grip}
+        self.obj_geoms = {g for g in range(w.model.ngeom) if w.model.geom_bodyid[g] == self.cube}
         self.others = {n: w._free_qadr(mujoco.mj_name2id(w.model, mujoco.mjtObj.mjOBJ_BODY, b))
                        for n, b in self.info.objects.items() if n != self.pick}
 
@@ -52,6 +59,7 @@ class SceneEnv(PickPlaceEnv):
             self.target, self.target_name = (xy, half), None
         else:
             raise ValueError("set_target needs a zone or an xy")
+        self.base_target = self.target
 
     # ---------------------------------------------------------------- reset
     def reset(self, seed: int, var: Variation | None = None, start: tuple[float, float] | None = None,
@@ -68,8 +76,9 @@ class SceneEnv(PickPlaceEnv):
         x += var.cube_offset[0] + rng.uniform(-jitter, jitter)
         y += var.cube_offset[1] + rng.uniform(-jitter, jitter)
         self.place_object(self.pick, (x, y), yaw=rng.uniform(-0.4, 0.4))
-        if var.box_offset != (0.0, 0.0) and self.target is not None:
-            (cx, cy), half = self.target
+        self.target = self.base_target
+        if var.box_offset != (0.0, 0.0) and self.base_target is not None:
+            (cx, cy), half = self.base_target
             self.target = ((cx + var.box_offset[0], cy + var.box_offset[1]), half)
         d.qvel[:] = 0
         self._apply_light(LIGHT_SCALE[var.lighting] * var.light_scale)
@@ -93,12 +102,38 @@ class SceneEnv(PickPlaceEnv):
         return np.array([cx, cy, 0.0])
 
     def upright(self) -> bool:
+        """Cylinders stand on an end; boxes rest on any face; spheres have no orientation."""
         R = self.world.data.xmat[self.cube].reshape(3, 3)
+        if self.shape == "sphere":
+            return True
+        if self.shape == "box":
+            return bool(np.max(np.abs(R[2, :])) > FACE_DOWN_COS)
         return bool(abs(R[2, 2]) > UPRIGHT_COS)
+
+    def _rest_height(self) -> float:
+        if self.shape != "box":
+            return self.obj_h / 2
+        # A box that landed on another face rests at half of that face's extent.
+        R = self.world.data.xmat[self.cube].reshape(3, 3)
+        half = self.world.model.geom_size[min(self.obj_geoms)]
+        return float(half[int(np.argmax(np.abs(R[2, :])))])
+
+    def held(self) -> bool:
+        d = self.world.data
+        for i in range(d.ncon):
+            g1, g2 = d.contact[i].geom1, d.contact[i].geom2
+            if (g1 in self.gripper_geoms and g2 in self.obj_geoms) or (g2 in self.gripper_geoms and g1 in self.obj_geoms):
+                return True
+        return False
+
+    def settled(self) -> bool:
+        m = self.world.model
+        dof = m.jnt_dofadr[m.body_jntadr[self.cube]]
+        return bool(np.linalg.norm(self.world.data.qvel[dof:dof + 3]) < SETTLED_SPEED)
 
     def resting(self) -> bool:
         p = self.cube_pos()
-        return bool(abs(p[2] - self.obj_h / 2) < REST_TOL_Z)
+        return bool(abs(p[2] - self._rest_height()) < REST_TOL_Z)
 
     def in_zone(self) -> bool:
         if self.target is None:
@@ -108,8 +143,8 @@ class SceneEnv(PickPlaceEnv):
         return bool(abs(p[0] - cx) <= hx + ZONE_MARGIN and abs(p[1] - cy) <= hy + ZONE_MARGIN)
 
     def in_box(self) -> bool:
-        """Task success: inside the target zone, resting on the table, upright."""
-        return self.in_zone() and self.resting() and self.upright()
+        """Task success: inside the target zone, resting on the table, upright, released and still."""
+        return self.in_zone() and self.resting() and self.upright() and self.settled() and not self.held()
 
     def reward(self) -> float:
         if self.in_box():

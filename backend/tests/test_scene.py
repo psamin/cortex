@@ -83,3 +83,47 @@ def test_feasibility_accepts_cube_and_refuses_full_bottle(tmp_path):
     o = r.objects[0]
     assert not r.ok and not o.grasp.ok and o.tall and o.grasp_mode == "side"
     assert o.suggestion == "try a small water bottle"
+
+
+def test_side_grasp_closes_jaws_horizontally(cube_env):
+    import mujoco
+
+    from cortex.sim.expert import approach_error_deg, closing_direction, side_approach, solve_ik
+    from cortex.sim.grasp import ik_seeds
+
+    _, _, env = cube_env
+    xyz = np.array([0.31, 0.0, 0.084])
+    axis = side_approach(xyz[:2])
+    best = min((solve_ik(env, xyz, s, approach=axis, iters=150) for s in ik_seeds(xyz, np.asarray(env.module.HOME))),
+               key=lambda r: r[1])
+    q, err = best
+    assert err < 0.004 and approach_error_deg(env, q, axis) < 5
+    w = env.world
+    d = mujoco.MjData(w.model)
+    d.qpos[:] = w.data.qpos
+    d.qpos[w.qadr[:5]] = np.deg2rad(q[:5])
+    mujoco.mj_kinematics(w.model, d)
+    assert abs(closing_direction(w.model, d)[2]) < 0.1  # jaws close sideways around a standing bottle
+
+
+def test_held_or_moving_object_is_not_success(cube_env):
+    _, _, env = cube_env
+    env.place_object(env.pick, (0.22, 0.12))
+    env.world.data.qvel[env.world.model.jnt_dofadr[env.world.model.body_jntadr[env.cube]]] = 0.5
+    assert not env.settled() and not env.in_box()
+
+
+def test_box_offset_does_not_accumulate(cube_env):
+    from cortex.sim.so101 import Variation
+
+    _, _, env = cube_env
+    for _ in range(3):
+        env.reset(1, Variation(box_offset=(0.02, 0.0)))
+    assert np.allclose(env.box_pos()[:2], (0.24, 0.12))
+
+
+def test_small_table_clips_default_workspace():
+    spec = intake.apply_patch(intake.start(), {"environment": {"table_size": [0.4, 0.4]}})
+    assert np.allclose(spec.workspace.y, (-0.18, 0.18))
+    with pytest.raises(intake.IntakeError, match="off the table"):
+        intake.apply_patch(spec, {"workspace": {"y": [-0.3, 0.3]}})

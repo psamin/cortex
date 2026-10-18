@@ -28,6 +28,7 @@ from .grasp import SIDE_MIN_RADIUS, grasp_mode
 from .so101 import envhub_module
 
 PARK_Z = -0.70  # under the table top, above the floor at -0.75: out of every camera
+FLOOR_Z = -0.75  # upstream floor plane
 OBJ_FRICTION = "1.2 0.03 0.003"
 
 
@@ -41,6 +42,7 @@ class SceneInfo:
     pick: str | None
     place: list[str]
     lighting: str = "normal"
+    shapes: dict[str, str] = field(default_factory=dict)  # object name -> box | cylinder | sphere
     digest: str = ""
     notes: list[str] = field(default_factory=list)
 
@@ -103,7 +105,7 @@ def build_scene(spec: IntakeSpec, out_dir: Path) -> SceneInfo:
         name = b.get("name", "")
         if name in m.CUBE_BODIES:
             i = m.CUBE_BODIES.index(name)
-            b.set("pos", f"{0.6 + 0.08 * i:.3f} 1.0 {PARK_Z}")
+            b.set("pos", f"{0.6 + 0.08 * i:.3f} 1.0 {FLOOR_Z + 0.015:.3f}")  # resting on the floor
         elif name == m.BOX_BODY:
             b.set("pos", f"0.9 1.2 {PARK_Z}")
 
@@ -143,6 +145,7 @@ def build_scene(spec: IntakeSpec, out_dir: Path) -> SceneInfo:
     return SceneInfo(path=path, objects={o.name: body_name(o.name) for o in spec.objects},
                      zones={z.name: (tuple(z.center), tuple(z.half_size)) for z in spec.zones},  # type: ignore[misc]
                      starts=starts, heights={o.name: o.height for o in spec.objects},
+                     shapes={o.name: o.shape for o in spec.objects},
                      pick=spec.task.pick, place=list(spec.task.place), lighting=env.lighting,
                      digest=digest, notes=notes)
 

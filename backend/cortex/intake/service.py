@@ -54,9 +54,30 @@ def apply_patch(spec: IntakeSpec, patch: dict[str, Any]) -> IntakeSpec:
         out = IntakeSpec.model_validate(merged)
     except ValidationError as e:
         raise IntakeError(_short(e)) from e
+    _fit_workspace_to_table(out)
     _check_robot(out)
     _check_refs(out)
     return out
+
+
+TABLE_CENTER_X = 0.20  # the upstream table is centred 0.2 m in front of the arm base
+TABLE_EDGE = 0.02  # keep objects this far from the edge
+
+
+def _fit_workspace_to_table(spec: IntakeSpec) -> None:
+    """A default (assumed) workspace is clipped to the table; one the agent set must fit on it."""
+    hx, hy = spec.environment.table_size[0] / 2 - TABLE_EDGE, spec.environment.table_size[1] / 2 - TABLE_EDGE
+    tx, ty = (TABLE_CENTER_X - hx, TABLE_CENTER_X + hx), (-hy, hy)
+    ws = spec.workspace
+    for axis, (lo, hi) in (("x", tx), ("y", ty)):
+        cur = getattr(ws, axis)
+        if axis in ws.assumed:
+            setattr(ws, axis, (max(cur[0], lo), min(cur[1], hi)))
+        elif cur[0] < lo - 1e-9 or cur[1] > hi + 1e-9:
+            raise IntakeError(f"workspace.{axis} {cur} runs off the table ({lo:.2f}, {hi:.2f}); "
+                              "make the table bigger or the workspace smaller")
+        if getattr(ws, axis)[0] >= getattr(ws, axis)[1]:
+            raise IntakeError(f"the table is too small for the arm's workspace along {axis}")
 
 
 def status(spec: IntakeSpec, previous: IntakeSpec | None = None) -> IntakeStatus:
