@@ -1,0 +1,93 @@
+{
+  "_comment": "Single source for the landing page's Connect section, the no-JS copy in index.html and llms.txt (scripts/gen_agent_index.py). backend/tests/test_agent_index.py checks every tool and argument here against the real registry.",
+  "mcp_url": "http://localhost:3000/mcp",
+  "rest_url": "http://localhost:8000/api/tools",
+  "clients": [
+    {
+      "id": "claude",
+      "label": "Claude Code",
+      "file": "Terminal",
+      "code": "claude mcp add --transport http cortex http://localhost:3000/mcp",
+      "doc": "https://code.claude.com/docs/en/mcp"
+    },
+    {
+      "id": "cursor",
+      "label": "Cursor",
+      "file": ".cursor/mcp.json",
+      "code": "{\n  \"mcpServers\": {\n    \"cortex\": {\n      \"url\": \"http://localhost:3000/mcp\"\n    }\n  }\n}",
+      "doc": "https://cursor.com/docs/context/mcp"
+    },
+    {
+      "id": "vscode",
+      "label": "VS Code",
+      "file": ".vscode/mcp.json",
+      "code": "{\n  \"servers\": {\n    \"cortex\": {\n      \"type\": \"http\",\n      \"url\": \"http://localhost:3000/mcp\"\n    }\n  }\n}",
+      "doc": "https://code.visualstudio.com/docs/copilot/customization/mcp-servers"
+    },
+    {
+      "id": "json",
+      "label": "Any client",
+      "file": ".mcp.json",
+      "code": "{\n  \"mcpServers\": {\n    \"cortex\": {\n      \"type\": \"http\",\n      \"url\": \"http://localhost:3000/mcp\"\n    }\n  }\n}",
+      "doc": null
+    },
+    {
+      "id": "rest",
+      "label": "REST",
+      "file": "Terminal",
+      "code": "# every tool, with its JSON schema\ncurl http://localhost:8000/api/tools\n\n# call one\ncurl -X POST http://localhost:8000/api/tools/get_project_state \\\n  -H \"Content-Type: application/json\" \\\n  -d '{\"project_id\": \"prj_…\"}'",
+      "doc": null
+    }
+  ],
+  "session": [
+    {
+      "tool": "cortex.start_intake",
+      "args": { "prompt": "pick up the small water bottle and put it on the mat" },
+      "returns": "prj_… and typed questions, each with a ready patch"
+    },
+    {
+      "tool": "cortex.update_intake",
+      "args": {
+        "project_id": "prj_…",
+        "patch": { "zones": [{ "name": "mat", "center": [0.25, -0.1] }], "task": { "pick": "small_water_bottle", "place": ["mat"] } }
+      },
+      "returns": "merged spec, what changed, questions left"
+    },
+    {
+      "tool": "cortex.build_simulation",
+      "args": { "project_id": "prj_…" },
+      "returns": "MuJoCo scene and feasibility: jaw, torque, reach"
+    },
+    {
+      "tool": "cortex.capture_frame",
+      "args": { "project_id": "prj_…", "camera": "front" },
+      "returns": "a render to check against the real setup"
+    },
+    {
+      "tool": "cortex.start_agent_collection",
+      "args": { "project_id": "prj_…", "num_demos": 12 },
+      "returns": "ac_… and a job; only verified successes become episodes",
+      "alt": "Or drive the arm yourself: cortex.robot_start_episode, then robot_observe, robot_move, robot_gripper … robot_finish_episode."
+    },
+    {
+      "tool": "cortex.create_dataset_version",
+      "args": { "project_id": "prj_…", "wait_s": 45 },
+      "returns": "ds_…, a LeRobot v3 dataset with lineage"
+    },
+    {
+      "tool": "cortex.propose_training_job",
+      "args": { "project_id": "prj_…", "dataset_version_id": "ds_…", "policy_type": "act" },
+      "returns": "tj_… with a GPU estimate; once a person approves it in the studio, cortex.launch_training_job runs it"
+    },
+    {
+      "tool": "cortex.evaluate_learned_policy",
+      "args": { "project_id": "prj_…", "checkpoint_id": "ck_…" },
+      "returns": "per-condition success with 95% intervals"
+    },
+    {
+      "tool": "cortex.improve_policy",
+      "args": { "project_id": "prj_…", "max_new_demos": 5 },
+      "returns": "weakest condition, targeted demos, a retraining proposal"
+    }
+  ]
+}

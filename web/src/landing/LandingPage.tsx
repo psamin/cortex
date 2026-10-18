@@ -11,6 +11,7 @@ import { HeroCopy } from "./hero/HeroCopy";
 import { HeroSection } from "./hero/HeroSection";
 import { SiteNav } from "./hero/SiteNav";
 import { LayersSection } from "./layers/LayersSection";
+import { ConnectSection } from "./connect/ConnectSection";
 import { AgentLoop } from "./sections/AgentLoop";
 import { BuiltOn } from "./sections/BuiltOn";
 import { Safety } from "./sections/Safety";
@@ -32,6 +33,7 @@ export function LandingPage() {
         <SiteNav />
         <HeroSection copy={<HeroCopy />} />
         <LayersSection />
+        <ConnectSection />
         <AgentLoop />
         <BuiltOn />
         <Safety />

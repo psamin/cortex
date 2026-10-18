@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { SectionHead } from "./SectionHead";
 
 const NODES = [
@@ -9,8 +8,6 @@ const NODES = [
   { k: "E", tag: "Policy", name: "ACT checkpoint", note: "Model card · run command" },
 ];
 
-const CMD = "claude mcp add --transport http cortex http://localhost:3000/mcp";
-
 function Arrow() {
   return (
     <svg aria-hidden className="h-3 w-full min-w-[28px] text-[#171717]" viewBox="0 0 40 12" preserveAspectRatio="none">
@@ -20,46 +17,14 @@ function Arrow() {
   );
 }
 
-/** FIG.03: agents call tools; tools run physics; physics fills the dataset; the dataset trains the policy. */
+/** FIG.04: agents call tools; tools run physics; physics fills the dataset; the dataset trains the policy. */
 export function AgentLoop() {
-  const [copied, setCopied] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(CMD);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* clipboard blocked: the command stays selectable */
-    }
-  };
-
   return (
-    <section id="loop" className="kn-gutter border-t border-[#E6E6E6] py-24 lg:py-32">
-      <div className="grid gap-12 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)] lg:items-end">
-        <SectionHead fig="FIG.03" label="The agent loop" first="Your agent drives." second="Cortex keeps it honest.">
-          Connect any MCP agent. It describes the arm and the task, calls Cortex tools and reads the results back. The
-          physics, the datasets and the training run on the Cortex side.
-        </SectionHead>
-
-        <div className="min-w-0 border border-[#E6E6E6]">
-          <div className="flex h-10 items-center justify-between border-b border-[#E6E6E6] pl-4 pr-2 kn-mono text-[10px] uppercase tracking-[0.16em] text-[#858585]">
-            <span>Terminal · connect once</span>
-            <button type="button" onClick={copy} className="rounded-full px-3 py-1 uppercase text-[#171717] transition-colors hover:bg-[#F5F5F5]">
-              {copied ? "Copied" : "Copy"}
-            </button>
-          </div>
-          <pre className="whitespace-pre-wrap px-4 py-5 [overflow-wrap:anywhere] sm:overflow-x-auto sm:whitespace-pre sm:[overflow-wrap:normal] kn-mono text-[12.5px] leading-[1.7] text-[#171717]">
-            <code>
-              <span className="select-none text-[#BDBDBD]">$ </span>
-              {CMD}
-            </code>
-          </pre>
-          <div className="border-t border-[#E6E6E6] px-4 py-3 kn-mono text-[10px] uppercase tracking-[0.14em] text-[#858585]">
-            Then ask{" "}
-            <span className="ml-1 normal-case tracking-normal text-[#171717]">&ldquo;Teach the SO-101 to put the cube in the bowl.&rdquo;</span>
-          </div>
-        </div>
-      </div>
+    <section id="loop" aria-labelledby="loop-title" className="kn-gutter border-t border-[#E6E6E6] py-24 lg:py-32">
+      <SectionHead titleId="loop-title" fig="FIG.04" label="The agent loop" first="Your agent drives." second="Cortex keeps it honest.">
+        The agent describes the arm and the task, calls Cortex tools and reads the results back. The
+        physics, the datasets and the training run on the Cortex side.
+      </SectionHead>
 
       <div
         className="mt-20"

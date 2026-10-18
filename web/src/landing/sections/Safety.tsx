@@ -21,12 +21,12 @@ const RULES = [
   },
 ];
 
-/** FIG.05: approvals and the hardware boundary. */
+/** FIG.06: approvals and the hardware boundary. */
 export function Safety() {
   return (
-    <section id="safety" className="kn-gutter border-t border-[#E6E6E6] py-24 lg:py-32">
+    <section id="safety" aria-labelledby="safety-title" className="kn-gutter border-t border-[#E6E6E6] py-24 lg:py-32">
       <div className="flex flex-wrap items-end justify-between gap-10">
-        <SectionHead fig="FIG.05" label="Safety and approvals" first="Agents propose." second="People approve." />
+        <SectionHead titleId="safety-title" fig="FIG.06" label="Safety and approvals" first="Agents propose." second="People approve." />
         <EStop />
       </div>
       <ol className="mt-14 grid border-t border-[#E6E6E6] md:grid-cols-3">

@@ -5,19 +5,20 @@ import { scrollToSection } from "../scroll";
 
 const LINKS = [
   ["How it works", "platform"],
+  ["Connect", "connect"],
   ["Agent loop", "loop"],
   ["Built on", "stack"],
   ["Safety", "safety"],
 ];
 
-/** FIG.06: the last ask, then the footer. */
+/** FIG.07: the last ask, then the footer. */
 export function FinalCta() {
   return (
     <>
       <section className="kn-gutter border-t border-[#E6E6E6] py-28 lg:py-36">
         <div>
           <div className="kn-label kn-label-rule">
-            <span className="text-[#171717]">FIG.06</span>
+            <span className="text-[#171717]">FIG.07</span>
             <span>Start</span>
           </div>
           <h2 className="kn-display mt-6 max-w-[48rem] text-[clamp(2.4rem,4.6vw,4.6rem)] text-[#171717]">
