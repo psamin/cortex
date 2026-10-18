@@ -17,6 +17,7 @@ Patch semantics (``apply_patch``):
 from __future__ import annotations
 
 import copy
+import json
 from typing import Any
 
 from pydantic import ValidationError
@@ -25,6 +26,8 @@ from . import catalogue
 from .spec import SO101_JOINTS, IntakeSpec, IntakeStatus, Question
 
 KEYED_LISTS = {"objects", "zones", "cameras", "environment.obstacles"}
+MAX_PATCH_CHARS = 20_000
+BASE_CLEARANCE = 0.09  # m around the arm base that obstacles must leave free
 # so101 actuator ctrlrange from the Menagerie model, in so101_follower units.
 SO101_LIMITS = [(-110.0, 110.0), (-100.0, 100.0), (-96.8, 96.8), (-95.0, 95.0), (-157.2, 162.8), (0.0, 100.0)]
 DEFAULT_ZONES = [{"name": "spot_a", "center": [0.22, 0.12]}, {"name": "spot_b", "center": [0.22, -0.12]}]
@@ -48,6 +51,8 @@ def start(prompt: str = "", mode: str = "sim") -> IntakeSpec:
 def apply_patch(spec: IntakeSpec, patch: dict[str, Any]) -> IntakeSpec:
     if not isinstance(patch, dict):
         raise IntakeError("patch must be an object")
+    if len(json.dumps(patch, default=str)) > MAX_PATCH_CHARS:
+        raise IntakeError(f"patch is too large (over {MAX_PATCH_CHARS} characters); send it in parts")
     _reject_assumed(patch, "")
     merged = _merge(spec.model_dump(mode="json"), patch, path="")
     try:
@@ -265,7 +270,8 @@ def _merge_keyed(base: list[dict], patch: Any, field: str) -> list[dict]:
         if not isinstance(p, dict) or not p.get("name"):
             raise IntakeError(f"every {field} item needs a 'name'")
         p = dict(p)
-        name = _resolve_object_name(p.pop("name"), items) if field == "objects" else p.pop("name")
+        name = (_resolve_object_name(p.pop("name"), items) if field == "objects"
+                else catalogue.slug(str(p.pop("name"))))
         if p.pop("_delete", False):
             items.pop(name, None)
             order = [n for n in order if n != name]
@@ -325,6 +331,26 @@ def _check_refs(spec: IntakeSpec) -> None:
     for o in spec.objects:
         if o.start is not None and not (x0 <= o.start[0] <= x1 and y0 <= o.start[1] <= y1):
             raise IntakeError(f"object '{o.name}' start {o.start} is outside the workspace")
+    _check_obstacles(spec)
+
+
+def _footprint(shape: str, size: list[float]) -> tuple[float, float]:
+    """Half extents of an obstacle on the table (axis-aligned)."""
+    if shape == "box":
+        return size[0] / 2, size[1] / 2
+    return size[0] / 2, size[0] / 2
+
+
+def _check_obstacles(spec: IntakeSpec) -> None:
+    """Obstacles may not cover the arm base, a place zone or an object's start."""
+    points = [("the arm base", (0.0, 0.0), BASE_CLEARANCE)]
+    points += [(f"zone '{z.name}'", tuple(z.center), max(z.half_size)) for z in spec.zones]
+    points += [(f"object '{o.name}' start", tuple(o.start), o.grasp_width / 2) for o in spec.objects if o.start]
+    for ob in spec.environment.obstacles:
+        hx, hy = _footprint(ob.shape, ob.size)
+        for what, (px, py), r in points:
+            if abs(px - ob.center[0]) < hx + r and abs(py - ob.center[1]) < hy + r:
+                raise IntakeError(f"obstacle '{ob.name}' overlaps {what}; move it or make it smaller")
 
 
 def _short(e: ValidationError) -> str:
