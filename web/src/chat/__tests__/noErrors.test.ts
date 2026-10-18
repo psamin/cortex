@@ -38,6 +38,20 @@ describe("chat without errors", () => {
     expect(blocks.map((b) => (b.type === "item" ? b.item.kind : b.type))).toEqual(["user", "job_done"]);
   });
 
+  it("leaves the backend's turn-failure lines out of the agent's reply", () => {
+    const blocks = buildBlocks(
+      fold([
+        { type: "user", text: "go" },
+        { type: "text", delta: "Started the demo collection." },
+        { type: "text", delta: `\n\nThis turn failed (ValidationError: ${PYDANTIC.slice(0, 120)}). The backend log has the details.` },
+        { type: "user", text: "again" },
+        { type: "text", delta: "Claude Code exited with an error: idle timeout" },
+      ]),
+    );
+    expect(blocks.map((b) => (b.type === "item" ? b.item.kind : b.type))).toEqual(["user", "assistant", "user"]);
+    expect(blocks[1].type === "item" && blocks[1].item.kind === "assistant" && blocks[1].item.text).toBe("Started the demo collection.");
+  });
+
   it("still asks to raise a spent planner budget, without the failed call's row", () => {
     const blocks = buildBlocks(
       fold([
@@ -71,5 +85,20 @@ describe("plainText", () => {
       "Claude Code failed: the built-in planner answered instead.",
     );
     expect(plainText(PYDANTIC)).toBe("");
+    expect(plainText("ValueError: no episodes")).toBe("");
+  });
+
+  it("drops Claude Code, ssh and tunnel error text", () => {
+    const tail = ": the built-in planner answered instead.";
+    expect(plainText(`Claude Code failed: API Error: 529 {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}${tail}`)).toBe(`Claude Code failed${tail}`);
+    expect(plainText(`Claude Code failed: Error: spawn claude ENOENT${tail}`)).toBe(`Claude Code failed${tail}`);
+    for (const raw of [
+      "ssh: connect to host planetexpress-login.cc.gatech.edu port 22: Operation timed out",
+      "ssh: Could not resolve hostname planetexpress-login.cc.gatech.edu: nodename nor servname provided",
+      "bind [127.0.0.1]:8765: Address already in use",
+      "Host key verification failed.",
+    ]) {
+      expect(plainText(`Can't reach Futurama (${raw}). Is the GT VPN on?`)).toBe("Can't reach Futurama. Is the GT VPN on?");
+    }
   });
 });

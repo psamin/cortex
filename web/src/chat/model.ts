@@ -305,6 +305,8 @@ export type Block =
   /** consecutive tool calls between two messages; cards render after the group, outside the collapse */
   | { type: "tools"; tools: ToolItem[]; cards: string[]; budgetError: string | null; key: string };
 
+const TURN_ERROR = /^(This turn failed \(|Claude Code exited with an error:)/m;
+
 /**
  * Deterministic layout: consecutive tool rows form one group; every result card renders once, at the
  * first mention of its id (so a live card stays put and updates in place); one training approval at most.
@@ -316,6 +318,12 @@ export function buildBlocks(items: ChatItem[]): Block[] {
   for (const it of items) {
     // Only what went right is shown: failed calls, turn errors and failed jobs stay in the backend's logs (#328).
     if (it.kind === "error" || (it.kind === "job_done" && it.status === "failed")) continue;
+    if (it.kind === "assistant") {
+      // the backend's own "This turn failed (…)" / "Claude Code exited with an error: …" lines stay in its logs
+      const text = it.text.split(/\n{2,}/).filter((p) => !TURN_ERROR.test(p)).join("\n\n").trim();
+      if (text) out.push({ type: "item", item: { ...it, text }, key: `i${it.id}` });
+      continue;
+    }
     if (it.kind === "tool") {
       // a spent planner budget still asks you to raise it (its call row is not shown)
       const budgetError = it.status === "error" && /budget/i.test(it.summary) ? it.summary : null;

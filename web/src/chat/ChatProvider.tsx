@@ -261,7 +261,8 @@ export function ChatProvider({ pid, children }: { pid: string; children: ReactNo
         if ((e as Error).name !== "AbortError") {
           console.warn("[cortex] agent turn", e); // the chat leaves it out (#328)
           const msg = e instanceof ApiError && e.unreachable ? "The Cortex backend is not responding." : splitError(e, undefined, "The agent request failed.").text;
-          setItems((xs) => applyEvent(xs, { type: "error", message: msg }));
+          // the error item stays out of the chat; the turn still ends with the plain "Stopped" line
+          setItems((xs) => applyEvent(applyEvent(xs, { type: "error", message: msg }), { type: "done", is_error: true }));
         }
       } finally {
         setItems((xs) => xs.map((it) => (it.kind === "tool" && it.status === "running" ? { ...it, status: "ok" } : it)));

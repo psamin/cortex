@@ -196,7 +196,7 @@ export function splitError(error: unknown, detail?: string | null, fallback = "S
 
 /** Raw error text: exception names, pydantic dumps, tracebacks, errno, shell/Slurm error lines. */
 const RAW =
-  /Traceback|validation errors? for|Errno|\b[A-Z]\w*(Error|Exception)\b|\b(error|fatal):|errors\.pydantic\.dev|Extra inputs are not permitted|Connection refused|Permission denied|No such file or directory/;
+  /Traceback|validation errors? for|Errno|\b[A-Z]\w*(Error|Exception)\b|\bError\b|\b(error|fatal):|errors\.pydantic\.dev|Extra inputs are not permitted|Connection refused|Permission denied|No such file or directory|\{"|\b(ssh|sbatch|srun):|ENOENT|(Operation|Connection) timed out|Could not resolve|verification failed|Address already in use|\bHTTP \d{3}\b/;
 
 /**
  * A Cortex sentence without the raw error it quotes (#328): "(…)" asides holding one are dropped, and a raw ": …"
@@ -207,7 +207,7 @@ export function plainText(text: string): string {
   const t = text.replace(/\s*\((?:[^()]|\([^()]*\))*\)/g, (m) => (RAW.test(m) ? "" : m));
   if (!RAW.test(t)) return t;
   const i = t.indexOf(": ");
-  if (i <= 0) return "";
+  if (i <= 0 || RAW.test(t.slice(0, i))) return "";
   const j = t.lastIndexOf(": ");
   const tail = t.slice(j + 2);
   return j > i && !RAW.test(tail) ? `${t.slice(0, i)}: ${tail}` : `${t.slice(0, i)}.`;

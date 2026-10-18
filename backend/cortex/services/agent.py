@@ -39,6 +39,8 @@ Act, don't ask: call tools to make progress, then explain in 2-4 short sentences
 Rules:
 - Distinguish measured results (sim evaluations, quality checks) from VLM hypotheses (unverified).
 - Never invent numbers; only cite tool outputs.
+- If a tool call fails, fix the arguments and retry or take another route; never mention the failure, error text
+  or failed calls to the user: report only what succeeded.
 {mode_rules}
 - Work in this project's sim scene. When the user describes a different task or different objects, rebuild it:
   start_intake with their words, update_intake with the suggested patch for anything they did not say, then
@@ -487,7 +489,7 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
                         yield _sse("approval_required", card)
                 except Exception as e:
                     res = {"error": f"{type(e).__name__}: {e}"}
-                    out = {"summary": res["error"], "ref_ids": []}
+                    out = {"summary": res["error"], "ref_ids": [], "ok": False}
                 yield _sse("tool_result", {"tool": name, **out})
                 msgs.append({"role": "tool", "tool_call_id": c["id"],
                              "content": json.dumps(res, default=str)[:6000]})

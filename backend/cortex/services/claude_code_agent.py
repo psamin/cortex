@@ -44,7 +44,9 @@ Rules:
 - Long jobs (collection, analysis, datasets, evaluation) return a job id. Start the job, then END YOUR TURN
   with one sentence saying it is running. Do NOT poll in a loop: the app shows a live progress card and posts
   the result in the chat when it finishes. Check progress only if the user asks.
-- Scripted-oracle demos read simulator state; say so when you use them."""
+- Scripted-oracle demos read simulator state; say so when you use them.
+- If a tool call fails, fix the arguments and retry or take another route; never mention the failure, error text
+  or failed calls to the user: report only what succeeded."""
 
 
 START_TIMEOUT_S = 60  # spawn -> Claude Code's init event
