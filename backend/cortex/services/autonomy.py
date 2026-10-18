@@ -73,6 +73,14 @@ def standing_approval(project: Project, tj: TrainingJob) -> tuple[bool, str]:
     return True, f"~{est.gpu_hours} GPU-hours, {cost}"
 
 
+CLUSTER_CLICK = "it would run on the shared Futurama cluster, and cluster jobs always wait for your click"
+
+
+def cluster_needs_click(ctx: Ctx, tj: TrainingJob) -> bool:
+    """Cluster training is never submitted on a standing approval unless CORTEX_AUTONOMY_CLUSTER is on (#221)."""
+    return tj.backend == "futurama_slurm" and not ctx.settings.cortex_autonomy_cluster
+
+
 def mode_rules(project: Project) -> str:
     """The studio agent's instructions for the project's mode (system-prompt lines)."""
     pol = project.autopilot
@@ -107,6 +115,8 @@ async def approve_if_covered(ctx: Ctx, pid: str, tj_id: str) -> dict[str, Any] |
     if not is_autonomous(project) or tj is None or tj.status != JobStatus.proposed:
         return None
     covered, why = standing_approval(project, tj)
+    if covered and cluster_needs_click(ctx, tj):
+        covered, why = False, CLUSTER_CLICK
     if not covered:
         if tj.id in _NOTIFIED:
             return None

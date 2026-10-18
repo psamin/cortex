@@ -15,8 +15,8 @@ def run(coro):
     return asyncio.run(coro)
 
 
-async def setup(tmp_path, mode: str = "autonomous"):
-    ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+async def setup(tmp_path, mode: str = "autonomous", cluster: bool = True):
+    ctx = await build_ctx(Settings(data_dir=tmp_path, cortex_autonomy_cluster=cluster, _env_file=None))
     p = project_service.create_project(CreateProjectRequest(task_prompt="pick up the cube"))
     p.autopilot.autonomy = mode  # type: ignore[assignment]
     await ctx.repo.save("projects", p, status="active")
@@ -207,4 +207,16 @@ def test_stop_ends_the_chain(tmp_path):
         assert autonomy.armed_thread(ctx, p.id) == "th_1"
         autonomy.stop(ctx, p.id)
         assert autonomy.armed_thread(ctx, p.id) is None
+    run(go())
+
+
+def test_cluster_training_waits_for_a_click_unless_allowed(tmp_path):
+    """#221: by default no Futurama job is ever submitted without a human click, even in autonomous mode."""
+    async def go():
+        ctx, p = await setup(tmp_path, cluster=False)
+        tj = proposed(p)  # futurama_slurm, free, under the cap: covered by the standing approval otherwise
+        await ctx.repo.save("training_jobs", tj)
+        row = await autonomy.approve_if_covered(ctx, p.id, tj.id)
+        cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob)
+        assert cur.status == JobStatus.proposed and row["tone"] == "needs_you" and "cluster" in row["text"]
     run(go())

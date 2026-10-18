@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     futurama_policy_dir: str = "~/cortex-jenga"  # holds serve_policy.sbatch and output/<task>/ checkpoints
     futurama_node_domain: str = "cc.gatech.edu"  # compute nodes are <node>.<domain>
     live_policy_gres: str = "gpu:l40s:1"  # e.g. gpu:h200:1
+    # Autonomous mode / Autopilot may submit Futurama training without a click only when this is on (#221):
+    # the cluster is shared and access can be revoked, so by default every cluster job is a human click.
+    cortex_autonomy_cluster: bool = False
     # task -> project id for results made on Futurama (live GPU sessions, replays, sim-task runs), #179
     futurama_projects_file: Path = ROOT / "infra" / "futurama" / "projects.json"
 
