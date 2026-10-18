@@ -9,7 +9,7 @@ import json
 import logging
 import threading
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -592,6 +592,44 @@ async def hardware_disarm(request: Request):
     hw.disarm()
     await ctx().audit(actor(request), "hardware_disarm", None, {}, "ok", "disarmed")
     return hw.status(ctx().data_dir, settings().cortex_enable_hardware)
+
+
+class CalibrateReq(BaseModel):
+    device: Literal["follower", "leader"]
+
+
+class ProcessInputReq(BaseModel):
+    text: Literal["", "c"] = ""
+
+
+@app.post("/api/hardware/calibrate")
+async def hardware_calibrate(req: CalibrateReq, request: Request):
+    from ..hardware import calibrate, setup as hw
+    _local_human(request)
+    out = await calibrate.start_calibration(req.device, hw.load_config(ctx().data_dir),
+                                            settings().cortex_enable_hardware)
+    await ctx().audit(actor(request), "hardware_calibrate", None, {"device": req.device}, "ok", "calibration started")
+    return out
+
+
+@app.get("/api/hardware/process")
+async def hardware_process():
+    from ..hardware import calibrate
+    return calibrate.snapshot()
+
+
+@app.post("/api/hardware/process/input")
+async def hardware_process_input(req: ProcessInputReq, request: Request):
+    from ..hardware import calibrate
+    _local_human(request)
+    return await calibrate.send_input(req.text)
+
+
+@app.post("/api/hardware/process/stop")
+async def hardware_process_stop(request: Request):
+    from ..hardware import calibrate
+    _local_human(request)
+    return await calibrate.stop()
 
 
 # ------------------------------------------------------------------ studio read models
