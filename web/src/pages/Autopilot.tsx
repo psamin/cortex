@@ -5,7 +5,7 @@ import { api } from "../api/client";
 import { useAutopilot, useTraining } from "../api/hooks";
 import { AUTOPILOT_STATES, type AutopilotPolicy, type AutopilotRun, type AutopilotStep, type Project } from "../api/types";
 import { ProvenanceBadge } from "../components/AgentTrace";
-import { RefChip, useApprover } from "../agent/AgentPanel";
+import { RefChip, useApprover } from "../components/refs";
 import { Badge, Button, ErrorState, Input, Segmented, Skeleton, Toggle, type Tone } from "../components/ui";
 import { cn, errorMessage, evidenceValue, humanize, pct } from "../lib/format";
 

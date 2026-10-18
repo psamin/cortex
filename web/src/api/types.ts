@@ -490,57 +490,6 @@ export interface Health {
   notes: string[];
 }
 
-// ---------------------------------------------------------------- agent
-export type AgentEvent =
-  | { type: "text"; delta: string }
-  | { type: "tool_call"; tool: string; args: Record<string, unknown> }
-  | { type: "tool_result"; tool: string; summary: string; ref_ids: string[] }
-  | { type: "approval_required"; kind: string; ref_id: string; summary: string; args: Record<string, unknown> }
-  | { type: "done" }
-  | { type: "error"; message: string };
-
-export interface AgentHistoryItem {
-  role: string;
-  content: string;
-  tool?: string | null;
-}
-
-// ---------------------------------------------------------------- lineage graph
-export type GraphNodeType =
-  | "project"
-  | "condition"
-  | "episode"
-  | "analysis"
-  | "cluster"
-  | "dataset"
-  | "training"
-  | "checkpoint"
-  | "evaluation"
-  | "branch"
-  | "recommendation"
-  | "autopilot";
-
-export interface GraphNode {
-  id: string;
-  type: GraphNodeType | string;
-  label: string;
-  status: string | null;
-  /** Where this row lives: e.g. backend "insforge postgres" or "sqlite (local fallback)". */
-  source: { backend: string; table: string | null; row_id: string | null };
-  meta: Record<string, unknown>;
-}
-
-export interface GraphEdge {
-  source: string;
-  target: string;
-  kind: string;
-}
-
-export interface ProjectGraph {
-  nodes: GraphNode[];
-  edges: GraphEdge[];
-  backend: { db: string; storage: string };
-}
 
 // ---------------------------------------------------------------- agent demonstrations
 /** Order from backend/cortex/services/autopilot.py STATES. The loop returns to SCENARIO_PLANNED. */
@@ -711,4 +660,43 @@ export interface PlannerBudget {
   budget_usd: number;
   spent_usd: number;
   remaining_usd: number;
+}
+
+// ---------------------------------------------------------------- viewer / pipeline (new endpoints; may 404)
+export interface RemoteRollout {
+  kind: "demo" | "eval";
+  id: string;
+  label: string;
+  success: boolean | null;
+  failure_mode?: string | null;
+  /** "left/normal" (Condition.key) on the live backend; an object is also accepted */
+  condition?: Condition | string | null;
+  seed?: number | null;
+  video_url?: string | null;
+  policy?: string | null;
+  planner?: string | null;
+  branch?: string | null;
+  evaluation_id?: string | null;
+  iteration?: number | null;
+  created_at?: ISODate;
+}
+
+export interface IterationBranch {
+  name: string;
+  successes: number;
+  n: number;
+  success_rate: number;
+  ci95: [number, number];
+  failure_modes: Record<string, number>;
+}
+
+export interface Iteration {
+  iteration: number;
+  policy_version: string;
+  checkpoint_id: string | null;
+  demos_accepted: number;
+  dataset_id: string | null;
+  training: { id: string; status: string; backend: string; policy_type?: string; gpu_hours_est?: number; loss_curve: [number, number][]; error?: string | null } | null;
+  evaluation: { id: string; branches: IterationBranch[] } | null;
+  next: { reason: string; conditions: Condition[]; collection_id: string | null } | null;
 }

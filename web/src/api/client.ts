@@ -8,8 +8,6 @@ import type {
   CollectorComparison,
   PlannerStatus,
   StartAgentCollectionRequest,
-  AgentEvent,
-  AgentHistoryItem,
   Analysis,
   AuditRow,
   AutopilotPolicy,
@@ -31,7 +29,8 @@ import type {
   LaunchEvaluationRequest,
   NextAction,
   PolicyType,
-  ProjectGraph,
+  RemoteRollout,
+  Iteration,
   Project,
   ProjectState,
   Recommendation,
@@ -119,7 +118,10 @@ export const api = {
   projectState: (pid: string) => get<ProjectState>(`/projects/${pid}/state`),
   audit: (pid: string) => get<AuditRow[]>(`/projects/${pid}/audit`),
   jobs: (pid: string) => get<Job[]>(`/projects/${pid}/jobs`),
-  graph: (pid: string) => get<ProjectGraph>(`/projects/${pid}/graph`),
+  /** May 404 until the backend ships it; callers fall back to data assembled from episodes + evaluations. */
+  rollouts: (pid: string) => get<RemoteRollout[]>(`/projects/${pid}/rollouts`),
+  iterations: (pid: string) => get<Iteration[]>(`/projects/${pid}/iterations`),
+  cameraUrl: (eid: string, cam: "front" | "wrist") => `${API_BASE}/episodes/${eid}/camera/${cam}.mp4`,
   job: (id: string) => get<Job>(`/jobs/${id}`),
   /** Resolve a storage key (e.g. EpisodeResult.video_key) to a browser URL. */
   media: (key: string) => get<{ url: string }>(`/media?key=${encodeURIComponent(key)}`),
@@ -200,14 +202,20 @@ export const api = {
   nextActions: (pid: string) => get<NextAction[]>(`/projects/${pid}/next-actions`),
 
   // agent
-  agentHistory: (pid: string) => get<AgentHistoryItem[]>(`/projects/${pid}/agent/history`),
+  agentHistory: (pid: string) => get<Record<string, unknown>[]>(`/projects/${pid}/agent/history`),
+  resetAgent: (pid: string) => post<{ reset: boolean }>(`/projects/${pid}/agent/reset`),
+  agentEngine: () => get<{ engine: string; label: string; model: string | null }>("/agent/engine"),
 };
 
 /**
  * POST /projects/{pid}/agent streams SSE over a POST body, so EventSource can't be used.
- * Parses `event:` / `data:` frames from a ReadableStream and yields typed events.
+ * Parses `event:` / `data:` frames from a ReadableStream and yields {event, data}.
  */
-export async function* streamAgent(pid: string, message: string, signal?: AbortSignal): AsyncGenerator<AgentEvent> {
+export async function* streamAgent(
+  pid: string,
+  message: string,
+  signal?: AbortSignal,
+): AsyncGenerator<{ event: string; data: Record<string, unknown> }> {
   let res: Response;
   try {
     res = await fetch(`${API_BASE}/projects/${pid}/agent`, {
@@ -230,7 +238,6 @@ export async function* streamAgent(pid: string, message: string, signal?: AbortS
     const { value, done } = await reader.read();
     if (done) break;
     buf += value;
-    // SSE frames are separated by a blank line (\n\n or \r\n\r\n)
     let idx: number;
     while ((idx = buf.search(/\r?\n\r?\n/)) !== -1) {
       const frame = buf.slice(0, idx);
@@ -238,7 +245,7 @@ export async function* streamAgent(pid: string, message: string, signal?: AbortS
       const ev = parseFrame(frame);
       if (ev) {
         yield ev;
-        if (ev.type === "done") return;
+        if (ev.event === "done") return;
       }
     }
   }
@@ -246,7 +253,7 @@ export async function* streamAgent(pid: string, message: string, signal?: AbortS
   if (tail) yield tail;
 }
 
-function parseFrame(frame: string): AgentEvent | null {
+function parseFrame(frame: string): { event: string; data: Record<string, unknown> } | null {
   let event = "message";
   const data: string[] = [];
   for (const raw of frame.split(/\r?\n/)) {
@@ -259,39 +266,10 @@ function parseFrame(frame: string): AgentEvent | null {
   }
   if (event === "message" && data.length === 0) return null;
   const rawData = data.join("\n");
-  let payload: Record<string, unknown> = {};
-  if (rawData) {
-    try {
-      payload = JSON.parse(rawData);
-    } catch {
-      payload = { delta: rawData };
-    }
-  }
-  switch (event) {
-    case "text":
-      return { type: "text", delta: String(payload.delta ?? "") };
-    case "tool_call":
-      return { type: "tool_call", tool: String(payload.tool ?? ""), args: (payload.args as Record<string, unknown>) ?? {} };
-    case "tool_result":
-      return {
-        type: "tool_result",
-        tool: String(payload.tool ?? ""),
-        summary: String(payload.summary ?? ""),
-        ref_ids: Array.isArray(payload.ref_ids) ? (payload.ref_ids as string[]) : [],
-      };
-    case "approval_required":
-      return {
-        type: "approval_required",
-        kind: String(payload.kind ?? ""),
-        ref_id: String(payload.ref_id ?? ""),
-        summary: String(payload.summary ?? ""),
-        args: (payload.args as Record<string, unknown>) ?? {},
-      };
-    case "done":
-      return { type: "done" };
-    case "error":
-      return { type: "error", message: String(payload.message ?? payload.detail ?? rawData) };
-    default:
-      return null;
+  try {
+    const parsed = rawData ? JSON.parse(rawData) : {};
+    return { event, data: parsed && typeof parsed === "object" ? parsed : { value: parsed } };
+  } catch {
+    return { event, data: { delta: rawData } };
   }
 }

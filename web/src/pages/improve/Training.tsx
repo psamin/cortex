@@ -6,7 +6,7 @@ import { api } from "../../api/client";
 import { useLogs } from "../../api/events";
 import { useCheckpoints, useDatasets, useTraining } from "../../api/hooks";
 import type { PolicyType, TrainingJob } from "../../api/types";
-import { useApprover } from "../../agent/AgentPanel";
+import { useApprover } from "../../components/refs";
 import { ManualTraining } from "../Autopilot";
 import { Badge, Button, EmptyState, ErrorState, Field, Input, Panel, QueryState, Segmented, Select, SkeletonRows, StatusBadge } from "../../components/ui";
 import { ago, cn, evidenceValue, usd } from "../../lib/format";
