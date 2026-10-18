@@ -831,6 +831,13 @@ async def rollouts(pid: str):
     return await studio_service.rollouts(ctx(), pid)
 
 
+@app.get("/api/projects/{pid}/replays")
+async def replays(pid: str):
+    """Policies run open loop on held-out recorded demos (Futurama replays and live GPU sessions)."""
+    from ..services import replay_service
+    return await replay_service.list_replays(ctx(), pid)
+
+
 @app.get("/api/episodes/{eid}/camera/{camera}.mp4")
 async def episode_camera(eid: str, camera: str):
     from fastapi.responses import FileResponse

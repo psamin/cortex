@@ -469,6 +469,44 @@ class LaunchEvaluationRequest(BaseModel):
     recommendation_id: str | None = None
 
 
+class ReplayEpisode(BaseModel):
+    """One held-out recorded episode a policy was run on, frame by frame, without moving an arm."""
+
+    episode: int  # episode index in the source dataset; never trained on
+    instruction: str = ""
+    frames: int  # frames the policy acted on
+    total_frames: int | None = None  # the episode's length when known (a live session can stop early)
+    joint_mae_deg: float | None = None  # mean |policy - human| over the 5 arm joints, in degrees
+    gripper_mae: float | None = None  # mean |policy - human| on the gripper, in the dataset's units
+    inference_ms: dict[str, float] = {}  # live sessions: mean, p50, p95 and max per frame on the GPU
+    video_key: str | None = None
+    trace_key: str | None = None  # live sessions: per-frame JSON (inference ms, joint error)
+
+
+REPLAY_NOTE = "open-loop replay on held-out real demos: joint error vs the human, not a success rate"
+
+
+class PolicyReplay(BaseModel):
+    """A trained policy run open loop on held-out recorded demos. It sees the recorded camera images and
+    arm state, and its joint targets are compared with what the human did. That measures imitation, not
+    task success: the arm never moves, so no success rate is claimed."""
+
+    id: str = Field(default_factory=lambda: new_id("rp"))
+    project_id: str
+    kind: Literal["held_out_replay", "live_inference"]
+    status: Literal["complete", "partial"] = "complete"  # partial: a live session the viewer left early
+    checkpoint_id: str | None = None  # the registered checkpoint, when it is registered in this project
+    checkpoint_name: str = ""  # as named where it ran, e.g. jenga_010000
+    policy_type: str = "smolvla"
+    task: str  # the task key on the GPU server (jenga, conveyor, suture)
+    gpu: str | None = None
+    episodes: list[ReplayEpisode]
+    joint_mae_deg: float | None = None  # mean over episodes
+    source: str = ""  # where the numbers came from (a Futurama directory or the live stream)
+    note: str = REPLAY_NOTE
+    created_at: datetime = Field(default_factory=now)
+
+
 class ExperimentComparison(BaseModel):
     evaluation_ids: list[str]
     rows: list[dict[str, Any]]  # one per (evaluation, branch)
@@ -492,6 +530,8 @@ class ProjectState(BaseModel):
     dataset_versions: list[str]
     training_jobs: list[dict[str, Any]]
     evaluations: list[dict[str, Any]]
+    # open-loop replays on held-out recorded demos (joint error, not success); see PolicyReplay
+    replays: list[dict[str, Any]] = []
     open_recommendations: list[Recommendation]
     next_actions: list[NextAction]
     storage_backend: str

@@ -43,6 +43,7 @@ from . import (
     project_service,
     recommendation_service,
     recording_service,
+    replay_service,
     simulation_runner,
     training_service,
 )
@@ -94,6 +95,7 @@ async def project_state(ctx: Ctx, project: Project) -> ProjectState:
                       "policy": e["run"].policy_label,
                       "branches": {b.spec.name: (f"{b.result.successes}/{b.result.n}" if b.result else b.status)
                                    for b in e["branches"]}} for e in evals],
+        replays=[replay_service.brief(r) for r in await replay_service.list_replays(ctx, project.id)],
         open_recommendations=recs, next_actions=[], storage_backend=ctx.blobs.name, db_backend=ctx.store.name)
     state.next_actions = await next_actions(ctx, project, state)
     return state
