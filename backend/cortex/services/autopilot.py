@@ -384,6 +384,8 @@ async def _train(ctx: Ctx, run: AutopilotRun, project: Project, tj_id: str) -> C
     assert tj
     if tj.status == JobStatus.proposed:
         covered = (not tj.estimate.paid or pol.allow_paid_jobs) and tj.estimate.gpu_hours <= pol.max_gpu_hours_per_job
+        from .autonomy import cluster_needs_click
+        covered = covered and not cluster_needs_click(ctx, tj)  # the shared cluster is always a human click (#221)
         if tj.backend == "manual":
             run.status = "waiting_approval"
             await _step(ctx, run, "train", f"No GPU backend reachable. Run {tj.id}'s command bundle on a GPU and "
