@@ -274,7 +274,8 @@ def segment_goal(kind: str, obj: str, target: dict[str, Any], task: str | None =
     if kind == "demo":
         return task or f"demo: put the {obj} in {where}, then go home"
     if kind == "reset":
-        return f"reset: put the {obj} back at {where}, then go home"
+        verb = "put the {} back at" if target.get("label") == "origin" else "move the {} to"
+        return f"reset: {verb.format(obj)} {where}, then go home"
     return f"recover: find the {obj}, pick it up, put it at {where}, then go home"
 
 

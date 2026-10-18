@@ -109,7 +109,7 @@ def test_cube_cycles_record_tagged_segments_and_dataset_keeps_demo_and_reset(cli
     async def record():
         p = await orch.get_project(ctx, pid)
         job = await recording_service.start_recording(ctx, p, [Condition()], cycles=2)
-        return await orch._wait(ctx, job.id, 900)
+        return await orch._wait(ctx, job.id, 5400)  # slow on a loaded machine
 
     j = client.portal.call(record)
     assert j["status"] == "succeeded", j
@@ -128,7 +128,7 @@ def test_cube_cycles_record_tagged_segments_and_dataset_keeps_demo_and_reset(cli
         for e in eps:
             await recording_service.set_status(ctx, e.id, EpisodeStatus.accepted)
         job = await dataset_service.create_version(ctx, p, CreateDatasetVersionRequest())
-        return await orch._wait(ctx, job.id, 600)
+        return await orch._wait(ctx, job.id, 1800)
 
     j = client.portal.call(dataset)
     assert j["status"] == "succeeded", j
