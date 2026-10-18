@@ -134,7 +134,7 @@ function Sessions() {
         {current && <NowBar session={current} calls={calls.data ?? []} work={work} />}
         {!selected ? null : (
           <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_420px]">
-            {current && <WorkBoard session={current} work={work} loading={loading} />}
+            {current && <WorkBoard from={current.first_seen} work={work} loading={loading} />}
             <div className="min-w-0">
               <h2 className={cn("mb-2.5 text-ink", label)}>Tool calls</h2>
               {calls.isLoading ? (

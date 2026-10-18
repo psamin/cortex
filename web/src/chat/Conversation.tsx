@@ -17,6 +17,7 @@ import { IsoIcon } from "../sketch";
 import { toolIcon } from "./toolIcon";
 import { buildBlocks, prefixOf, toolLabel, type Block, type ChatItem, type ToolItem } from "./model";
 import { GlowEdge } from "../components/ui/spotlight-card";
+import { AgentLog } from "./AgentLog";
 
 /** [chip label, message sent] */
 const SUGGESTIONS: [string, string][] = [
@@ -32,6 +33,23 @@ const STICK_PX = 48;
 export function Conversation({ pid }: { pid: string }) {
   const chat = useChat();
   const nav = useNavigate();
+  // Chat: talk to the agent and step in. Agent log: just watch what every agent on this project is doing.
+  const modeKey = `cortex.chatMode.${pid}`;
+  const [mode, setModeState] = useState<"chat" | "log">(() => {
+    try {
+      return localStorage.getItem(modeKey) === "log" ? "log" : "chat";
+    } catch {
+      return "chat";
+    }
+  });
+  const setMode = (m: "chat" | "log") => {
+    setModeState(m);
+    try {
+      localStorage.setItem(modeKey, m);
+    } catch {
+      /* storage unavailable */
+    }
+  };
   const scroller = useRef<HTMLDivElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const blocks = useMemo(() => buildBlocks(chat.items), [chat.items]);
@@ -108,7 +126,17 @@ export function Conversation({ pid }: { pid: string }) {
         </div>
       )}
       <div className="flex h-11 shrink-0 items-center gap-2 border-b border-line px-5">
-        <ModeSwitch pid={pid} />
+        <Segmented
+          size="sm"
+          ariaLabel="View"
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: "chat", label: "Chat" },
+            { value: "log", label: "Agent log" },
+          ]}
+        />
+        {mode === "chat" && <ModeSwitch pid={pid} />}
         <div className="ml-auto flex items-center gap-3">
           <HistoryToggle />
           <button
@@ -122,6 +150,10 @@ export function Conversation({ pid }: { pid: string }) {
         </div>
       </div>
 
+      {mode === "log" ? (
+        <AgentLog pid={pid} onIntervene={() => setMode("chat")} />
+      ) : (
+        <>
       <div className="relative min-h-0 flex-1">
         <div
           ref={scroller}
@@ -223,6 +255,8 @@ export function Conversation({ pid }: { pid: string }) {
           />
         </div>
       </div>
+        </>
+      )}
     </div>
   );
 }

@@ -265,10 +265,12 @@ export function NowBar({ session, calls, work }: { session: AgentSession; calls:
   );
 }
 
-/** Everything the agent's projects are doing since this session started: demos, training, evaluations, RL. */
-export function WorkBoard({ session, work, loading }: { session: AgentSession; work: (ProjectWork | undefined)[]; loading: boolean }) {
-  const from = session.first_seen;
-  const [all, setAll] = useState(false);
+/**
+ * Everything these projects are doing: demos, training, evaluations, RL. With `from` (an agent session's
+ * start), only work since then, with a toggle for earlier work; without it, all of the projects' work.
+ */
+export function WorkBoard({ from, work, loading }: { from?: string; work: (ProjectWork | undefined)[]; loading: boolean }) {
+  const [all, setAll] = useState(!from);
   const pick = <T extends { created_at?: string }>(xs: T[]) => (all ? xs : since(xs, from));
   const rows = work.filter(Boolean) as ProjectWork[];
   const collections = rows.flatMap((w) => pick(w.collections));
@@ -284,10 +286,12 @@ export function WorkBoard({ session, work, loading }: { session: AgentSession; w
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <h2 className={cn("text-ink", label)}>Work in progress</h2>
-        <span className={cn("text-ink-3", label)}>{all ? "all work in these projects" : "since this session started"}</span>
-        <button type="button" onClick={() => setAll((v) => !v)} className={cn("ml-auto text-ink-3 underline-offset-2 hover:text-ink hover:underline", label)}>
-          {all ? "this session only" : "show earlier work"}
-        </button>
+        <span className={cn("text-ink-3", label)}>{all ? (from ? "all work in these projects" : "everything in this project") : "since this session started"}</span>
+        {from && (
+          <button type="button" onClick={() => setAll((v) => !v)} className={cn("ml-auto text-ink-3 underline-offset-2 hover:text-ink hover:underline", label)}>
+            {all ? "this session only" : "show earlier work"}
+          </button>
+        )}
       </div>
       {loading && !rows.length ? (
         <p className="text-sm text-ink-3">Loading the agent's work…</p>
