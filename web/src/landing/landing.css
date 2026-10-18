@@ -1,0 +1,24 @@
+/* Landing page ("Kinetic") type and motion. Scoped by class so the studio theme is untouched. */
+
+.kn-serif { font-family: "Newsreader", "Iowan Old Style", "Times New Roman", serif; }
+.kn-sans { font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif; }
+.kn-mono { font-family: "IBM Plex Mono", ui-monospace, "SFMono-Regular", monospace; }
+
+.kn-page {
+  background: #ffffff;
+  color: #171717;
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+.kn-page *:focus-visible { outline-color: #171717; }
+
+/* Text entrance: pure CSS so copy never waits on JS or WebGL. */
+@keyframes kn-rise {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+.reveal { animation: kn-rise 0.9s cubic-bezier(0.22, 0.61, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .reveal { animation: none; }
+}
