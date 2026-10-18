@@ -1048,7 +1048,8 @@ async def t_verify_agent_key(ctx, a, actor):
 
 
 class RegisterAgentArgs(BaseModel):
-    name: str = Field(min_length=1, max_length=40, description="a short, distinctive name for yourself, e.g. 'Atlas'")
+    name: str = Field(min_length=1, max_length=40, description="a short, distinctive name you invent for yourself "
+                      "(one word, not 'Agent' or 'Claude')")
     purpose: str | None = Field(None, max_length=200, description="what you are here to do, in a few words")
 
 

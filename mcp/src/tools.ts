@@ -758,7 +758,7 @@ const TOOLS: Def[] = [
       "Cortex labels your session, every call and the Agent log with it. Then tell your user, in one line, the name " +
       "and the watch link this returns.",
     inputSchema: z.object({
-      name: z.string().min(1).max(40).describe("A short, distinctive name for yourself, e.g. 'Atlas'"),
+      name: z.string().min(1).max(40).describe("A short, distinctive name you invent for yourself (one word, not 'Agent' or 'Claude')"),
       purpose: z.string().max(200).optional().describe("What you are here to do, in a few words"),
     }),
     annotations: WRITE,

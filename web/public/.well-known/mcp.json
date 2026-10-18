@@ -1906,7 +1906,7 @@
       "inputSchema": {
         "properties": {
           "name": {
-            "description": "a short, distinctive name for yourself, e.g. 'Atlas'",
+            "description": "a short, distinctive name you invent for yourself (one word, not 'Agent' or 'Claude')",
             "maxLength": 40,
             "minLength": 1,
             "type": "string"
