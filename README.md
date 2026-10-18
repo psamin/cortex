@@ -8,7 +8,7 @@ touch the physical world. Cortex is the infrastructure in between: the agent han
 plain-language task and gets back a measured robot policy. Cortex builds the sim scene, the agent
 collects the demonstrations, training runs on GPUs, evaluation reports confidence intervals, and RL
 goes after the policy's weakest spot. A human approves only the spend and the hardware. For an agent,
-"I can't do physical things" becomes a tool call.
+"I can't train a robot" becomes a few tool calls and a human's approval.
 
 Robot learning today needs people at every step:
 - someone teleoperates the demonstrations;
@@ -65,7 +65,7 @@ carry the same step-by-step path, so any MCP client gets it on connect. Agent-re
 ## RL: the agent fixes its own weak spots
 
 An evaluation tells the agent where its policy fails. RL sandboxes let it fix that itself, with every
-number labelled measured or estimate. One round:
+prediction labelled an estimate and every held-out result labelled measured. One round:
 
 1. **Find the weak spot.** `get_policy_weaknesses` reads the latest evaluation of the trained
    checkpoint. For each condition below target (80% by default) it reports the success rate with a
@@ -83,14 +83,14 @@ number labelled measured or estimate. One round:
    release point and height. Each iteration scores a population of candidates (32 by default) on the
    same seeds. The return is a weighted sum of measured terms: success, lifted, still held in the
    carry, distance to the target. Once the elite candidates succeed more than 80% of the time, the
-   randomization ranges widen 1.5×, up to a cap. RL only chooses where the skill goes; IK still
-   executes every move.
+   offset, yaw and lighting ranges widen 1.5×, up to a cap. RL only chooses where the skill goes; IK
+   still executes every move.
 4. **Measure the skill.** The tuned and base skills run on the same held-out seeds, compared with an
    exact McNemar test.
 5. **Turn it into data.** The tuned skill records fresh demos, and only simulator successes are kept.
    A fifth of them get DART-style noise on their free-space waypoints but keep the clean command as
-   the label, so the policy also learns to recover. Each is tagged `rl_sandbox:<id>` and labelled an
-   oracle demo, because the skill reads privileged sim state.
+   the label, so the demos also show recoveries from off-nominal states. Each is tagged
+   `rl_sandbox:<id>` and labelled an oracle demo, because the skill reads privileged sim state.
 6. **Retrain and re-measure.** `close_rl_round` adds the demos that pass the quality gate to a new
    dataset version, with targeted demos capped at 40% of the train split, and proposes retraining. A
    human approves it. Then the old and new checkpoints run every condition on the same fresh seeds,
