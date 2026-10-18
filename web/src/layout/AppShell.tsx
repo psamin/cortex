@@ -130,8 +130,8 @@ export function AppShell() {
         )}
         <div className="ml-auto flex items-center gap-1 sm:gap-2">
           {pid && engine.data && (
-            <span className={cn("hidden h-7 items-center gap-1.5 px-2 text-ink-3 md:inline-flex", statusLabel)} title={engine.data.model ? `model ${engine.data.model}` : "agent engine"}>
-              <span className={cn("h-1.5 w-1.5 rounded-full", engine.data.engine === "rules" ? "bg-caution" : "bg-pass")} />
+            <span className={cn("hidden h-7 items-center gap-1.5 px-2 text-ink-3 md:inline-flex", statusLabel)} title={engine.data.note ?? (engine.data.model ? `model ${engine.data.model}` : "agent engine")}>
+              <span className={cn("h-1.5 w-1.5 rounded-full", engine.data.engine === "rules" || engine.data.note ? "bg-caution" : "bg-pass")} />
               {engine.data.label}
             </span>
           )}

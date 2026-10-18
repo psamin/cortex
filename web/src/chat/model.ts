@@ -32,8 +32,9 @@ export type ChatItem =
   | { kind: "changes"; id: number; items: ChangeItem[] }
   /** A demo import started from this studio (not in agent history): upload progress, then the live job card. */
   | { kind: "import"; id: number; title: string; detail: string; status: "uploading" | "started" | "error"; loaded: number; total: number; error?: string; errorDetail?: string; jobId?: string }
-  /** Written by Cortex in autonomous mode: it acted under your standing approval ("auto"), or a gate needs you. */
-  | { kind: "notice"; id: number; tone: "auto" | "needs_you"; text: string; refIds: string[] }
+  /** Written by Cortex: in autonomous mode it acted under your standing approval ("auto") or a gate needs you;
+   *  "engine": which agent answers and what is missing ("Claude Code not found: using the built-in planner"). */
+  | { kind: "notice"; id: number; tone: "auto" | "needs_you" | "engine"; text: string; refIds: string[] }
   /** Written by Cortex (not the LLM) when a background job finishes. */
   | { kind: "job_done"; id: number; jobId: string; jobKind: string; status: string; text: string; refIds: string[]; detail?: string | null; superseded?: boolean };
 
@@ -224,7 +225,7 @@ export function applyEvent(items: ChatItem[], ev: ChatEvent): ChatItem[] {
     case "changes":
       return ev.items.length ? [...items, { kind: "changes", id: id(), items: ev.items }] : items;
     case "notice":
-      return [...items, { kind: "notice", id: id(), tone: ev.tone === "needs_you" ? "needs_you" : "auto", text: ev.text, refIds: ev.ref_ids }];
+      return [...items, { kind: "notice", id: id(), tone: ev.tone === "needs_you" || ev.tone === "engine" ? ev.tone : "auto", text: ev.text, refIds: ev.ref_ids }];
     case "job_done":
       // the same line can arrive live (SSE) and again from history: one row per job
       if (items.some((it) => it.kind === "job_done" && it.jobId === ev.job_id)) return items;

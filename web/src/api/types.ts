@@ -100,6 +100,8 @@ export interface Project {
   spec: TaskSpec;
   plan: CollectionPlan;
   autopilot: AutopilotPolicy;
+  /** the sim scene built from the project's intake (build_simulation); absent for the built-in cube tabletop */
+  scene?: { digest: string } | null;
   created_at: ISODate;
 }
 

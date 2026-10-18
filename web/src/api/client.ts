@@ -188,6 +188,8 @@ export const api = {
   simFrameUrl: (pid: string, c: Condition, seed: number) =>
     `${API_BASE}/projects/${pid}/sim/frame?cube_region=${c.cube_region}&lighting=${c.lighting}&seed=${seed}`,
   simLiveUrl: (pid: string) => `${API_BASE}/projects/${pid}/sim/live`,
+  /** top camera of the scene built from the project's intake; `digest` changes with every rebuild */
+  sceneFrameUrl: (pid: string, digest: string) => `${API_BASE}/projects/${pid}/simulation/frame?camera=top&v=${digest}`,
 
   // trained policies running live on a Futurama GPU (#157)
   livePolicy: () => get<LivePolicyStatus>("/live-policy"),
@@ -255,7 +257,8 @@ export const api = {
   agentThreads: (pid: string) => get<AgentThread[]>(`/projects/${pid}/agent/threads`),
   newThread: (pid: string) => post<AgentThread>(`/projects/${pid}/agent/threads`),
   resetAgent: (pid: string) => post<{ reset: boolean }>(`/projects/${pid}/agent/reset`),
-  agentEngine: () => get<{ engine: string; label: string; model: string | null }>("/agent/engine"),
+  /** `note`: what is missing for a better engine, in words ("Claude Code not found: using the built-in planner") */
+  agentEngine: () => get<{ engine: string; label: string; note: string | null; model: string | null }>("/agent/engine"),
 };
 
 /**
