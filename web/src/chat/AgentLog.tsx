@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api, resolveMediaUrl } from "../api/client";
-import { ErrorState, SkeletonRows } from "../components/ui";
+import { SkeletonRows } from "../components/ui";
 import { GlowEdge } from "../components/ui/spotlight-card";
 import { ago, cn, humanize, pct } from "../lib/format";
 import { IsoIcon, type IsoIconName } from "../sketch";
@@ -74,7 +74,7 @@ function stagesOf(calls: AgentCall[], w: ProjectWork | undefined): Stage[] {
       name: "Demonstrate",
       icon: "demonstrate",
       state: demoRunning ? "running" : demoDone ? "done" : demoFailed ? "failed" : "waiting",
-      note: demos || demoDone ? `${demos} demos` : demoFailed ? "no demos yet" : undefined,
+      note: demos || demoDone ? `${demos} demos` : undefined,
     },
     {
       name: "Train",
@@ -110,9 +110,9 @@ const STAGE_TONE: Record<StageState, string> = {
   running: "text-servo border-servo/60",
   done: "text-ink border-line-strong",
   attention: "text-caution border-caution/60",
-  failed: "text-fault border-fault/50",
+  failed: "text-ink-4 border-line", // errors stay in the backend logs, not in the studio (#313)
 };
-const STAGE_WORD: Record<StageState, string> = { waiting: "not yet", running: "now", done: "done", attention: "needs you", failed: "failed" };
+const STAGE_WORD: Record<StageState, string> = { waiting: "not yet", running: "now", done: "done", attention: "needs you", failed: "not yet" };
 
 function Stages({ stages }: { stages: Stage[] }) {
   return (
@@ -148,11 +148,11 @@ function eventsOf(w: ProjectWork | undefined): FeedItem[] {
   for (const c of w.collections) {
     const t = c.totals ?? {};
     const tone = isActive(c.status) ? "live" : c.status === "succeeded" ? "ok" : c.status === "failed" ? "bad" : undefined;
-    out.push({ kind: "event", at: c.created_at, icon: "demonstrate", tone, text: `Demonstrations (${c.collector}): ${humanize(c.status)}, ${t.successes ?? 0} of ${c.request?.num_demos ?? "?"} demos${c.error ? `. ${c.error}` : ""}` });
+    out.push({ kind: "event", at: c.created_at, icon: "demonstrate", tone, text: `Demonstrations (${c.collector}): ${humanize(c.status)}, ${t.successes ?? 0} of ${c.request?.num_demos ?? "?"} demos` });
   }
   for (const j of w.jobs.filter((x) => x.kind === "record" || x.kind === "import" || x.kind === "dataset")) {
     const tone = isActive(j.status) ? "live" : j.status === "succeeded" ? "ok" : j.status === "failed" ? "bad" : undefined;
-    out.push({ kind: "event", at: j.created_at ?? "", icon: j.kind === "dataset" ? "dataset" : "demonstrate", tone, text: `${humanize(j.kind)}: ${humanize(j.status)}${j.message ? `. ${j.message}` : ""}` });
+    out.push({ kind: "event", at: j.created_at ?? "", icon: j.kind === "dataset" ? "dataset" : "demonstrate", tone, text: `${humanize(j.kind)}: ${humanize(j.status)}${j.message && j.status !== "failed" ? `. ${j.message}` : ""}` });
   }
   for (const t of w.training) {
     const tone = isActive(t.status) && t.status !== "proposed" ? "live" : t.status === "succeeded" ? "ok" : t.status === "failed" ? "bad" : undefined;
@@ -247,7 +247,7 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
   const qc = useQueryClient();
   const calls = useQuery({ queryKey: ["agents", "project-calls", pid], queryFn: () => agentsApi.projectCalls(pid), refetchInterval: 15_000 });
   const { work, loading } = useSessionWork([pid]);
-  const [onlyDecisions, setOnlyDecisions] = useState(false);
+  const [onlyDecisions, setOnlyDecisions] = useState(true); // the high-level overview first; tool calls on request
 
   // Every call row is an `entity` change on the project stream (start and end), whoever made it.
   const timer = useRef<ReturnType<typeof setTimeout>>();
@@ -268,12 +268,13 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
     };
   }, [pid, qc]);
 
-  const list = useMemo(() => calls.data ?? [], [calls.data]);
+  // Only what went right is shown: failed calls and failed work stay in the backend's audit log (#313).
+  const list = useMemo(() => (calls.data ?? []).filter((c) => c.status !== "error"), [calls.data]);
   const w = work[0];
   const stages = useMemo(() => stagesOf(list, w), [list, w]);
   const feed = useMemo<FeedItem[]>(() => {
     const items: FeedItem[] = list.map((c) => (c.tool === "log_decision" ? { kind: "decision", at: c.started_at, call: c } : { kind: "call", at: c.started_at, call: c }));
-    const all = [...items, ...eventsOf(w)].filter((x) => !onlyDecisions || x.kind !== "call");
+    const all = [...items, ...eventsOf(w).filter((e) => e.kind !== "event" || e.tone !== "bad")].filter((x) => !onlyDecisions || x.kind !== "call");
     return all.sort((a, b) => (a.at < b.at ? 1 : -1)); // newest first
   }, [list, w, onlyDecisions]);
 
@@ -340,8 +341,6 @@ export function AgentLog({ pid, onIntervene }: { pid: string; onIntervene: () =>
           )}
           {calls.isLoading ? (
             <SkeletonRows rows={4} />
-          ) : calls.error ? (
-            <ErrorState error={calls.error} onRetry={() => calls.refetch()} />
           ) : feed.length === 0 ? (
             <p className="text-sm text-ink-3">Nothing yet. The agent's plans, tool calls and training stages appear here as they happen.</p>
           ) : (
