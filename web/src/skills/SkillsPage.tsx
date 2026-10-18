@@ -189,7 +189,8 @@ export function SkillsPage() {
                 </li>
               ))}
             </ul>
-          ) : skills.error ? (
+          ) : skills.error && !skills.data ? (
+            // a failed background refetch keeps showing the cached list
             <ErrorState error={skills.error} onRetry={() => skills.refetch()} />
           ) : !list.length ? (
             <EmptyState

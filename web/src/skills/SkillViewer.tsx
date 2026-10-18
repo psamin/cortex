@@ -282,7 +282,8 @@ export function SkillViewer() {
       <main className="flex min-h-0 min-w-0 flex-1 flex-col">
         {skills.isLoading ? (
           <Skeleton className="m-5 flex-1" />
-        ) : skills.error ? (
+        ) : skills.error && !skills.data ? (
+          // a failed background refetch keeps the cached list, so a playing replay or live stream isn't torn down
           <div className="space-y-4 p-5">
             <BackToSkills />
             <ErrorState error={skills.error} onRetry={() => skills.refetch()} />
