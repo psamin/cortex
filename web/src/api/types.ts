@@ -337,6 +337,8 @@ export interface TrainingJob {
   error: string | null;
   created_at: ISODate;
   updated_at: ISODate;
+  /** live training metrics; `loss_curve` is [[step, loss], ...] parsed from the trainer log */
+  metrics?: { loss_curve?: [number, number][] } & Record<string, unknown>;
 }
 
 export interface Checkpoint {
@@ -830,4 +832,44 @@ export interface LivePolicyStatus {
   job?: string | null;
   gpu?: string;
   policies?: Record<string, { checkpoint: string; stage: string; held_out: number[] }>;
+}
+
+// ------------------------------------------------------------------ RL sandboxes (#80)
+export interface Interval {
+  mean: number;
+  ci90?: [number, number];
+  source?: "measured" | "prior" | "learned";
+}
+
+export interface RLProposal {
+  id: string;
+  condition: string;
+  policy_success: number;
+  dominant_failure?: string | null;
+  predicted_policy_uplift?: Interval | null;
+  predicted_sandbox_success?: Interval | null;
+  p_improve_ge_delta?: number | null;
+  cost?: { episodes: number; cpu_hours: number; gpu_hours: number; wall_clock_est_min: number; usd: number } | null;
+  executor?: string;
+  reason?: string;
+}
+
+export interface RLSandboxView {
+  id: string;
+  status: "proposed" | "piloting" | "ready" | "accepted" | "running" | "succeeded" | "failed" | "stopped" | "dismissed";
+  phase?: string;
+  reason?: string;
+  weakness_id: string;
+  method: string;
+  iteration: number;
+  max_iterations: number;
+  episodes: number;
+  success?: { rate: number; ci95: [number, number]; elite_rate?: number } | null;
+  curve: { iteration: number; success_rate: number; ci95: [number, number]; elite_success_rate?: number }[];
+  elapsed_s: number;
+  cost_so_far?: { cpu_hours: number; usd: number };
+  estimate: RLProposal;
+  result?: { base_success: number; base_ci95: [number, number]; tuned_success: number; tuned_ci95: [number, number]; p_value?: number | null; demo_episode_ids: string[]; stop_reason?: string } | null;
+  live_frame?: string;
+  job_id?: string | null;
 }

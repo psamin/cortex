@@ -6,6 +6,7 @@ import { ago, cn } from "../lib/format";
 import { agentsApi, token, useAgentEvents, type AgentCall, type AgentEvent, type AgentSession } from "./api";
 import { KeysPanel } from "./Keys";
 import { Timeline } from "./Timeline";
+import { NowBar, WorkBoard, useSessionWork } from "./Work";
 
 const label = "font-mono text-[10.5px] uppercase tracking-[0.14em]";
 
@@ -92,6 +93,7 @@ function Sessions() {
   });
 
   const current = sessions.data?.find((s) => s.id === selected);
+  const { work, loading } = useSessionWork(current?.projects ?? []);
   return (
     <div className="grid gap-6 lg:grid-cols-[320px_minmax(0,1fr)]">
       <Panel title="Sessions" meta={<span className="inline-flex items-center gap-1.5"><span className={cn("h-1.5 w-1.5 rounded-full", live ? "bg-pass" : "bg-caution")} />{live ? "live tail on" : "connecting"}</span>} bodyClassName="p-2">
@@ -129,12 +131,21 @@ function Sessions() {
             ))}
           </div>
         )}
-        {!selected ? null : calls.isLoading ? (
-          <SkeletonRows rows={4} />
-        ) : calls.error ? (
-          <ErrorState error={calls.error} onRetry={() => calls.refetch()} />
-        ) : (
-          <Timeline calls={calls.data ?? []} />
+        {current && <NowBar session={current} calls={calls.data ?? []} work={work} />}
+        {!selected ? null : (
+          <div className="grid gap-6 2xl:grid-cols-[minmax(0,1fr)_420px]">
+            {current && <WorkBoard session={current} work={work} loading={loading} />}
+            <div className="min-w-0">
+              <h2 className={cn("mb-2.5 text-ink", label)}>Tool calls</h2>
+              {calls.isLoading ? (
+                <SkeletonRows rows={4} />
+              ) : calls.error ? (
+                <ErrorState error={calls.error} onRetry={() => calls.refetch()} />
+              ) : (
+                <Timeline calls={calls.data ?? []} />
+              )}
+            </div>
+          </div>
         )}
       </section>
     </div>
@@ -150,11 +161,9 @@ export function AgentsPage() {
 
   return (
     <div className="h-full overflow-y-auto scroll-thin">
-      <div className="mx-auto max-w-[1180px] px-4 pb-16 pt-8 sm:px-6">
+      <div className="mx-auto max-w-[1560px] px-4 pb-16 pt-8 sm:px-6">
         <div className="kn-label kn-label-rule">
-          <span>
-            <span className="text-ink">FIG.A1</span>&nbsp;&nbsp;Agents
-          </span>
+          <span className="text-ink">Agents</span>
         </div>
         <div className="mt-4 flex flex-wrap items-end gap-4">
           <h1 className="kn-display text-[clamp(1.9rem,3.6vw,2.6rem)]">What your agents are doing</h1>
