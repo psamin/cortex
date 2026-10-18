@@ -55,6 +55,7 @@ SIDE_EPISODE_MAX_STEPS = 2400  # 80 s: side grasps move slowly along straight li
 ARM_DEG_PER_STEP, GRIP_PER_STEP = 4.0, 8.0
 CONTACT_DEG_PER_STEP = 2.0  # straight-line moves with an approach axis (side grasps), as in the skill
 LINE_STEP_M = 0.01  # waypoint spacing of straight-line moves
+VERTICAL_XY_M = 0.02  # top grasps: a move that shifts the gripper less than this sideways is a straight line
 LINE_AXIS_TOL_DEG = 5.0  # straight lines only when the gripper already points along the axis; else a joint move
 MAX_AXIS_ERR_DEG = 10.0  # an approach-axis IK solution must point within this of the wanted axis
 HOME_TOL_DEG = 2.0
@@ -531,6 +532,32 @@ class ManipulationSession:
         self._last_axis = (self.cmd[:ARM].copy(), axis.copy())
         return steps
 
+    def _move_vertical(self, p: Pose) -> int:
+        """Top grasps: a straight line to ``p`` (descend to the grasp, lift, lower, retreat). One joint move turns
+        each joint at its own rate limit, so the fingertips dip to the table short of the object and sweep it away
+        before the jaws close (#225). Every waypoint is solved and swept for collisions before the arm moves."""
+        start, goal = self.ee_pos(), np.array([p.x, p.y, p.z])
+        yaw = np.deg2rad(p.yaw_deg) if p.yaw_deg is not None else None
+        n = max(1, int(np.ceil(np.linalg.norm(goal - start) / LINE_STEP_M)))
+        qs, prev = [], self.cmd[:ARM].copy()
+        for t in np.linspace(0, 1, n + 1)[1:]:
+            q, err = solve_ik(self.env, start + (goal - start) * t, prev, yaw)  # stay on one IK branch
+            if t == 1 and err > MAX_REACH_ERR:
+                q = self._ik(p)  # the end pose: the usual solve from several seeds (raises if unreachable)
+            elif err > 0.02:
+                raise ToolError("unreachable", f"no IK on the straight path ({err * 1000:.0f} mm off)",
+                                residual_m=round(err, 4))
+            q = self._check_limits(q)
+            self._check_path_collisions(q, start_deg=prev)
+            qs.append(q)
+            prev = q
+        steps = 0
+        for i, q in enumerate(qs):
+            last = i == len(qs) - 1
+            steps += self._drive(np.r_[q, self.cmd[5]], rate=CONTACT_DEG_PER_STEP, settle=3 if last else 1,
+                                 measured=last)
+        return steps
+
     def _resolve_object(self, object_id: str | None) -> dict[str, Any]:
         assert self.obj is not None
         if object_id is None or _norm_name(object_id) == self.obj.name:
@@ -658,9 +685,11 @@ class ManipulationSession:
 
     def move_end_effector(self, a: MoveArgs) -> dict[str, Any]:
         self._validate_pose(a.target)
+        goal = np.array([a.target.x, a.target.y, a.target.z])
         if a.target.approach is not None:
-            goal = np.array([a.target.x, a.target.y, a.target.z])
             steps = self._move_axis(goal, _unit(a.target.approach))
+        elif np.linalg.norm(goal[:2] - self.ee_pos()[:2]) < VERTICAL_XY_M:
+            steps = self._move_vertical(a.target)
         else:
             q = self._ik(a.target)
             target = np.r_[q, self.cmd[5]]
