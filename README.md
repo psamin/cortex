@@ -100,11 +100,21 @@ prediction labelled an estimate and every held-out result labelled measured. One
 
 The tuned skill is never deployed. Only the re-evaluated ACT checkpoint counts as a better policy.
 
-<!-- RL video: add when rendered -->
+### At scale: 50 rollouts at once
+
+![Parallel CEM: 50 pick-and-place rollouts per iteration, success climbing to 86%](docs/media/rl_parallel.jpg)
+
+The same CEM update, run 50 rollouts at a time on GT's Futurama cluster
+([infra/futurama/rl_grid.py](infra/futurama/rl_grid.py), one process per core). It starts from a
+deliberately mis-calibrated pick-and-place skill (grasp about 1.5 cm off, jaws turned 16°).
+**Measured:** success went from 48% to 86% of rollouts over 6 iterations: 300 rollouts, 64 s of RL
+compute. MuJoCo physics ran on 32 CPU cores and rendering on one NVIDIA L4.
+[render_video.py](infra/futurama/render_video.py) turns the run into the grid video.
 
 **Not built yet:** GPU sandboxes (residual RL on ACT, on Futurama), MimicGen-style re-targeting, a
 DAgger relabel pass and sequential stopping are designed in [docs/RL_DESIGN.md](docs/RL_DESIGN.md)
-but aren't on `main`. Sandboxes run on local CPU today. The loop's end-to-end test
+but aren't on `main`. The studio's sandboxes run on local CPU today, one rollout at a time; the parallel
+run above is a cluster script, not yet wired into the studio. The loop's end-to-end test
 ([#187](https://github.com/psamin/cortex/pull/187)) builds the real dataset version and proposes the
 real retrain, but uses recorded results for the two checkpoint evaluations. Code:
 [backend/cortex/rl/](backend/cortex/rl/).
