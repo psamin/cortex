@@ -96,6 +96,6 @@ echo "[sim] TRAINING_DONE"
 for ck in "$OUT"/checkpoints/[0-9]*/pretrained_model; do
   step=$(basename "$(dirname "$ck")")
   python -m cortex.sim.tasks.run evaluate "$TASK" "$ck" "$OUT/eval/$step" --episodes "${EVAL_EPISODES:-50}" \
-    --size "${SIZE:-240x320}" "${CAMS[@]}" | tail -1
+    --size "${SIZE:-240x320}" --videos "${EVAL_VIDEOS:-4}" "${CAMS[@]}" | tail -1
 done
 echo "[sim] EVAL_DONE"

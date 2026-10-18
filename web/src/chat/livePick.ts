@@ -4,7 +4,7 @@ import type { LivePolicyStatus } from "../api/types";
 export type Pick = { kind: "sim"; task: string; seed: number } | { kind: "replay"; task: string; ep: number };
 
 export const SIM_TITLE: Record<string, string> = {
-  jenga: "Jenga", screwdriver: "Screwdriver", unscrew: "Unscrew (grip)", palletize: "Palletizing", suture: "Suture",
+  jenga: "Jenga", screwdriver: "Screwdriver", unscrew: "Unscrew (grip)", unscrew_black: "Unscrewing policy 2", palletize: "Palletizing", suture: "Suture",
 };
 // which sim task a project is about, from its name and prompt; earlier entries win ("Screwdriver" before "Unscrew").
 // No "box": cube-in-a-box projects are not palletizing.
