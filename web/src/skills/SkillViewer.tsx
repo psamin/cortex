@@ -57,7 +57,7 @@ function Replays({ s }: { s: PhysicalSkill }) {
     );
   return (
     <div className="flex h-full min-h-0 flex-col gap-3">
-      <div className="flex min-h-0 flex-1 items-center justify-center">
+      <div className="relative min-h-0 flex-1">
         <video
           key={cur.url}
           src={resolveMediaUrl(cur.url) ?? undefined}
@@ -66,13 +66,13 @@ function Replays({ s }: { s: PhysicalSkill }) {
           muted
           playsInline
           controls
-          className="block max-h-full w-auto max-w-full border border-line-strong bg-rail object-contain"
+          className="absolute inset-0 block h-full w-full bg-rail object-contain"
         />
       </div>
       {videos.length > 1 && (
         <ul className="scroll-thin flex shrink-0 gap-2 overflow-x-auto pb-1">
           {videos.map((v, k) => (
-            <li key={v.url} className="w-40 shrink-0">
+            <li key={v.url} className="w-28 shrink-0">
               <button
                 type="button"
                 onClick={() => setI(k)}
@@ -185,8 +185,12 @@ function Live({ s }: { s: PhysicalSkill }) {
         </Button>
         <span className={cn("ml-auto text-ink-3", label)}>{st?.gpu}</span>
       </div>
-      <div className="min-h-0 flex-1 bg-rail">
-        {seed != null && <LiveFrame key={`${seed}-${view}`} src={api.livePolicySimUrl(task, seed, view)} label={`${s.name} running live on the GPU`} />}
+      <div className="relative min-h-0 flex-1 bg-rail">
+        {seed != null && (
+          <div className="absolute inset-0">
+            <LiveFrame fill key={`${seed}-${view}`} src={api.livePolicySimUrl(task, seed, view)} label={`${s.name} running live on the GPU`} />
+          </div>
+        )}
       </div>
       <p className="text-[11.5px] leading-5 text-ink-3">
         Closed loop in MuJoCo on the GPU; the simulator judges the end. Each run is {simWhere({ ...s, layouts: layouts ?? null })}. Saved to past runs when it ends.
@@ -201,17 +205,21 @@ function Stage({ s }: { s: PhysicalSkill }) {
   const b = scoreBadge(s.score);
   return (
     <>
-      <header className="flex flex-wrap items-start gap-x-6 gap-y-3 border-b border-line px-5 py-4">
+      {/* one compact row, so the video gets nearly the whole screen */}
+      <header className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-line px-4 py-2.5">
         <div className="min-w-0 flex-1">
-          <h1 className="kn-display text-[26px] leading-tight">{s.name}</h1>
-          <p className="mt-1 text-xs leading-5 text-ink-3">
-            {[s.robot, s.policy, "trained in simulation", s.steps ? `${s.steps.toLocaleString()} steps` : null].filter(Boolean).join(" · ")}
-          </p>
-          <div className="mt-2 flex flex-wrap items-center gap-2">
+          <h1 className="kn-display truncate text-[20px] leading-tight">{s.name}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11.5px] text-ink-3">
             <Badge tone={b.tone} title={s.score.detail}>
               {b.text}
             </Badge>
-            {s.score.label !== b.text && <span className="text-[12.5px] text-ink-2">{s.score.label}</span>}
+            {s.score.label !== b.text && <span className="text-ink-2">{s.score.label}</span>}
+            <span>{[s.robot, s.policy, "trained in simulation", s.steps ? `${s.steps.toLocaleString()} steps` : null].filter(Boolean).join(" · ")}</span>
+            {s.project_id && (
+              <Link to={`/p/${s.project_id}`} className="inline-flex items-center gap-0.5 text-ink-2 hover:text-ink">
+                Open its project <ArrowUpRight className="h-3 w-3" />
+              </Link>
+            )}
           </div>
         </div>
         <Segmented
@@ -224,14 +232,7 @@ function Stage({ s }: { s: PhysicalSkill }) {
           ]}
         />
       </header>
-      <div className="min-h-0 flex-1 p-4 sm:p-5">{mode === "replay" ? <Replays s={s} /> : <Live s={s} />}</div>
-      {s.project_id && (
-        <div className="border-t border-line px-5 py-2.5">
-          <Link to={`/p/${s.project_id}`} className="inline-flex items-center gap-1 text-[12.5px] text-ink-2 hover:text-ink">
-            Open its project{s.project_name ? `: ${s.project_name}` : ""} <ArrowUpRight className="h-3.5 w-3.5" />
-          </Link>
-        </div>
-      )}
+      <div className="min-h-0 flex-1 p-2 sm:p-3">{mode === "replay" ? <Replays s={s} /> : <Live s={s} />}</div>
     </>
   );
 }
@@ -252,7 +253,7 @@ export function SkillViewer() {
 
   return (
     <div className="flex h-full flex-col bg-bench text-ink md:flex-row">
-      <aside className="flex max-h-[40vh] shrink-0 flex-col border-b border-line md:max-h-none md:w-72 md:border-b-0 md:border-r">
+      <aside className="flex max-h-[30vh] shrink-0 flex-col border-b border-line md:max-h-none md:w-56 md:border-b-0 md:border-r">
         <div className="flex items-center gap-2 px-4 pb-2 pt-4">
           <Link to="/studio/skills" className="inline-flex h-8 items-center gap-1.5 rounded-full border border-line-strong px-3 text-[13px] text-ink-2 hover:text-ink">
             <ArrowLeft className="h-3.5 w-3.5" /> Back

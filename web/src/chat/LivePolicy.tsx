@@ -114,13 +114,15 @@ export function GpuStage({ pid, hint = "" }: { pid: string; hint?: string }) {
 }
 
 
-/** The live stream, with a "loading onto the GPU" state until the first frame and a clear failure state. */
-export function LiveFrame({ src, label }: { src: string; label: string }) {
+/** The live stream, with a "loading onto the GPU" state until the first frame and a clear failure state.
+ *  `fill` scales it up to fill its box (the full-screen skill viewer, #308). */
+export function LiveFrame({ src, label, fill = false }: { src: string; label: string; fill?: boolean }) {
   const [state, setState] = useState<"loading" | "live" | "failed">("loading");
   return (
     <div className="relative flex h-full w-full items-center justify-center">
       <img src={src} alt={label} onLoad={() => setState("live")} onError={() => setState("failed")}
-        className={cn("block max-h-full w-auto max-w-full border border-line-strong object-contain", state !== "live" && "invisible")} />
+        className={cn(fill ? "absolute inset-0 block h-full w-full object-contain"
+          : "block max-h-full w-auto max-w-full border border-line-strong object-contain", state !== "live" && "invisible")} />
       {state === "loading" && (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 text-xs text-ink-2">
           <CircleDashed className="h-6 w-6 animate-spin text-ink-3" />
