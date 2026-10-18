@@ -1,18 +1,23 @@
 """How the SO-101 grasps an object of a given height, shared by the scene, feasibility and tools.
 
 Short objects are grasped from above. Tall ones (bottles, cans) are grasped from the side:
-a top-down approach over them is beyond the arm's reach. Side grasps only reach far from
-the base. Measured on the Menagerie SO-101 (12 mm IK tolerance): about r >= 0.30 m at
-z = 0.07 and r >= 0.26 m at z >= 0.10. So tall objects need starts and zones out there.
+a top-down approach over them is beyond the arm's reach. A horizontal side grasp only reaches far
+from the base: measured on the Menagerie SO-101, about r >= 0.30 m at z = 0.07 and
+r >= 0.26 m at z >= 0.10. Tilting the approach 40 degrees down brings it in to about
+r = 0.20 m, so side grasps search tilts of 0, 20 and 40 degrees.
 """
 
 from __future__ import annotations
 
 import numpy as np
 
+from .expert import side_approach
+
 SIDE_GRASP_MIN_H = 0.07  # objects taller than this are grasped from the side
 FINGER_DEPTH = 0.04  # how far down an object the fingertips reach from above
-SIDE_MIN_RADIUS = 0.30  # default starts for side grasps sit at least this far from the base
+SIDE_MIN_RADIUS = 0.30  # purely horizontal side grasps reach from here outward
+# Side-grasp approach tilts tried in order: tilting down brings the grasp in to r ~0.20 m.
+SIDE_PITCHES = (0.0, 20.0, 40.0)
 
 
 def grasp_mode(height: float) -> str:
@@ -34,3 +39,8 @@ def ik_seeds(xyz: np.ndarray, home: np.ndarray) -> list[np.ndarray]:
     seeds += [np.array([pan, a, e, w, 0.0, 30.0]) for a in (-60, -20, 20, 60) for e in (-60, 0, 60)
               for w in (-60, 0, 60)]
     return seeds
+
+
+def approaches(xy: np.ndarray, mode: str) -> list[np.ndarray | None]:
+    """Approach axes to try for a grasp at xy: straight down (top), or the side tilts."""
+    return [None] if mode == "top" else [side_approach(xy, p) for p in SIDE_PITCHES]
