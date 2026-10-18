@@ -203,13 +203,14 @@ function Metrics({ pid, iterations, run }: { pid: string; iterations: Iteration[
   const version = trainedIt?.policy_version ?? null;
   const pendingIt = [...iterations].reverse().find((i) => !i.checkpoint_id);
   const iteration = run?.iteration || iterations.length || null;
+  const replay = [...iterations].reverse().find((i) => i.replay?.joint_mae_deg != null)?.replay ?? null;
 
   return (
     <div className="grid grid-cols-4 gap-x-5 gap-y-4">
       <Tile
         label="Policy success"
         value={policy ? pct(policy.rate) : "—"}
-        sub={policy && ci ? `${policy.k}/${policy.n} · 95% CI ${pct(ci[0])}–${pct(ci[1])}` : oracle.n ? `oracle: ${pct(oracle.k / oracle.n)}` : "no learned policy yet"}
+        sub={policy && ci ? `${policy.k}/${policy.n} · 95% CI ${pct(ci[0])}–${pct(ci[1])}` : oracle.n ? `oracle: ${pct(oracle.k / oracle.n)}` : replay ? `held-out replay: ${replay.joint_mae_deg!.toFixed(2)}° joint error` : version ? "not evaluated" : "no learned policy yet"}
       />
       <Tile label="Demos accepted" value={episodes.data ? accepted.length : "—"} />
       <Tile label="Iteration" value={iteration ?? "—"} sub={pendingIt ? pendingIt.policy_version : version ? `policy ${version}` : "none yet"} />
@@ -258,10 +259,13 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
       <div className="min-w-0">
         <div className="kn-label kn-label-rule"><span>Success across iterations</span></div>
         <p className="mt-2.5 text-sm text-ink-2">
-          {iterations.length ? `${iterations.length} planned · no policy trained` : "No policy trained"}
+          {iterations.some((i) => i.checkpoint_id)
+            ? `${iterations.filter((i) => i.checkpoint_id).length} trained · no sim evaluation`
+            : iterations.length ? `${iterations.length} planned · no policy trained` : "No policy trained"}
           {/futurama/i.test(trainingProvider) ? " · needs Futurama GPU (GT VPN)" : health.data?.training?.fallback ? " · no GPU connected" : ""}
         </p>
         {proposed > 0 && <p className="mt-1 text-xs text-caution">{proposed} training job{proposed === 1 ? "" : "s"} to approve in chat</p>}
+        <Replays iterations={iterations} sel={sel} />
         {failures.length > 0 && <FailureBars failures={failures} maxF={maxF} empty="No failures." />}
       </div>
     );
@@ -308,6 +312,40 @@ function Progress({ iterations, pid, sel }: { iterations: Iteration[]; pid: stri
         </ResponsiveContainer>
       </div>
       <FailureBars failures={failures} maxF={maxF} empty="No failures." />
+    </div>
+  );
+}
+
+/** Open-loop replays of each trained version on held-out recorded demos: joint error, not success. */
+function Replays({ iterations, sel }: { iterations: Iteration[]; sel: ViewerSelection }) {
+  const rows = iterations.filter((i) => i.replay);
+  if (!rows.length) return null;
+  return (
+    <div className="mt-2.5 space-y-1">
+      <div className="flex items-center gap-1.5 font-mono text-[10px] uppercase tracking-[0.14em] text-ink-3">
+        Held-out replays
+        <InfoTip>{`${rows[0].replay!.note}. The policy sees each recorded frame and its joint targets are compared with the human's; the arm does not move.`}</InfoTip>
+      </div>
+      {rows.map((it) => {
+        const r = it.replay!;
+        return (
+          <button
+            key={it.iteration}
+            type="button"
+            onClick={() => {
+              sel.setEvaluationId(null);
+              sel.setFilter("replay");
+              sel.setSelectedId(null);
+            }}
+            className="block w-full truncate text-left text-xs text-ink-2 hover:text-ink"
+            title="Show these replays in the viewer"
+          >
+            <span className="font-medium text-ink">{it.policy_version}</span>
+            {r.episodes ? ` · ${r.episodes} episodes · ${r.joint_mae_deg?.toFixed(2) ?? "—"}° mean joint error` : ""}
+            {r.live_sessions ? ` · ${r.live_sessions} live GPU run${r.live_sessions === 1 ? "" : "s"}${r.inference_ms != null ? `, ${r.inference_ms.toFixed(0)} ms/frame` : ""}` : ""}
+          </button>
+        );
+      })}
     </div>
   );
 }

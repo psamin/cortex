@@ -7,7 +7,7 @@ import { agentLabel, isImported, type Condition, type RemoteRollout, type Episod
 
 /** One playable MuJoCo episode: a demonstration or an evaluation rollout. */
 export interface Rollout {
-  kind: "demo" | "eval" | "attempt";
+  kind: "demo" | "eval" | "attempt" | "replay";
   id: string;
   label: string;
   success: boolean | null;
@@ -34,12 +34,15 @@ export interface Rollout {
   who: string;
   frames: number | null;
   durationS: number | null;
+  /** replays: what was measured instead of success, e.g. "0.12° joint error" */
+  metric: string | null;
 }
 
-export type RolloutOrigin = "agent" | "oracle" | "imported" | "teleop" | "eval" | "attempt";
+export type RolloutOrigin = "agent" | "oracle" | "imported" | "teleop" | "eval" | "attempt" | "replay";
 
 /** Classify a rollout by kind + planner (+ the episode when known). */
-function classify(kind: string, planner: string | null | undefined, ep?: Episode, policy?: string | null): { origin: RolloutOrigin; who: string } {
+function classify(kind: string, planner: string | null | undefined, ep?: Episode, policy?: string | null, replayKind?: string): { origin: RolloutOrigin; who: string } {
+  if (kind === "replay") return { origin: "replay", who: `${replayKind === "live_inference" ? "Live GPU" : "Held-out replay"} · policy ${policy ?? ""}`.trim() };
   if (kind === "eval") return { origin: "eval", who: `Eval · ${policy && !/oracle/i.test(policy) ? `policy ${policy}` : "oracle"}` };
   if (kind === "attempt") return { origin: "attempt", who: planner === "scripted_ik_oracle" ? "Scripted oracle" : agentLabel(planner) };
   if ((ep && isImported(ep)) || /imported/i.test(planner ?? "")) return { origin: "imported", who: "Human (imported)" };
@@ -125,6 +128,7 @@ function fromEpisodes(eps: Episode[]): Rollout[] {
       ...classify("demo", e.provenance?.planner, e),
       frames: e.num_frames,
       durationS: e.num_frames / (e.fps || 30),
+      metric: null,
       ...importedFields(e),
     }));
 }
@@ -155,6 +159,7 @@ function fromEvaluations(evs: EvaluationWithBranches[]): Rollout[] {
           ...classify("eval", null, undefined, policy),
           frames: null,
           durationS: null,
+          metric: null,
           source: null,
           task: null,
         });
@@ -181,6 +186,7 @@ function rolloutFields(r: RemoteRollout, ep: Episode | undefined) {
     policy: r.policy ?? plannerLabel(r.planner),
     iteration: r.iteration ?? null,
     createdAt: r.created_at ?? "",
+    metric: r.metric ?? null,
     ...(ep ? importedFields(ep) : { imported: /imported/i.test(r.planner ?? ""), source: null, task: null }),
   };
 }
@@ -197,8 +203,8 @@ export function useRollouts(pid: string) {
         .map((r) => {
           const ep = epById.get(r.id);
           return {
-            ...classify(r.kind, r.planner, ep, r.policy),
-            frames: ep?.num_frames ?? null,
+            ...classify(r.kind, r.planner, ep, r.policy, r.replay_kind),
+            frames: ep?.num_frames ?? r.frames ?? null,
             durationS: ep ? ep.num_frames / (ep.fps || 30) : null,
             ...rolloutFields(r, ep),
           };
