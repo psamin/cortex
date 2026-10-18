@@ -328,10 +328,11 @@ node evals/run.ts                                   # all scenarios, model sonne
 node evals/run.ts --scenario cube_golden_path --model haiku
 node evals/run.ts --mcp-url http://localhost:3050/mcp --api-url http://127.0.0.1:8050/api --claude /path/to/claude
 node evals/run.ts --rescore                         # re-score the saved transcripts without rerunning agents
+node evals/run.ts --dry-run                         # check scenarios, backend, MCP server and Claude Code auth; no model calls
 node evals/preflight.ts                             # publish-metadata preflight against the live server
 ```
 
-Results go to [`evals/reports/latest.md`](evals/reports/latest.md) and `latest.json`, with one trimmed transcript per scenario in `evals/reports/transcripts/` (images are stripped). The exit code is 0 only when every scenario passes.
+Results go to [`evals/reports/latest.md`](evals/reports/latest.md) and `latest.json`, with one trimmed transcript per scenario in `evals/reports/transcripts/` (images are stripped). The exit code is 0 only when every scenario passes. A real run first checks `claude auth status` (or `ANTHROPIC_API_KEY`) and exits with a login hint instead of starting agents that cannot authenticate.
 
 **Manufact Testing.** Manufact test suites are created in the dashboard (task, rubric, passing threshold, optional expected tool calls); there is no file import. `node evals/run.ts --emit-manufact` writes [`evals/manufact/test-suites.json`](evals/manufact/test-suites.json), which holds the values to paste for each scenario. See "Publish to Manufact" below.
 

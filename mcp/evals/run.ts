@@ -10,12 +10,13 @@
 //                     [--claude PATH] [--max-budget-usd 2] [--timeout-min 25] [--out evals/reports]
 //   node evals/run.ts --rescore            # re-score saved transcripts, no agent runs
 //   node evals/run.ts --emit-manufact      # write evals/manufact/test-suites.json
+//   node evals/run.ts --dry-run            # validate scenarios, backend, MCP server and auth; no model calls
 //
 // Needs Node >= 22.18 (type stripping), a running backend and MCP server, and a
 // logged-in Claude Code (or ANTHROPIC_API_KEY). Keep runs cheap: the scenarios
 // ask for 2 simulated demos and never train.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -96,6 +97,7 @@ function parseArgs(argv: string[]) {
     out: resolve(one("out", join(HERE, "reports"))),
     rescore: o.rescore !== undefined,
     emitManufact: o["emit-manufact"] !== undefined,
+    dryRun: o["dry-run"] !== undefined,
   };
 }
 
@@ -422,6 +424,80 @@ function emitManufact(scenarios: Scenario[]) {
   console.log(`wrote ${join(dir, "test-suites.json")}`);
 }
 
+// ------------------------------------------------------------------ preflight
+
+const AUTH_HELP =
+  "Claude Code is not logged in. Run `claude /login` (or `claude setup-token`) once in a terminal, " +
+  "or set ANTHROPIC_API_KEY, then rerun. Pass --claude <path> or CLAUDE_BIN if `claude` is not on PATH.";
+
+/** `claude auth status` -> null when usable, else why not. Never reads credentials itself. */
+function authProblem(claude: string): string | null {
+  const r = spawnSync(claude, ["auth", "status"], { encoding: "utf8", timeout: 30_000 });
+  if (r.error) return `cannot run ${claude} (${r.error.message}). Pass --claude <path> or set CLAUDE_BIN.`;
+  try {
+    const st = JSON.parse(r.stdout);
+    if (st.loggedIn === true) return null;
+  } catch {
+    // older CLIs print text; fall through to the env check
+  }
+  return process.env.ANTHROPIC_API_KEY ? null : AUTH_HELP;
+}
+
+async function mcpTools(url: string): Promise<string[]> {
+  const headers = { "Content-Type": "application/json", Accept: "application/json, text/event-stream" };
+  const call = async (id: number, method: string, params: object, sid?: string) => {
+    const r = await fetch(url, { method: "POST", headers: sid ? { ...headers, "mcp-session-id": sid } : headers, body: JSON.stringify({ jsonrpc: "2.0", id, method, params }) });
+    const raw = await r.text();
+    const body = raw.startsWith("{") ? raw : raw.split("\n").find((l) => l.startsWith("data: "))?.slice(6) ?? "{}";
+    return { sid: r.headers.get("mcp-session-id") ?? sid, msg: JSON.parse(body) };
+  };
+  const init = await call(1, "initialize", { protocolVersion: "2025-06-18", capabilities: {}, clientInfo: { name: "cortex-evals", version: "1" } });
+  const list = await call(2, "tools/list", {}, init.sid ?? undefined);
+  return (list.msg.result?.tools ?? []).map((t: { name: string }) => t.name);
+}
+
+/** Static + live checks that need no model: scenario fields, tool names, backend and MCP reachability. */
+async function dryRun(a: ReturnType<typeof parseArgs>, scenarios: Scenario[]): Promise<number> {
+  const problems: string[] = [];
+  const ok = (cond: boolean, what: string) => {
+    if (!cond) problems.push(what);
+  };
+  const tools = await mcpTools(a.mcpUrl).catch((e) => {
+    problems.push(`MCP server not reachable at ${a.mcpUrl} (${(e as Error).message})`);
+    return [] as string[];
+  });
+  if (tools.length) console.log(`MCP ${a.mcpUrl}: ${tools.length} tools`);
+  const health = await getJson(`${a.apiUrl}/health`).catch((e) => {
+    problems.push(`backend not reachable at ${a.apiUrl} (${(e as Error).message})`);
+    return null;
+  });
+  if (health) console.log(`backend ${a.apiUrl}: agent planner ${health.agent?.provider ?? "?"}, sim ${health.sim_env ?? "?"}`);
+  const ids = new Set<string>();
+  for (const s of scenarios) {
+    ok(!ids.has(s.id), `${s.id}: duplicate id`);
+    ids.add(s.id);
+    ok(STAGES.includes(s.expected_stage), `${s.id}: unknown expected_stage '${s.expected_stage}'`);
+    ok(s.prompt.length > 10 && !/cortex[._]/i.test(s.prompt), `${s.id}: prompt must be a cold user request without tool names`);
+    ok(s.tool_call_budget > 0, `${s.id}: tool_call_budget must be > 0`);
+    ok(!!s.rubric, `${s.id}: rubric missing`);
+    if (s.final_text_must_match) {
+      try {
+        new RegExp(s.final_text_must_match, "i");
+      } catch (e) {
+        problems.push(`${s.id}: bad final_text_must_match (${(e as Error).message})`);
+      }
+    }
+    if (tools.length)
+      for (const t of [...s.expected_tools, ...s.forbidden_tools]) ok(tools.includes(t), `${s.id}: tool ${t} is not on the server`);
+    console.log(`scenario ${s.id}: expects ${s.expected_stage}, budget ${s.tool_call_budget} calls`);
+  }
+  const auth = authProblem(a.claude);
+  console.log(auth ? `auth: ${auth}` : "auth: Claude Code is usable");
+  for (const p of problems) console.log(`FAIL  ${p}`);
+  console.log(problems.length ? `dry run: ${problems.length} problems` : `dry run passed${auth ? " (but a real run needs auth)" : ""}`);
+  return problems.length ? 1 : 0;
+}
+
 // ------------------------------------------------------------------ main
 
 async function main() {
@@ -430,9 +506,17 @@ async function main() {
   if (a.emitManufact) return emitManufact(scenarios);
   if (a.scenarios.length) scenarios = scenarios.filter((s) => a.scenarios.includes(s.id));
   if (!scenarios.length) throw new Error("no scenarios selected");
+  if (a.dryRun) {
+    process.exitCode = await dryRun(a, scenarios);
+    return;
+  }
   await getJson(`${a.apiUrl}/health`).catch((e) => {
     throw new Error(`backend not reachable at ${a.apiUrl} (${(e as Error).message})`);
   });
+  if (!a.rescore) {
+    const auth = authProblem(a.claude);
+    if (auth) throw new Error(auth);
+  }
   mkdirSync(a.out, { recursive: true });
 
   const results: Result[] = [];
