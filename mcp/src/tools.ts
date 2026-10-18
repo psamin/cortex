@@ -159,7 +159,13 @@ const TOOLS: Def[] = [
     description:
       "Snapshot all accepted episodes as a versioned LeRobotDataset v3 with lineage, a train/eval split and optional image-only " +
       "augmentation. Background job: the dataset version id appears in the job's result_ref (and in ref_ids once done). " +
-      "Needs at least 10 accepted episodes before training makes sense.",
+      "Needs at least 10 accepted episodes before training makes sense.
+" +
+      "USE WHEN: you recorded or imported demos yourself and want control over the dataset (custom path).
+" +
+      "USE INSTEAD: cortex_train_from_agent_demonstrations after agent collection: it builds the dataset AND proposes training in one call.
+" +
+      "NEXT: poll cortex_get_job, then cortex_propose_training_job with the dataset version id (ds_...).",
     inputSchema: z.object({
       project_id: projectId,
       augmentation_preset: z.enum(["lighting_robustness"]).nullish().describe(
@@ -181,7 +187,14 @@ const TOOLS: Def[] = [
     description:
       "Propose an ACT or SmolVLA training job on a dataset version, with its config, rationale and GPU-hours/cost estimate. " +
       "This does NOT start training: the proposal must be approved by a human in the Cortex studio before cortex_launch_training_job " +
-      "will run it. Show the human the estimate and ask them to approve.",
+      "will run it. Show the human the estimate and ask them to approve.
+" +
+      "USE WHEN: you already have a dataset version (ds_...) from cortex_create_dataset_version or cortex_import_demonstrations. " +
+      "Without a dataset_version_id this tool cannot run: build the dataset first.
+" +
+      "USE INSTEAD: cortex_train_from_agent_demonstrations after agent collection (dataset + proposal in one call).
+" +
+      "NEXT: STOP and ask the human to approve the job in the Cortex studio, then cortex_launch_training_job.",
     inputSchema: z.object({
       project_id: projectId,
       dataset_version_id: z.string().describe("Dataset version id (ds_...), from cortex_create_dataset_version or get_project_state"),
@@ -196,7 +209,9 @@ const TOOLS: Def[] = [
     description:
       "Launch a proposed training job. It only runs if a human has already approved the job in the Cortex studio, or if you were " +
       "given the operator's approval_token. Otherwise nothing is launched and the result says APPROVAL REQUIRED: stop, ask the human " +
-      "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.",
+      "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.
+" +
+      "NEXT: poll cortex_get_project_state until training_jobs[].checkpoint_ids has a checkpoint (ck_...), then cortex_evaluate_learned_policy.",
     inputSchema: z.object({
       training_job_id: z.string().describe("Training job id (tj_...), from cortex_propose_training_job"),
       approval_token: z.string().nullish().describe("Operator approval token, only if the human gave you one; otherwise omit and have them approve in the studio"),
@@ -209,9 +224,15 @@ const TOOLS: Def[] = [
     description:
       "Evaluate a policy in three parallel MuJoCo branches (baseline, shifted object, dim lighting), recording seeds, successes, " +
       "rewards and video storage keys. Use policy='scripted_expert' for a reference ceiling, or a trained checkpoint id (ck_...) " +
-      "from get_project_state's training_jobs[].checkpoint_ids. Returns the evaluation id (ev_...) and its job (job.id): if it is still running " +
+      "from cortex_get_project_state's training_jobs[].checkpoint_ids. Returns the evaluation id (ev_...) and its job (job.id): if it is still running " +
       "when wait_s runs out, poll cortex_get_job with job.id. " +
-      "get_next_actions marks evaluations requires_approval: confirm with the human first unless they already asked you to run it.",
+      "cortex_get_next_actions marks evaluations requires_approval: confirm with the human first unless they already asked you to run it.
+" +
+      "USE WHEN: you want the scripted-expert reference ceiling (policy='scripted_expert') or to pin base_seed for a like-for-like comparison.
+" +
+      "USE INSTEAD: cortex_evaluate_learned_policy to evaluate a trained checkpoint (the golden path).
+" +
+      "NEXT: cortex_compare_experiments to compare runs.",
     inputSchema: z.object({
       project_id: projectId,
       policy: z.string().optional().describe("'scripted_expert' (default) or a checkpoint id (ck_...)"),
@@ -226,7 +247,9 @@ const TOOLS: Def[] = [
     title: "Compare experiments",
     description:
       "Branch-by-branch comparison of evaluation runs with success-rate deltas and p-values. " +
-      "Defaults to the project's evaluations when evaluation_ids is omitted.",
+      "Defaults to the project's evaluations when evaluation_ids is omitted.
+" +
+      "USE WHEN: two or more evaluations have finished (from cortex_evaluate_learned_policy or cortex_launch_simulation_evaluation).",
     inputSchema: z.object({
       project_id: projectId,
       evaluation_ids: z.array(z.string()).nullish().describe("Evaluation ids (ev_...) to compare (default: the project's runs)"),
@@ -339,7 +362,15 @@ const TOOLS: Def[] = [
       "Build a LeRobotDataset v3 version from accepted demos of the chosen sources (default only agent-planner demos) and " +
       "propose ACT training. Returns job_id; its result_ref is the proposed training job id. Training does NOT start until a " +
       "human approves it in the studio (or the project's standing approval covers it). Never claim a policy was retrained " +
-      "until a checkpoint exists.",
+      "until a checkpoint exists.
+" +
+      "USE WHEN: agent collection (cortex_create_policy_project / cortex_start_agent_collection) has finished. This is the golden path: " +
+      "it replaces cortex_create_dataset_version + cortex_propose_training_job.
+" +
+      "USE INSTEAD: cortex_create_dataset_version + cortex_propose_training_job for custom datasets or imported demos.
+" +
+      "NEXT: poll cortex_get_job for the proposed training job id, then STOP and ask the human to approve it in the Cortex studio; " +
+      "after they confirm, cortex_launch_training_job.",
     inputSchema: z.object({
       project_id: projectId,
       sources: z.array(z.enum(["sim_agent", "sim_scripted"])).optional().describe("Demo sources (default ['sim_agent'])"),
@@ -353,7 +384,13 @@ const TOOLS: Def[] = [
     title: "Evaluate learned policy",
     description:
       "Evaluate a trained checkpoint (ck_..., never the oracle) in three parallel MuJoCo conditions (baseline, shifted object, " +
-      "dim lighting) on held-out seeds. Returns the evaluation id and job (poll cortex_get_job). Success rates come with 95% CIs.",
+      "dim lighting) on held-out seeds. Returns the evaluation id and job (poll cortex_get_job). Success rates come with 95% CIs.
+" +
+      "USE WHEN: a training job has produced a checkpoint (cortex_get_project_state training_jobs[].checkpoint_ids).
+" +
+      "USE INSTEAD: cortex_launch_simulation_evaluation for the scripted-expert reference ceiling.
+" +
+      "NEXT: poll cortex_get_job, then cortex_improve_policy to target the weakest condition.",
     inputSchema: z.object({
       project_id: projectId,
       checkpoint_id: z.string().regex(/^ck_/).describe("Checkpoint id from get_project_state training_jobs[].checkpoint_ids"),
@@ -367,7 +404,12 @@ const TOOLS: Def[] = [
     description:
       "Close the loop once: find the weakest measured condition of the latest learned-policy evaluation (or the top coverage " +
       "gap), collect targeted agent demonstrations there in fresh seeds within the budget, build a new dataset version and " +
-      "propose retraining (needs approval). Returns the target cell, the evidence, collection_id and job_id.",
+      "propose retraining (needs approval). Returns the target cell, the evidence, collection_id and job_id.
+" +
+      "USE WHEN: a learned-policy evaluation has finished (cortex_evaluate_learned_policy) and you want to close the loop.
+" +
+      "NEXT: cortex_get_collection_progress, then STOP and ask the human to approve the retraining job in the Cortex studio; " +
+      "after they confirm, cortex_launch_training_job.",
     inputSchema: z.object({
       project_id: projectId,
       max_new_demos: z.number().int().min(1).max(20).optional(),
