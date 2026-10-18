@@ -169,6 +169,8 @@ class Question(BaseModel):
     required: bool = True
     # A ready-to-send update_intake patch that accepts the default (or the first option).
     patch: dict | None = None
+    # For enum questions whose options need different values: one ready-to-send patch per option.
+    option_patches: dict[str, dict] = {}
 
 
 class IntakeStatus(BaseModel):
