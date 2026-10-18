@@ -657,6 +657,14 @@ async def hardware_teleop(pid: str, request: Request):
     return await hs.start_teleop(ctx(), await orch.get_project(ctx(), pid), req)
 
 
+@app.post("/api/projects/{pid}/hardware/policy")
+async def hardware_policy(pid: str, request: Request):
+    from ..services import hardware_service as hs
+    _local_human(request)
+    req = hs.PolicyRunRequest.model_validate(await request.json())
+    return await hs.start_policy(ctx(), await orch.get_project(ctx(), pid), req)
+
+
 @app.get("/api/hardware/run")
 async def hardware_run():
     from ..services import hardware_service as hs
