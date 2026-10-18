@@ -161,7 +161,11 @@ def check(spec: IntakeSpec, info: SceneInfo, env: SceneEnv | None = None) -> Fea
         reports = [_object_report(env, o, opening, limit, carry_qs.get(o.name, [])) for o in objs]
         ok = all(r.ok for r in reports) and all(p.ok for p in places)
         bad = [r.name for r in reports if not r.ok] + [p.name for p in places if not p.ok]
-        summary = "feasible" if ok else "not feasible: " + ", ".join(bad)
+        # The agent reads this. It must report a physical limit to its human, not edit the world to pass:
+        # in a live agent test, it shrank a real mug so the simulated one would fit the jaws.
+        summary = "feasible" if ok else (
+            "not feasible: " + ", ".join(bad) + ". Tell the user what doesn't fit and why; don't change an object's "
+            "measured size or mass to pass. Moving a zone or using a different object needs their OK.")
         return FeasibilityReport(ok=ok, jaw_opening_m=round(opening, 4), objects=reports, places=places,
                                  summary=summary)
     finally:

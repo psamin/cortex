@@ -29,18 +29,16 @@ from ..errors import worker_error
 from ..sim.manipulation import ManipulationSession
 from ..sim.so101 import FPS, PickPlaceEnv, Variation, configure_gl
 from ..sim.viewer import DemoCamera
+from .livefile import write_live_jpg
 from .sim_worker import emit, write_mp4
 
 
 def live_writer(live_dir: Path):
-    from PIL import Image
 
     live_dir.mkdir(parents=True, exist_ok=True)
 
     def write(frame: np.ndarray) -> None:
-        tmp = live_dir / "live.tmp.jpg"
-        Image.fromarray(frame).save(tmp, quality=80)
-        os.replace(tmp, live_dir / "live.jpg")
+        write_live_jpg(frame, live_dir)
     return write
 
 
