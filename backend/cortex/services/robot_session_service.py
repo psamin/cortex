@@ -23,7 +23,7 @@ from ..errors import NotFound
 from ..models import AgentAttempt, AgentCollection, Condition, Project, Scenario, StartAgentCollectionRequest, new_id
 from . import agent_collection_service as acs
 from .jobs import BACKEND_DIR
-from .recording_service import dataset_blur_reference, live_key
+from .recording_service import dataset_blur_reference, fresh_live_dir
 
 IDLE_TIMEOUT_S = 600
 PHASES = {"observe_scene": "Observing scene", "get_robot_state": "Reading robot state",
@@ -108,7 +108,7 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
     from .intake_service import scene_payload
 
     out = await _rpc(s, {"op": "reset", "seed": seed, "scenario": scenario.model_dump(), "mode": "camera",
-                         "live_dir": str(ctx.local(live_key(project.id))), "scene": scene_payload(ctx, project)})
+                         "live_dir": str(fresh_live_dir(ctx, project.id)), "scene": scene_payload(ctx, project)})
     if not out.get("ok"):
         await close(s.id)
         raise RuntimeError(out.get("error", "reset failed"))

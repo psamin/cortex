@@ -13,8 +13,10 @@ export const useAgent = () => useContext(AgentCtx);
 export function ProjectLayout() {
   const { pid } = useParams<{ pid: string }>();
   if (!pid) return null;
+  // keyed by project: opening another project starts every piece of state fresh (its chat thread, the viewer's
+  // live frame, rollout selection and filters), so nothing from the last simulation shows in the new one
   return (
-    <ProjectEventsProvider pid={pid}>
+    <ProjectEventsProvider key={pid} pid={pid}>
       <ChatProvider pid={pid}>
         <Frame pid={pid} />
       </ChatProvider>

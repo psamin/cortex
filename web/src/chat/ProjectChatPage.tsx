@@ -4,9 +4,12 @@ import { useProjectState } from "../api/hooks";
 import { useChat } from "./ChatProvider";
 import { Conversation } from "./Conversation";
 import { ViewerFocusContext } from "./focus";
-import { prefixOf, toolLabel } from "./model";
+import { normalizeTool, prefixOf, toolLabel } from "./model";
 import { Pipeline } from "./Pipeline";
 import { Viewer, type RolloutFilter, type ViewerSelection } from "./Viewer";
+
+/** The tools that build a scene from a prompt; while one runs, the viewer shows that the simulation is being built. */
+const SCENE_TOOLS = new Set(["start_intake", "update_intake", "build_simulation"]);
 
 function usePersisted(key: string, initial: boolean) {
   const [v, setV] = useState(() => {
@@ -94,6 +97,23 @@ export function ProjectChatPage() {
     ? { busy: true, label: chat.status?.text ?? (chat.status?.state === "running" && chat.status.tool ? toolLabel(chat.status.tool) : "Agent is thinking") }
     : { busy: false, label: "Idle" };
 
+  // without a scene built from the prompt the sim is the cube tabletop: the request was about something else
+  const project = state.data?.project;
+  const asked =
+    project && !project.scene && project.spec.objects[0] && !project.task_prompt.toLowerCase().includes(project.spec.objects[0].toLowerCase())
+      ? project.task_prompt
+      : null;
+  // a new task's scene is being set up (its first prompt, or the agent running the intake tools): the viewer says
+  // so instead of showing the cube tabletop, another scene or old videos in between
+  const firstPrompt = (location.state as { autoSend?: string } | null)?.autoSend;
+  const sceneTool = chat.busy && !!chat.status?.tool && SCENE_TOOLS.has(normalizeTool(chat.status.tool));
+  const lastUser = [...chat.items].reverse().find((it) => it.kind === "user");
+  const building = sceneTool
+    ? (lastUser?.kind === "user" ? lastUser.text : null) ?? asked ?? project?.task_prompt ?? ""
+    : asked && (chat.busy || firstPrompt)
+      ? asked
+      : null;
+
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex min-h-0 flex-1">
@@ -103,13 +123,8 @@ export function ProjectChatPage() {
           </ViewerFocusContext.Provider>
         </div>
         <div className="min-w-0 flex-1">
-          <Viewer pid={pid} goal={state.data?.project.spec.goal ?? state.data?.project.task_prompt ?? "…"}
-            asked={
-              // without a scene built from the prompt the sim is the cube tabletop: say so when the request was about something else
-              state.data && !state.data.project.scene && state.data.project.spec.objects[0] && !state.data.project.task_prompt.toLowerCase().includes(state.data.project.spec.objects[0].toLowerCase())
-                ? state.data.project.task_prompt
-                : null
-            } sceneDigest={state.data?.project.scene?.digest ?? null} activity={activity} sel={sel} />
+          <Viewer pid={pid} goal={project?.spec.goal ?? project?.task_prompt ?? "…"} asked={asked} building={building}
+            sceneDigest={project?.scene?.digest ?? null} activity={activity} sel={sel} />
         </div>
       </div>
       <Pipeline pid={pid} open={pipelineOpen} onToggle={() => setPipelineOpen(!pipelineOpen)} sel={sel} />

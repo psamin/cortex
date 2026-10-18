@@ -26,6 +26,15 @@ def live_key(project_id: str) -> str:
     return f"projects/{project_id}/live"
 
 
+def fresh_live_dir(ctx: Ctx, project_id: str):
+    """The live-frame folder for a sim run that starts now, without the last run's frame: the studio's live
+    view streams live.jpg, and an old frame would show the previous simulation until the new one renders."""
+    d = ctx.local(live_key(project_id))
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "live.jpg").unlink(missing_ok=True)
+    return d
+
+
 async def list_episodes(ctx: Ctx, project_id: str) -> list[Episode]:
     return await ctx.repo.list("episodes", Episode, project_id=project_id)
 
@@ -73,7 +82,7 @@ async def start_recording(ctx: Ctx, project: Project, conditions: list[Condition
         from .intake_service import scene_payload
 
         cfg = {
-            "mode": "record", "max_steps": 240, "live_dir": str(ctx.local(live_key(project.id))),
+            "mode": "record", "max_steps": 240, "live_dir": str(fresh_live_dir(ctx, project.id)),
             "scene": scene_payload(ctx, project),
             "episodes": [{"seed": ep.seed, "condition": ep.condition.model_dump(),
                           "out_dir": str(ctx.local(episode_key(project.id, ep.id)))} for ep in specs],
@@ -178,7 +187,7 @@ async def start_cycle_recording(ctx: Ctx, project: Project, cond: Condition, cyc
 
         cfg = {"mode": "record", "cycles": cycles, "reset_policy": policy, "seed": seed,
                "condition": cond.model_dump(), "max_steps": 240, "scene": scene,
-               "live_dir": str(ctx.local(live_key(project.id))), "out_root": str(ctx.local(cycle_key(project.id, run_id)))}
+               "live_dir": str(fresh_live_dir(ctx, project.id)), "out_root": str(ctx.local(cycle_key(project.id, run_id)))}
         await ctx.jobs.run_worker(job, "cortex.workers.sim_worker", cfg,
                                   ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
         await ctx.audit(actor, "record_demonstrations", project.id,

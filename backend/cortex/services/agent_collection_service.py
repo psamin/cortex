@@ -28,7 +28,7 @@ from ..models import (
 from ..sim.so101 import REGION_XY
 from .jobs import Job
 from .recording_service import (
-    AUTO_ACCEPT_MIN_SCORE, HD_FILES, dataset_blur_reference, live_key, list_episodes, quality_for,
+    AUTO_ACCEPT_MIN_SCORE, HD_FILES, dataset_blur_reference, fresh_live_dir, list_episodes, quality_for,
 )
 
 REGIONS = ["left", "center", "right"]
@@ -230,7 +230,7 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
         col.status, col.job_id = "running", job.id
         await _save(ctx, col)
         blur_ref = await dataset_blur_reference(ctx, project.id)
-        live_dir = ctx.local(live_key(project.id))
+        live_dir = fresh_live_dir(ctx, project.id)
 
         async def on_event(ev: dict[str, Any]) -> None:
             t = ev.get("type")

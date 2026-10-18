@@ -12,6 +12,7 @@ import { InfoTip } from "../components/ui";
 import { useRolloutVideo, useRollouts, type Camera, type Rollout, type RolloutOrigin } from "./rollouts";
 import { maxDisplayHeight } from "./videoScale";
 import { GpuStage } from "./LivePolicy";
+import { Logo } from "../layout/AppShell";
 
 export type RolloutFilter = "all" | RolloutOrigin | "demo" | "failed";
 
@@ -58,6 +59,7 @@ export function Viewer({
   pid,
   goal,
   asked,
+  building,
   sceneDigest,
   activity,
   sel,
@@ -66,6 +68,8 @@ export function Viewer({
   goal: string;
   /** the user's request when the simulated task differs from it */
   asked?: string | null;
+  /** a new task's scene is being set up (this is its request): show only that, nothing of another scene */
+  building?: string | null;
   /** the scene built from the user's prompt, shown until there are videos */
   sceneDigest?: string | null;
   activity: { label: string; busy: boolean } | null;
@@ -83,6 +87,8 @@ export function Viewer({
   const showLive = mode === "live" || (mode === "auto" && !!liveJob);
   const showGpu = mode === "gpu";
   const replay = !showLive && !showGpu;
+  // the scene of a new task is being built: no live run of it can exist yet, and nothing else belongs on screen
+  const setup = building != null && !liveJob && !showGpu;
   const [camera, setCamera] = useState<Camera>("presentation");
   const [compare, setCompare] = useState(false);
 
@@ -137,7 +143,7 @@ export function Viewer({
             <Cpu className="h-3.5 w-3.5" /> Inference
           </ToolbarTab>
         </div>
-        {replay && (
+        {replay && !setup && (
           <div className="flex min-w-0 flex-1 items-center gap-4 overflow-x-auto px-1 scroll-thin">
             {(
               [
@@ -166,7 +172,7 @@ export function Viewer({
             )}
           </div>
         )}
-        {replay && current && (
+        {replay && !setup && current && (
           <div className="ml-auto flex shrink-0 items-center gap-1.5">
             <select
               value={cam?.id ?? "presentation"}
@@ -198,15 +204,22 @@ export function Viewer({
         )}
       </div>
 
-      <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={!replay || compare ? null : current} />
+      {setup ? (
+        <Hud goal={building ?? ""} activity={{ busy: true, label: "Building your simulation…" }} rollout={null} />
+      ) : (
+        <Hud aug={current ? augmented.get(current.id) : undefined} goal={goal} asked={asked} activity={activity} liveJob={showLive ? liveJob : undefined} rollout={!replay || compare ? null : current} />
+      )}
 
       {/* stage */}
       <div className="relative min-h-0 flex-1 overflow-hidden">
         <DashedOrbit r={200} className="pointer-events-none absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 opacity-70" />
-        {showGpu ? (
+        {setup ? (
+          <BuildingStage />
+        ) : showGpu ? (
           <GpuStage hint={goal} />
         ) : showLive ? (
-          <LiveStage pid={pid} job={liveJob} />
+          // a new run is a new stream: never carry the last run's frame or its "unavailable" state over
+          <LiveStage key={liveJob?.id ?? "none"} pid={pid} job={liveJob} />
         ) : rollouts.isLoading ? (
           <div className="relative flex h-full items-center justify-center">
             <CircleDashed className="h-6 w-6 animate-spin text-ink-4" />
@@ -233,7 +246,7 @@ export function Viewer({
       </div>
 
       {/* selector */}
-      {replay && filtered.length > 0 && (
+      {replay && !setup && filtered.length > 0 && (
         <div className="relative border-t border-line bg-bench">
           <p className="flex items-center gap-1.5 px-4 pt-2 font-mono text-[10px] uppercase tracking-[0.1em] text-ink-3">
             Newest first · ✓ sim-verified · ✗ failed
@@ -293,6 +306,21 @@ function ToolbarTab({
 }
 
 // ------------------------------------------------------------------ stages
+/** A new task's scene is being set up: the app's mark and what is happening, nothing from another scene. */
+function BuildingStage() {
+  return (
+    <div className="relative flex h-full flex-col items-center justify-center gap-4 px-8 text-center" role="status">
+      <div className="scale-[2.4] opacity-90">
+        <Logo />
+      </div>
+      <p className="kn-display mt-4 text-[28px] text-ink">Building your simulation…</p>
+      <p className="flex max-w-sm items-center gap-2 text-xs leading-5 text-ink-3">
+        <CircleDashed className="h-3.5 w-3.5 animate-spin text-servo" /> The scene appears here when it is ready, then its demos.
+      </p>
+    </div>
+  );
+}
+
 function LiveStage({ pid, job }: { pid: string; job?: Job }) {
   const [failed, setFailed] = useState(false);
   const src = api.simLiveUrl(pid);
