@@ -8,12 +8,12 @@ import { callTool } from "./backend.js";
 // enum is spelled out here so agents cannot pick a value the backend rejects.
 // Optional fields are left unset so the backend applies its own defaults.
 
-const projectId = z.string().describe("Cortex project id (prj_...), from cortex.create_project");
+const projectId = z.string().describe("Cortex project id (prj_...), from cortex_create_project");
 
 const waitS = (max: number, typical: string) =>
   z.number().int().min(0).max(max).optional().describe(
     `Seconds to block waiting for the background job to finish (0-${max}, default 0 = return immediately with the job id). ` +
-      `${typical} Many MCP clients time out a tool call after about 60 s, so prefer wait_s <= 45 and then poll with cortex.get_job.`,
+      `${typical} Many MCP clients time out a tool call after about 60 s, so prefer wait_s <= 45 and then poll with cortex_get_job.`,
   );
 
 const READ: ToolAnnotations = { readOnlyHint: true, destructiveHint: false, idempotentHint: true, openWorldHint: false };
@@ -29,7 +29,7 @@ type Def = {
   backend?: (input: Record<string, unknown>) => [string, Record<string, unknown>];
 };
 
-const sessionId = z.string().describe("Robot session id (rs_...) from cortex.robot_start_episode");
+const sessionId = z.string().describe("Robot session id (rs_...) from cortex_robot_start_episode");
 const pose = z.object({
   x: z.number().describe("metres, +x forward from the robot base"),
   y: z.number().describe("metres, +y to the robot's left"),
@@ -53,7 +53,7 @@ const TOOLS: Def[] = [
     description:
       "Start a robot-learning project from a plain-language task (SO-101 arm, MuJoCo tabletop sim). " +
       "Returns the project id, a task spec with measurable success criteria, and an initial demonstration plan " +
-      "(condition cells with target counts). Use the returned project_id for every other cortex.* tool.",
+      "(condition cells with target counts). Use the returned project_id for every other cortex_* tool.",
     inputSchema: z.object({
       task_prompt: z.string().describe("What the robot should learn, in plain language, e.g. 'pick up the cube and place it in the bowl'"),
       mode: z.enum(["sim", "real"]).optional().describe(
@@ -91,7 +91,7 @@ const TOOLS: Def[] = [
     description:
       "Record scripted-expert demonstrations in the MuJoCo simulator for the given conditions. Simulation projects only: " +
       "on a 'real' project the backend refuses and a human must record with the physical robot. " +
-      "Starts a background job; pass wait_s to block, otherwise poll cortex.get_job with the returned job id.",
+      "Starts a background job; pass wait_s to block, otherwise poll cortex_get_job with the returned job id.",
     inputSchema: z.object({
       project_id: projectId,
       conditions: z.array(z.object({
@@ -100,7 +100,7 @@ const TOOLS: Def[] = [
         count: z.number().int().min(1).max(20).optional().describe("Demonstrations to record for this condition (1-20, default 1)"),
       })).describe(
         "Condition cells to record, e.g. [{cube_region:'left', lighting:'normal', count:2}]. " +
-          "cortex.create_project's plan and cortex.recommend_demonstrations suggest which cells to fill.",
+          "cortex_create_project's plan and cortex_recommend_demonstrations suggest which cells to fill.",
       ),
       auto_accept: z.boolean().optional().describe("Accept demos that succeed and pass quality checks (default true)"),
       recommendation_id: z.string().nullish().describe("If this recording fulfils a recommendation (rec_...), its id, so it is marked accepted"),
@@ -113,8 +113,8 @@ const TOOLS: Def[] = [
     title: "Analyze dataset",
     description:
       "Run quality checks, telemetry failure analysis and (optionally) VLM failure hypotheses over the project's episodes, " +
-      "and rebuild the failure clusters. Background job: pass wait_s or poll cortex.get_job. " +
-      "When it finishes, the summary is the analysis summary; read clusters with cortex.get_failure_clusters.",
+      "and rebuild the failure clusters. Background job: pass wait_s or poll cortex_get_job. " +
+      "When it finishes, the summary is the analysis summary; read clusters with cortex_get_failure_clusters.",
     inputSchema: z.object({
       project_id: projectId,
       use_vlm: z.boolean().optional().describe("Also ask a vision-language model for failure hypotheses (default true). VLM output is a hypothesis, not evidence."),
@@ -138,7 +138,7 @@ const TOOLS: Def[] = [
     description:
       "Rank what to do next for data collection: which demonstrations to collect (condition + count) and any augment/train/evaluate " +
       "suggestions, each with evidence and a support level ('evidence_backed' or 'hypothesis'). " +
-      "Replaces any earlier proposed recommendations. Act on a 'collect' recommendation with cortex.record_demonstrations, passing its recommendation_id.",
+      "Replaces any earlier proposed recommendations. Act on a 'collect' recommendation with cortex_record_demonstrations, passing its recommendation_id.",
     inputSchema: z.object({
       project_id: projectId,
       budget: z.number().int().nullish().describe("Demonstrations you can still afford to collect (default: the plan budget + 12 minus accepted episodes)"),
@@ -172,11 +172,11 @@ const TOOLS: Def[] = [
     title: "Propose training job",
     description:
       "Propose an ACT or SmolVLA training job on a dataset version, with its config, rationale and GPU-hours/cost estimate. " +
-      "This does NOT start training: the proposal must be approved by a human in the Cortex studio before cortex.launch_training_job " +
+      "This does NOT start training: the proposal must be approved by a human in the Cortex studio before cortex_launch_training_job " +
       "will run it. Show the human the estimate and ask them to approve.",
     inputSchema: z.object({
       project_id: projectId,
-      dataset_version_id: z.string().describe("Dataset version id (ds_...), from cortex.create_dataset_version or get_project_state"),
+      dataset_version_id: z.string().describe("Dataset version id (ds_...), from cortex_create_dataset_version or get_project_state"),
       policy_type: z.enum(["act", "smolvla"]).optional().describe("'act' (default; fast, single-task) or 'smolvla' (language-conditioned, ~5x slower per step)"),
       steps: z.number().int().nullish().describe("Training steps (default 20000)"),
     }),
@@ -190,7 +190,7 @@ const TOOLS: Def[] = [
       "given the operator's approval_token. Otherwise nothing is launched and the result says APPROVAL REQUIRED: stop, ask the human " +
       "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.",
     inputSchema: z.object({
-      training_job_id: z.string().describe("Training job id (tj_...), from cortex.propose_training_job"),
+      training_job_id: z.string().describe("Training job id (tj_...), from cortex_propose_training_job"),
       approval_token: z.string().nullish().describe("Operator approval token, only if the human gave you one; otherwise omit and have them approve in the studio"),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
@@ -202,7 +202,7 @@ const TOOLS: Def[] = [
       "Evaluate a policy in three parallel MuJoCo branches (baseline, shifted object, dim lighting), recording seeds, successes, " +
       "rewards and video storage keys. Use policy='scripted_expert' for a reference ceiling, or a trained checkpoint id (ck_...) " +
       "from get_project_state's training_jobs[].checkpoint_ids. Returns the evaluation id (ev_...) and its job (job.id): if it is still running " +
-      "when wait_s runs out, poll cortex.get_job with job.id. " +
+      "when wait_s runs out, poll cortex_get_job with job.id. " +
       "get_next_actions marks evaluations requires_approval: confirm with the human first unless they already asked you to run it.",
     inputSchema: z.object({
       project_id: projectId,
@@ -230,7 +230,7 @@ const TOOLS: Def[] = [
     title: "Get next actions",
     description:
       "What to do next for this project, and why. Each item has an action, reason, requires_approval and args. " +
-      "Most actions map to a cortex.<action> tool called with those args. 'review_episodes' and 'approve_training_job' are human " +
+      "Most actions map to a cortex_<action> tool called with those args. 'review_episodes' and 'approve_training_job' are human " +
       "steps in the Cortex studio: ask the human. When requires_approval is true, confirm with the human before calling the tool.",
     inputSchema: z.object({ project_id: projectId }),
     annotations: READ,
@@ -273,7 +273,7 @@ const TOOLS: Def[] = [
       "Generate demonstrations autonomously in fresh simulator seeds. collector='agent' (default): the agent planner (self-hosted VLM or GPT-6 Astra) chooses actions " +
       "through validated tools (observe, point at the cube, move, grip, verify, place); collector='oracle': the scripted IK " +
       "expert on the same kind of scenes (for A/B). Pass conditions to target weak cells, e.g. [{cube_region:'left', " +
-      "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex.get_collection_progress. Each attempt takes " +
+      "lighting:'normal'}]. Returns collection_id and job_id; poll with cortex_get_collection_progress. Each attempt takes " +
       "~5 s of sim plus model latency. A 403 means the project's planner budget is exhausted: ask the human to raise it.",
     inputSchema: z.object({
       project_id: projectId,
@@ -334,7 +334,7 @@ const TOOLS: Def[] = [
     title: "Evaluate learned policy",
     description:
       "Evaluate a trained checkpoint (ck_..., never the oracle) in three parallel MuJoCo conditions (baseline, shifted object, " +
-      "dim lighting) on held-out seeds. Returns the evaluation id and job (poll cortex.get_job). Success rates come with 95% CIs.",
+      "dim lighting) on held-out seeds. Returns the evaluation id and job (poll cortex_get_job). Success rates come with 95% CIs.",
     inputSchema: z.object({
       project_id: projectId,
       checkpoint_id: z.string().regex(/^ck_/).describe("Checkpoint id from get_project_state training_jobs[].checkpoint_ids"),
@@ -400,11 +400,11 @@ const TOOLS: Def[] = [
     name: "robot_start_episode",
     title: "Robot: start episode",
     description:
-      "Start a simulated SO-101 pick-and-place episode that YOU control (fresh seed). Then: cortex.robot_observe -> " +
-      "cortex.robot_propose_grasp (point at the red cube's centre in the overhead image) -> cortex.robot_gripper open -> " +
-      "cortex.robot_move to pregrasp -> robot_move to grasp -> robot_gripper closed -> cortex.robot_verify_grasp -> " +
-      "robot_move up to z=0.075 -> cortex.robot_observe -> cortex.robot_place (point at the green box's centre) -> " +
-      "cortex.robot_check_success -> cortex.robot_finish_episode. You never send motor commands: Cortex checks workspace, " +
+      "Start a simulated SO-101 pick-and-place episode that YOU control (fresh seed). Then: cortex_robot_observe -> " +
+      "cortex_robot_propose_grasp (point at the red cube's centre in the overhead image) -> cortex_robot_gripper open -> " +
+      "cortex_robot_move to pregrasp -> robot_move to grasp -> robot_gripper closed -> cortex_robot_verify_grasp -> " +
+      "robot_move up to z=0.075 -> cortex_robot_observe -> cortex_robot_place (point at the green box's centre) -> " +
+      "cortex_robot_check_success -> cortex_robot_finish_episode. You never send motor commands: Cortex checks workspace, " +
       "reachability, joint limits and collisions, then executes with IK. Rejected commands return an error code; adjust " +
       "and retry. Successful episodes become LeRobot demonstrations.",
     inputSchema: z.object({
@@ -498,7 +498,7 @@ const TOOLS: Def[] = [
     description:
       "Start teaching a task by describing your setup. Creates a draft project and returns typed questions about the arm, " +
       "cameras, objects, place zones, surroundings and task. Every question carries a ready-to-send `patch` for " +
-      "cortex.update_intake, so you can accept defaults or edit them. Objects named in the prompt (e.g. 'water bottle', " +
+      "cortex_update_intake, so you can accept defaults or edit them. Objects named in the prompt (e.g. 'water bottle', " +
       "'cube', 'cup') are pre-filled from a catalogue and marked as assumed until you confirm them.",
     inputSchema: z.object({
       prompt: z.string().optional().describe("The task in plain language, e.g. 'pick up the small water bottle and put it on the coaster'"),
@@ -545,7 +545,7 @@ const TOOLS: Def[] = [
     title: "Capture frame",
     description:
       "Render a camera of the built scene (top, front or wrist_cam) as an image, so you can check that the simulation " +
-      "matches the setup you described. Fix differences with cortex.update_intake, then cortex.build_simulation again.",
+      "matches the setup you described. Fix differences with cortex_update_intake, then cortex_build_simulation again.",
     inputSchema: z.object({
       project_id: projectId,
       camera: z.enum(["top", "front", "wrist_cam"]).optional(),
