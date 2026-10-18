@@ -4,6 +4,7 @@ import { scrollToSection } from "../scroll";
 
 const LINKS: [string, string][] = [
   ["How it works", "platform"],
+  ["Connect", "connect"],
   ["Agent loop", "loop"],
   ["Built on", "stack"],
   ["Safety", "safety"],

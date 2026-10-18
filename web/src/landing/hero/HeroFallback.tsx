@@ -10,7 +10,7 @@ export function HeroFallback() {
     >
       <img
         src="/robot-still.png"
-        alt=""
+        alt="Isometric line drawing of a six-axis robotic arm on a square base"
         width={820}
         height={610}
         className="h-auto w-[92%] max-w-[820px] lg:w-[57%]"

@@ -1,0 +1,45 @@
+{
+  "_comment": "Landing FAQ. One source for the React accordion, the no-JS HTML, the FAQPage JSON-LD (src/landing/staticHtml.ts) and llms.txt (scripts/gen_agent_index.py). Answers: 1-3 sentences, only what Cortex does today.",
+  "items": [
+    {
+      "id": "what",
+      "q": "What is Cortex?",
+      "a": "Cortex is an open-source (MIT) MCP server and studio for training robot manipulation policies with an AI agent. It is built on LeRobot, MuJoCo, ACT (Action Chunking Transformer) and the SO-101 (SO-ARM101) arm: your agent describes the task, and Cortex simulates it, collects demonstrations, trains an imitation-learning policy and evaluates it."
+    },
+    {
+      "id": "train",
+      "q": "How do I train a robot policy with an AI agent?",
+      "a": "Connect your agent to the Cortex MCP server, then ask for the task in plain words. The agent calls cortex.start_intake and cortex.update_intake to describe the arm, objects and goal, cortex.build_simulation for the MuJoCo scene, cortex.start_agent_collection for demonstrations, cortex.create_dataset_version and cortex.propose_training_job; training (behaviour cloning with ACT or SmolVLA) starts after a person approves the GPU job in the studio."
+    },
+    {
+      "id": "claude-code",
+      "q": "Can Claude Code train a robot?",
+      "a": "Yes, in simulation. Run claude mcp add --transport http cortex http://localhost:3000/mcp and ask Claude Code to teach the arm a task; it calls cortex.* tools and reads the results. It never sends motor commands: Cortex validates every target and executes it with inverse kinematics, and the simulator decides whether an attempt succeeded."
+    },
+    {
+      "id": "demos",
+      "q": "How do I collect demonstrations for an SO-101 with LeRobot in MuJoCo?",
+      "a": "cortex.start_agent_collection runs autonomous attempts in fresh simulator seeds, planned by a vision-language model or by the scripted IK oracle (labelled as such); only simulator-verified successes are saved, as LeRobotDataset v3 episodes. Your agent can also drive the arm itself with cortex.robot_start_episode and the cortex.robot_* tools, or import existing recordings from the Hugging Face Hub with cortex.import_demonstrations."
+    },
+    {
+      "id": "evaluate",
+      "q": "How do I evaluate a robot policy in simulation?",
+      "a": "cortex.evaluate_learned_policy runs a trained checkpoint in three seeded MuJoCo branches (baseline, shifted object, dim lighting) on held-out seeds. Success rates are reported with 95% Wilson confidence intervals, and cortex.compare_experiments gives branch-by-branch deltas and p-values between runs."
+    },
+    {
+      "id": "improve",
+      "q": "How do I improve an ACT policy with targeted demonstrations or RL?",
+      "a": "cortex.improve_policy finds the weakest measured condition of the latest evaluation, collects new demonstrations there in fresh seeds, builds a new dataset version and proposes retraining. Reinforcement learning is not an agent tool yet: the planned RL sandbox tunes the pick-and-place skill under domain randomization, its successful rollouts become demonstrations that retrain ACT, and any uplift is shown as a labelled estimate."
+    },
+    {
+      "id": "mcp",
+      "q": "Is there an MCP server for robotics?",
+      "a": "Cortex is one: a Model Context Protocol server over streamable HTTP at http://localhost:3000/mcp, exposing intake, simulation, data collection, dataset, training, evaluation and improvement tools as cortex.*. The same tools answer on REST at http://localhost:8000/api/tools, and calls are attributed to the agent in the audit log."
+    },
+    {
+      "id": "real",
+      "q": "Does it run on a real robot arm (sim-to-real)?",
+      "a": "The whole loop runs in MuJoCo today. A real SO-101 runs a trained policy only through a local bridge with an operator present, joint, velocity and workspace limits, a watchdog and an e-stop; the API and MCP cannot reach the hardware."
+    }
+  ]
+}

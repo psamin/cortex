@@ -41,7 +41,7 @@ export function LayerStack({
   mix = 0,
   uniformGap,
   className,
-  title = "Exploded diagram of the seven steps of the Cortex training loop",
+  title = `Exploded isometric diagram of the seven stacked layers of the Cortex robot-policy training loop: ${STEPS.map((s) => s.label.toLowerCase()).join(", ")}`,
 }: {
   explode: number;
   active: number;
