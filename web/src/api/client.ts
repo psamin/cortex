@@ -197,7 +197,9 @@ export const api = {
   startLivePolicy: () => post<LivePolicyStatus>("/live-policy/start"),
   stopLivePolicy: () => post<LivePolicyStatus>("/live-policy/stop"),
   livePolicyStreamUrl: (task: string, episode: number) => `${API_BASE}/live-policy/stream/${task}/${episode}`,
-  livePolicySimUrl: (task: string, seed: number) => `${API_BASE}/live-policy/sim/${task}/${seed}`,
+  /** `view`: which camera the GPU server streams (#308); left out, the server's default. */
+  livePolicySimUrl: (task: string, seed: number, view?: "both" | "front" | "wrist") =>
+    `${API_BASE}/live-policy/sim/${task}/${seed}${view ? `?view=${view}` : ""}`,
   // Physical Skills (#276): every trained policy across projects
   skills: () => get<PhysicalSkill[]>("/skills"),
   skill: (id: string) => get<PhysicalSkill>(`/skills/${encodeURIComponent(id)}`),
