@@ -63,8 +63,8 @@ There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an ag
 
 | Env var | Default | Purpose |
 |---|---|---|
-| `CORTEX_API_URL` | `http://127.0.0.1:8000/api` | Backend API base. It must be a **public** URL when the server is hosted. |
-| `CORTEX_MCP_KEY` | unset | Sent as `Authorization: Bearer ...`. Required whenever the backend is reached through a tunnel. |
+| `CORTEX_API_URL` | `http://127.0.0.1:8000/api` | Backend API base for direct mode. It is used when no runner is connected. A hosted server can leave it unset and use the runner. |
+| `CORTEX_MCP_KEY` | unset | Shared secret. It authenticates the runner link (`/relay/*`), which is disabled while the key is unset, and it is sent as `Authorization: Bearer ...` in direct mode. |
 | `CORTEX_STUDIO_URL` | `http://localhost:5173` | Studio link included in approval messages. |
 | `PORT` | `3000` | Listen port for `npm start`. |
 
@@ -117,42 +117,71 @@ For a hosted server, use its URL instead: `claude mcp add --transport http corte
 
 ## Deploy to Manufact (mcp-use cloud)
 
-A hosted MCP server **cannot reach `localhost:8000`**, because inside the Manufact container `localhost` is the container itself. The backend therefore has to be exposed first.
+A hosted MCP server **cannot reach `localhost:8000`**, because inside the Manufact container `localhost` is the container itself. There are three ways to connect them. The runner is the recommended one.
 
-1. **Pick an MCP key and give it to the backend.** Add `CORTEX_MCP_KEY=<long random string>` to `backend/.env`, or export it, then restart the backend. The backend's guard treats any request carrying `cf-connecting-ip` or `x-forwarded-for` as remote. A remote request can only reach `/api/health`, and `/api/tools*` with `Authorization: Bearer <CORTEX_MCP_KEY>`; everything else gets a 403. Without a key, remote tool calls are always refused.
-2. **Expose the backend with a tunnel.** A Cloudflare quick tunnel needs no account:
-   ```bash
-   cloudflared tunnel --url http://127.0.0.1:8000     # prints https://<random>.trycloudflare.com
-   curl https://<random>.trycloudflare.com/api/health  # should answer
-   ```
-   The quick-tunnel URL changes every time `cloudflared` restarts. When it changes, update `CORTEX_API_URL` on Manufact (step 4).
-3. **Log in and deploy** from this directory:
+| Mode | MCP server URL | Backend exposed? | URL stable across restarts? |
+|---|---|---|---|
+| **Runner** (recommended) | `https://<slug>.run.mcp-use.com/mcp` | no, the runner dials out | yes |
+| **mcp-use tunnel** (no deploy) | `https://<name>.tunnel.mcp-use.run/mcp` | no, the MCP server runs locally | yes (verified across a restart) |
+| Cloudflare quick tunnel (legacy) | `https://<slug>.run.mcp-use.com/mcp` | yes, `/api/tools` with the key | no, update `CORTEX_API_URL` every time |
+
+### Runner: hosted server, local backend, no tunnel
+
+The local runner (`backend/cortex/mcp_runner.py`) opens an outbound HTTPS link to the hosted server and long-polls it. The server hands each `cortex.*` call to the runner (`src/relay.ts`). The runner POSTs it to the local backend's `/api/tools/<name>` and sends the response back, so results, error mapping and approval handling are identical to direct mode. Nothing listens on a public port.
+
+1. **Pick a shared key.** Run `openssl rand -hex 24`, then put `CORTEX_MCP_KEY=<key>` in the repo-root `.env`. The runner reads it from there.
+2. **Deploy once** from this directory:
    ```bash
    cd mcp
    npx mcp-use login
    npx mcp-use deploy --no-github --name cortex \
-     --env CORTEX_API_URL=https://<random>.trycloudflare.com/api \
-     --env CORTEX_MCP_KEY=<same key as the backend> \
+     --env CORTEX_MCP_KEY=<same key> \
      --env CORTEX_STUDIO_URL=http://localhost:5173
    ```
    - `--no-github` uploads this folder as a tarball. `node_modules`, `.env*` and git-ignored paths are left out.
    - Manufact detects Node from `package.json` and `package-lock.json`, runs `npm run build`, then `npm start` on port 3000.
    - To deploy from GitHub instead, run `npx mcp-use deploy --root-dir mcp --name cortex --env ...` from a pushed branch. Do not pass `-y` unless you want the CLI to `git add`, commit and push for you.
    - The CLI prints the server URL, `https://<slug>.run.mcp-use.com/mcp`. Follow the build with `npx mcp-use deployments logs <id> --build --follow`.
-4. **Change env vars later** with `npx mcp-use servers env add CORTEX_API_URL=<new url> --server <id>` or in the dashboard, then `npx mcp-use deployments restart <id>`. Env changes only apply after a restart or a redeploy.
-5. **Connect:** `claude mcp add --transport http cortex https://<slug>.run.mcp-use.com/mcp`.
+   - Leave `CORTEX_API_URL` unset. Whenever a runner is connected, every call goes through it.
+3. **Start the stack with the runner:**
+   ```bash
+   scripts/dev.sh --runner https://<slug>.run.mcp-use.com
+   # or just the runner, next to a backend that is already running:
+   cd backend && uv run python -m cortex.mcp_runner --server https://<slug>.run.mcp-use.com
+   ```
+   It logs `connected to ...`, then one line per tool call. `--api` points it at a backend other than `http://127.0.0.1:8000/api`.
+4. **Connect:** `claude mcp add --transport http cortex https://<slug>.run.mcp-use.com/mcp`.
+
+How transport selection works (`src/backend.ts`): when a runner has an open poll (or polled within the last 5 s), calls go through it. Otherwise the server POSTs to `CORTEX_API_URL` directly, which is how local dev and the Cloudflare mode keep working unchanged. If neither works, the tool returns `isError: true` with `Cannot reach the Cortex backend: no local runner is connected and <url> is unreachable ... Start the local runner ...`. A call that no runner picks up within 30 s fails with a message saying the runner seems to have disconnected.
+
+The link's security:
+
+- `POST /relay/poll` and `POST /relay/result` need `Authorization: Bearer <CORTEX_MCP_KEY>`. The key is compared in constant time.
+- A wrong key gets a 401, and the runner exits with code 2 instead of retrying.
+- Without `CORTEX_MCP_KEY` on the server, the relay is disabled (503).
+- The runner forwards only `Content-Type`, `Accept` and `X-Cortex-*` headers to the backend.
+- The runner reaches the backend over `127.0.0.1`, so the backend's remote guard never sees it as remote.
+
+### mcp-use tunnel: no deploy at all
+
+`npm run dev -- --tunnel`, or `scripts/dev.sh --mcp-tunnel`, runs the MCP server locally and exposes it at `https://<name>.tunnel.mcp-use.run/mcp` through mcp-use's relay. You need no account, and nothing is deployed. The MCP server still reaches `localhost:8000` directly. The reservation is saved in `mcp/.mcp-use/state/tunnel.json` (git-ignored), so a restart reattaches to the **same** URL. We checked this on 2026-10-18: a tool call worked through the tunnel, and after a kill and restart the server came back at the same subdomain. The URL is only up while your laptop is running the server, and the endpoint has no auth (see below).
+
+### Cloudflare quick tunnel (legacy)
+
+`scripts/dev.sh --tunnel` exposes the backend with `cloudflared tunnel --url http://127.0.0.1:8000` and prints `https://<random>.trycloudflare.com/api`. Deploy with `--env CORTEX_API_URL=<that>/api --env CORTEX_MCP_KEY=<key>`. Remote requests can only reach `/api/health`, and `/api/tools*` with `Authorization: Bearer <CORTEX_MCP_KEY>`. The URL changes every time `cloudflared` restarts. When it does, run `npx mcp-use servers env add CORTEX_API_URL=<new url> --server <id>` and then `npx mcp-use deployments restart <id>`. Env changes only apply after a restart or a redeploy.
 
 Notes:
 
-- The Manufact free plan scales to zero, so expect a cold start on the first call.
-- **The deployed `/mcp` endpoint has no auth of its own.** Anyone with the URL can call the `cortex.*` tools through it: create projects, record simulations, run evaluations. Training still cannot launch without a human approval in the studio. Treat the URL as a secret, and stop the tunnel when you are done.
-- An alternative with no deploy is `npm run dev -- --tunnel` (`mcp-use start --tunnel` also works). This exposes the local MCP server at `https://<name>.tunnel.mcp-use.run/mcp`, and because the server runs locally it still reaches `localhost:8000` with no backend tunnel. This was not tested here.
+- The Manufact free plan scales to zero, so expect a cold start on the first call. A runner that is polling keeps the server warm.
+- **The deployed `/mcp` endpoint has no auth of its own.** Anyone with the URL can call the `cortex.*` tools through it, and with a runner connected those calls reach your laptop's backend: they can create projects, record simulations and run evaluations. Training still cannot launch without a human approval in the studio. Treat the URL as a secret, and stop the runner when you are done.
+- The relay keeps its queue in memory. Run the hosted server as a single instance. A call that is in flight when the server restarts fails, and the runner reconnects on its own.
 
 ## Layout
 
 ```
 index.ts         MCPServer setup (name "cortex"), registers tools and the prompt
-src/backend.ts   POST /tools/{name}: headers, error mapping, approval handling
+src/backend.ts   POST /tools/{name} (runner or direct): headers, error mapping, approval handling
+src/relay.ts     /relay/poll and /relay/result: the authenticated long-poll link to the local runner
 src/tools.ts     zod input schemas mirroring GET /api/tools, descriptions, annotations
 src/prompts.ts   cortex.teach_task
 ```
