@@ -106,7 +106,8 @@ def episode(env, policy, seed: int, record: bool, presenter: Presenter | None = 
             video.append(presenter.frame(obs))
         nxt, _, success, _, _ = env.step(nudge(action) if nudge else action, render=render)
         obs = nxt if nxt is not None else obs
-        finished = getattr(policy, "done", False) or success
+        # an expert demo runs its whole motion (back out, return home); a learned policy stops on success
+        finished = policy.done if hasattr(policy, "done") else success
         held = held + 1 if finished else 0
         if held >= SETTLE:
             break

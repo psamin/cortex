@@ -88,3 +88,15 @@ def test_noise_moves_the_executed_command_but_records_the_clean_one(monkeypatch)
     assert np.allclose(recorded, recorded[0])  # the expert's clean command every step
     assert np.abs(np.stack(sent)[:, :5] - recorded[:, :5]).max() > 0.5  # what ran was nudged
     assert np.allclose(np.stack(sent)[:, 5], recorded[:, 5])  # the gripper is never nudged
+
+
+def test_an_expert_demo_runs_its_whole_motion_not_just_until_success():
+    configure_gl()
+
+    class Slow(_Oracle):
+        @property
+        def done(self):
+            return self.n >= 20  # e.g. backing out and going home after the task already counts as done
+
+    ep = run.episode(_Env(), Slow(), 0, record=True)
+    assert ep["success"] and len(ep["rows"]) >= 20 + run.SETTLE - 1  # success came at step 5
