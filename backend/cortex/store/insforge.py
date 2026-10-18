@@ -33,6 +33,7 @@ class InsForgeError(RuntimeError):
 class _Client:
     def __init__(self, base_url: str, api_key: str, transport: httpx.AsyncBaseTransport | None = None):
         self.base = base_url.rstrip("/")
+        self.transport = transport
         self.http = httpx.AsyncClient(
             base_url=self.base, timeout=60, transport=transport,
             headers={"Authorization": f"Bearer {api_key}"})
@@ -176,7 +177,19 @@ class InsForgeBlobStore:
         return key
 
     async def get_bytes(self, key: str) -> bytes:
-        return (await self.c.req("GET", self._obj(key))).content
+        """The object's bytes. InsForge Cloud answers a download with a redirect to its CDN: follow it (without our
+        API key, which must not go off-host; the CDN URL is presigned) instead of keeping the redirect page as the
+        object, which once corrupted every chat history fetched from storage (#340)."""
+        r = await self.c.req("GET", self._obj(key))
+        if r.is_redirect:
+            loc = str(httpx.URL(self.c.base).join(r.headers.get("location", "")))
+            async with httpx.AsyncClient(timeout=60, transport=self.c.transport, follow_redirects=True) as h:
+                r = await h.get(loc)
+            if r.status_code >= 400:
+                raise InsForgeError(f"GET {key} (CDN) -> {r.status_code}")
+        if r.content.startswith(b"Found. Redirecting to"):
+            raise InsForgeError(f"GET {key} returned a redirect page, not the object")
+        return r.content
 
     async def url(self, key: str, expires_s: int = 3600) -> str:
         """Presigned URL on S3-backed InsForge (Cloud). Self-hosted local-disk
