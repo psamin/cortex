@@ -90,10 +90,12 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
     return tj
 
 
-async def approve(ctx: Ctx, tj_id: str, approver: str, actor: str, token: str | None) -> TrainingJob:
+async def approve(ctx: Ctx, tj_id: str, approver: str, actor: str, token: str | None,
+                  human_verified: bool = False) -> TrainingJob:
     tj = await _get(ctx, tj_id)
-    # gui = a human click; autopilot = the project's standing approval, checked by the caller.
-    if actor not in ("gui", "autopilot"):
+    # gui = a human click; autopilot = the project's standing approval, checked by the caller;
+    # human_verified = a human click in an MCP App view, proven by a single-use nonce (mcp_views).
+    if actor not in ("gui", "autopilot") and not human_verified:
         secret = ctx.settings.cortex_approval_secret
         if not secret or token != secret:
             await ctx.audit(actor, "approve_training_job", tj.project_id, {"id": tj_id}, "denied",

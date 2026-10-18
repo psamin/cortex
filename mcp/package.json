@@ -17,10 +17,15 @@
   },
   "dependencies": {
     "mcp-use": "2.10.1",
+    "react": "19.2.0",
+    "react-dom": "19.2.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
     "@types/node": "22.20.5",
-    "typescript": "7.0.2"
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.2",
+    "typescript": "7.0.2",
+    "vite": "8.1.6"
   }
 }

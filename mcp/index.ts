@@ -1,6 +1,7 @@
 import { MCPServer } from "mcp-use";
 import { registerPrompts } from "./src/prompts.js";
 import { registerTools } from "./src/tools.js";
+import { registerViews } from "./src/views.js";
 
 // Thin MCP layer over the Cortex backend tool registry: every cortex.<x> tool
 // forwards to POST {CORTEX_API_URL}/tools/<x>. Structured commands and
@@ -43,6 +44,7 @@ const server = new MCPServer({
 });
 
 registerTools(server);
+registerViews(server); // MCP Apps views rendered in the agent's chat (#119)
 registerPrompts(server);
 
 export default server;

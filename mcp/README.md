@@ -29,6 +29,22 @@ Media is never streamed. Episodes and evaluations come back as ids and storage k
 | `cortex.build_simulation` | `build_simulation` | builds the MuJoCo scene, checks feasibility; returns a preview image |
 | `cortex.capture_frame` | `capture_frame` | read-only; returns an image of `top`, `front` or `wrist_cam` |
 
+## Views in the agent's chat (MCP Apps)
+
+Three tools render interactive views inside MCP Apps hosts (Claude, ChatGPT, VS Code, the mcp-use Inspector), built with mcp-use views under `views/<name>/view.tsx`. Hosts without MCP Apps get the same text summary as before.
+
+| Tool | View | Shows |
+|---|---|---|
+| `cortex.show_collection` | `collection` | The latest MuJoCo frame, successes vs attempts, model calls, spend and recent attempts. Refreshes every 2 s while the collection runs. |
+| `cortex.show_evaluation` | `evaluation` | Success per condition with its Wilson 95% interval, measured failure modes, and the weakest condition (only when conditions differ). Refreshes while branches run. |
+| `cortex.show_training_review` | `approval` | A proposed training job (GPU hours, cost, dataset, rationale) with an **Approve** button. |
+
+The `cortex.view_*` tools have `visibility: "app"`: the views call them to refresh or approve, and hosts hide them from the model.
+
+**Only a human can approve through the view.** `show_training_review` gets a single-use approval nonce from the backend (10-minute expiry, bound to that training job) and puts it only in the result's `_meta`, which MCP Apps hosts give to the view and keep out of the model's context. It is never in `content` or `structuredContent`. The Approve button sends it back through `cortex.view_approve_training`, and the backend records the approval as "human click in the MCP App view". A wrong, reused or expired nonce is refused. The model never sees the nonce, so `cortex.launch_training_job` still answers HUMAN APPROVAL REQUIRED until someone clicks. This relies on the host keeping `_meta` from the model, as the MCP Apps spec requires; the studio and the operator token remain the other ways to approve.
+
+Try them in the Inspector (`npm run dev`, then http://localhost:3000/mcp/inspector): run `cortex.show_collection` with a project id and switch the response to **Component (MCP Apps)**. In dev mode each view compiles on first use, which takes a few seconds.
+
 There is also one prompt, `cortex.teach_task(task, project_id?)`. It walks an agent through the whole loop: create the project, record demonstrations, analyze, recommend, build a dataset version, propose training, ask the human for approval, evaluate in simulation, compare, and get the next actions.
 
 **Approval.** `cortex.launch_training_job` only runs a job that a human has approved in the studio. If the job is not approved, the backend answers `403 {approval_required: true}`. The server turns that into a normal, non-error result that says `HUMAN APPROVAL REQUIRED`. The result includes `next_step` and `studio_url` (from `CORTEX_STUDIO_URL`), so the agent asks the human to approve instead of retrying. Other errors (404, 422, unreachable backend, remote access refused) come back as `isError: true`, with the backend's `detail`.
