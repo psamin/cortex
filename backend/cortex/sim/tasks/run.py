@@ -13,8 +13,8 @@ Recording is parallel: n shard processes take seeds shard, shard + n, ... and ``
 datasets into one (the rendering, not the physics, is the bottleneck, so this scales with processes).
 
 Demos use seeds 0, 1, ... and keep only the oracle's successful episodes (a LeRobotDataset v3 with
-front + wrist video, 6-D state and action). Evaluation runs the checkpoint closed loop on seeds from
-100000 up, which training never saw, and writes metrics.json plus videos. ``--examples`` also renders
+front + wrist video, state and action named by the env's ``joint_names``, SO-101's six by default).
+Evaluation runs the checkpoint closed loop on seeds from 100000 up, which training never saw, and writes metrics.json plus videos. ``--examples`` also renders
 the first few demos with the presentation camera, plus the policy's own camera views as insets.
 """
 
@@ -37,18 +37,29 @@ SETTLE = 30  # control steps held after the motion ends, so the verifier sees th
 GRIP_HALF = 30.0  # gripper command above this is open (expert.GRIP_OPEN = 60, GRIP_CLOSED = 0)
 
 
-class Nudge:
-    """Smooth (Ornstein-Uhlenbeck) noise on the five arm joints, in degrees: full size while the gripper is
-    open (reaching), 30% while it is closed (holding / turning), so contact phases are not wrecked."""
+def joint_names(env) -> list[str]:
+    """The env's state/action names (arm joints, then the gripper or suction); SO-101's by default."""
+    return list(getattr(env, "joint_names", JOINTS))
 
-    def __init__(self, rng: np.random.Generator, deg: float, theta: float = 0.15):
-        self.rng, self.deg, self.theta = rng, deg, theta
-        self.x = np.zeros(5)
+
+def so101_holding(action: np.ndarray) -> bool:
+    return bool(action[-1] <= GRIP_HALF)
+
+
+class Nudge:
+    """Smooth (Ornstein-Uhlenbeck) noise on the arm joints (all but the last, the gripper), in degrees: full
+    size while reaching, 30% while holding (``holding(action)``; SO-101: gripper closed), so contact phases
+    are not wrecked."""
+
+    def __init__(self, rng: np.random.Generator, deg: float, theta: float = 0.15, arm: int = 5,
+                 holding=so101_holding):
+        self.rng, self.deg, self.theta, self.arm, self.holding = rng, deg, theta, arm, holding
+        self.x = np.zeros(arm)
 
     def __call__(self, action: np.ndarray) -> np.ndarray:
-        self.x += -self.theta * self.x + self.deg * np.sqrt(2 * self.theta) * self.rng.standard_normal(5)
+        self.x += -self.theta * self.x + self.deg * np.sqrt(2 * self.theta) * self.rng.standard_normal(self.arm)
         out = np.array(action, dtype=np.float32, copy=True)
-        out[:5] += (1.0 if out[5] > GRIP_HALF else 0.3) * self.x
+        out[:self.arm] += (0.3 if self.holding(out) else 1.0) * self.x
         return out
 
 
@@ -101,7 +112,8 @@ def episode(env, policy, seed: int, record: bool, presenter: Presenter | None = 
     """``seed`` sets the layout; ``noise_seed`` (default: the same) sets the exploration noise, so one practice
     layout can be recorded many times with different recoveries."""
     obs = env.reset(seed)
-    nudge = Nudge(np.random.default_rng((seed if noise_seed is None else noise_seed) + 7919), noise_deg) \
+    nudge = Nudge(np.random.default_rng((seed if noise_seed is None else noise_seed) + 7919), noise_deg,
+                  arm=len(joint_names(env)) - 1, holding=getattr(env, "holding", so101_holding)) \
         if noise_deg > 0 else None
     policy.reset(env, obs, seed)
     render = record or presenter is not None or getattr(policy, "needs_pixels", True)
@@ -134,11 +146,12 @@ def demos(args: argparse.Namespace) -> None:
     env, oracle = make(args.task, *_size(args.size))
     root = Path(args.root)
     img = {"dtype": "video", "shape": (*_size(args.size), 3), "names": ["height", "width", "channels"]}
-    ds = LeRobotDataset.create(repo_id=f"cortex/sim_{args.task}", fps=FPS, root=root, robot_type="so101_follower",
-                               use_videos=True, features={
-                                   "observation.images.front": img, "observation.images.wrist": img,
-                                   "observation.state": {"dtype": "float32", "shape": (6,), "names": JOINTS},
-                                   "action": {"dtype": "float32", "shape": (6,), "names": JOINTS}})
+    names = joint_names(env)
+    vec = {"dtype": "float32", "shape": (len(names),), "names": names}
+    ds = LeRobotDataset.create(repo_id=f"cortex/sim_{args.task}", fps=FPS, root=root,
+                               robot_type=getattr(env, "robot_type", "so101_follower"), use_videos=True,
+                               features={"observation.images.front": img, "observation.images.wrist": img,
+                                         "observation.state": vec, "action": dict(vec)})
     ex_dir = Path(args.examples) if args.examples else None
     if ex_dir:
         ex_dir.mkdir(parents=True, exist_ok=True)

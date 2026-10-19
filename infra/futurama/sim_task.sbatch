@@ -21,7 +21,7 @@ cd "$JOB_DIR"
 SCR="/dev/shm/cortex-${SLURM_JOB_ID}"
 mkdir -p "$SCR"
 trap 'rm -rf "$SCR"' EXIT INT TERM
-export UV_CACHE_DIR="$SCR/uv" HF_HOME="$SCR/hf" TORCHINDUCTOR_CACHE_DIR="$SCR/inductor" TRITON_CACHE_DIR="$SCR/triton" \
+export UV_CACHE_DIR="$SCR/uv" HF_HOME="$SCR/hf" CORTEX_CACHE="$SCR/cache" TORCHINDUCTOR_CACHE_DIR="$SCR/inductor" TRITON_CACHE_DIR="$SCR/triton" \
        MUJOCO_GL=egl PYOPENGL_PLATFORM=egl PYTHONPATH="$JOB_DIR/code" PATH="$SCR/bin:$HOME/.local/bin:$PATH"
 T="$JOB_DIR/$TASK"
 echo "[sim] node=$(hostname -s) gpu=$(nvidia-smi --query-gpu=name --format=csv,noheader | head -1) mode=$MODE task=$TASK"
