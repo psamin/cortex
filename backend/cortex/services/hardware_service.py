@@ -114,11 +114,13 @@ async def start_policy(ctx: Ctx, project: Project, req: PolicyRunRequest) -> dic
     ck = await ctx.repo.get("checkpoints", req.checkpoint_id, Checkpoint)
     if ck is None or ck.project_id != project.id:
         raise NotFound(f"checkpoint {req.checkpoint_id}")
+    from ..sim.policies import inference_device
     from .training_service import checkpoint_dir
 
     path = checkpoint_dir(ctx, ck)
     if not (path / "config.json").exists():
         raise FileNotFoundError(f"checkpoint files for {ck.id} are not on this machine ({path})")
+    inference_device()  # no GPU here: refuse before the arm worker starts (#290)
     run = await _launch(ctx, project, "policy", {"mode": "policy", "episodes": req.episodes,
                                                  "episode_s": req.episode_s},
                         {"record": False, "checkpoint_path": str(path)}, await _transfer_warnings(ctx, ck))

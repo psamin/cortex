@@ -463,8 +463,10 @@ async def _realise(ctx: Ctx, project: Project, sb: RLSandbox, rnd: RLRound, acto
     comps = paired_compare(before["branches"], after["branches"], target_name=sb.weakness.key)
     target = next((c for c in comps if c.is_target), None)
     if target is None:
+        why = next((b.error for e in evs for b in e["branches"] if b.error), None)  # e.g. no GPU here (#290)
         rnd.status = "retrain_proposed"
-        await _save_round(ctx, rnd, "the weak condition has no finished paired result; call again to relaunch")
+        await _save_round(ctx, rnd, "the weak condition has no finished paired result"
+                          + (f" ({why})" if why else "") + "; call again to relaunch")
         return
     rnd.comparisons = comps
     rnd.realised_uplift, rnd.p_value = target.delta, target.p_value

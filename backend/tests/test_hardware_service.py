@@ -106,13 +106,38 @@ def test_not_ready_lists_what_is_missing(tmp_path, monkeypatch):
     asyncio.run(run())
 
 
-def test_policy_run_checks_the_checkpoint_warns_and_runs_under_the_deadman(tmp_path, ready):
+def test_policy_run_refuses_without_a_gpu_before_the_arm_worker_starts(tmp_path, ready, monkeypatch):
+    """#290: the studio shows the reason on the Start button; no worker is launched, so the arm is never touched."""
+    from cortex.errors import UserError
+    from cortex.models import Checkpoint
+    from cortex.sim import policies
+
+    monkeypatch.delenv(policies.CPU_FOR_TESTS, raising=False)
+    monkeypatch.setattr(policies, "has_cuda", lambda: False)
+
+    async def run():
+        ctx = await build_ctx(Settings(data_dir=tmp_path, cortex_enable_hardware=True, _env_file=None))
+        p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
+        (tmp_path / "ck").mkdir()
+        (tmp_path / "ck" / "config.json").write_text('{"type": "act"}')
+        ck = Checkpoint(project_id=p.id, training_job_id=None, policy_type="act", step=1, path=str(tmp_path / "ck"))
+        await ctx.repo.save("checkpoints", ck)
+        with pytest.raises(UserError, match="Trained policies run on the GPU cluster, not this Mac"):
+            await hs.start_policy(ctx, p, hs.PolicyRunRequest(checkpoint_id=ck.id, operator_confirmed=True))
+        assert hs.RUN is None
+    asyncio.run(run())
+
+
+def test_policy_run_checks_the_checkpoint_warns_and_runs_under_the_deadman(tmp_path, ready, monkeypatch):
     from tiny_act import make_tiny_act
 
     from cortex.models import (
         Checkpoint, Condition, DatasetEpisodeLink, DatasetVersion, Episode, EpisodeSource, ResourceEstimate,
         TrainingJob,
     )
+    from cortex.sim.policies import CPU_FOR_TESTS
+
+    monkeypatch.setenv(CPU_FOR_TESTS, "1")  # the tiny fake ACT runs on CPU here; real policies need the GPU (#290)
 
     async def run():
         ctx = await build_ctx(Settings(data_dir=tmp_path, cortex_enable_hardware=True, _env_file=None))

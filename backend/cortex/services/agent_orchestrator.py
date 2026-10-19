@@ -359,7 +359,8 @@ async def t_eval(ctx, a, actor):
                 break
             await asyncio.sleep(2)
     ev = await simulation_runner.get_evaluation(ctx, run.id)
-    br = {b.spec.name: (f"{b.result.successes}/{b.result.n}" if b.result else str(b.status)) for b in ev["branches"]}
+    br = {b.spec.name: (f"{b.result.successes}/{b.result.n}" if b.result else b.error or str(b.status))
+          for b in ev["branches"]}
     j = ctx.jobs.get(run.job_id) if run.job_id else None
     return {"summary": f"Evaluation {run.id} ({run.policy_label}): {br}", "ref_ids": [run.id],
             "job": j.model_dump() if j else None,
