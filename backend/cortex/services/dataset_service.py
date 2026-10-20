@@ -149,12 +149,14 @@ async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRe
         for p in root.rglob("*"):
             if p.is_file():
                 await ctx.publish_file(str(p.relative_to(ctx.data_dir)))
-        await ctx.repo.save("dataset_versions", ds, status="ready")
         for ln in ds.links:
             lid = f"{ds.id}_{ln.lerobot_episode_index}"
             await ctx.store.put("dataset_episode_links", {
                 "id": lid, "project_id": project.id, "status": ln.split,
                 "data": {"id": lid, "dataset_version_id": ds.id, **ln.model_dump(mode="json")}})
+        # last: a 'ready' row means its files and links are all written. A restart part-way leaves no row, so the
+        # build is simply run again (#365).
+        await ctx.repo.save("dataset_versions", ds, status="ready")
         ctx.changed(project.id, "dataset_versions", ds.id)
         await ctx.audit(actor, "create_dataset_version", project.id, req.model_dump(mode="json"), "ok",
                         f"{ds.name}: {ds.num_source_episodes} source episodes, {len(ds.links)} LeRobot episodes")
