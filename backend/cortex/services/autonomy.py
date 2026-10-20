@@ -105,23 +105,41 @@ def cluster_needs_click(ctx: Ctx, tj: TrainingJob) -> bool:
     return tj.backend == "futurama_slurm" and not ctx.settings.cortex_autonomy_cluster
 
 
-def mode_rules(project: Project) -> str:
-    """The studio agent's instructions for the project's mode (system-prompt lines)."""
+def cluster_waits_for_click(ctx: Ctx, project: Project) -> bool:
+    """Would this project's training wait for a click even inside the standing approval? (cluster_needs_click
+    for the backend a proposal would get.)"""
+    return (training_service.resolve_backend(ctx, project) == "futurama_slurm"
+            and not ctx.settings.cortex_autonomy_cluster)
+
+
+def mode_rules(project: Project, ctx: Ctx | None = None) -> str:
+    """The studio agent's instructions for the project's mode (system-prompt lines). With `ctx` the training line
+    matches what approve_if_covered will actually do: on the shared cluster it never starts training by itself
+    unless CORTEX_AUTONOMY_CLUSTER is on, so the agent must not tell the user it has (#350)."""
     pol = project.autopilot
     if not is_autonomous(project):
         return ("- MANUAL MODE (the user's choice): do one stage per turn, then stop and suggest the next step.\n"
                 "- Training on the GPU cluster needs the human's approval in the app: propose it, then tell the "
                 "user to approve.")
+    if ctx is not None and cluster_waits_for_click(ctx, project):
+        training = ("- Training runs on the shared Futurama cluster, and cluster jobs always wait for the user's click "
+                    "(CORTEX_AUTONOMY_CLUSTER is off): propose it, then tell the user in one sentence to approve it "
+                    "on the training card, and end your turn. Never say training has started until "
+                    "cortex_get_project_state shows it queued or running. Spend outside the standing approval, a "
+                    "used-up planner budget, and any real-robot motion need the human too: the app shows them a "
+                    "card, so say in one sentence what needs them and stop.\n")
+    else:
+        training = (f"- Training inside the project's standing approval (at most {pol.max_gpu_hours_per_job} "
+                    f"GPU-hours, {'paid GPUs allowed' if pol.allow_paid_jobs else 'free GPUs only'}) is approved and "
+                    f"started by Cortex as soon as you propose it, so don't ask the user to approve it. Spend outside "
+                    f"it, a used-up planner budget, and any real-robot motion need the human: the app shows them a "
+                    f"card, so say in one sentence what needs them and stop.\n")
     return (f"- AUTONOMOUS MODE (the user's choice): run the whole loop without waiting on the user. Don't ask "
             f"questions or offer options; pick sensible defaults and keep going: collect demos in sim, build the "
             f"dataset, train, evaluate, then improve the weakest condition. Stop when every condition reaches "
             f"{pol.target_success_rate:.0%} or after {pol.max_iterations} improvement rounds.\n"
-            f"- Training inside the project's standing approval (at most {pol.max_gpu_hours_per_job} GPU-hours, "
-            f"{'paid GPUs allowed' if pol.allow_paid_jobs else 'free GPUs only'}) is approved and started by Cortex "
-            f"as soon as you propose it, so don't ask the user to approve it. Spend outside it, a used-up planner "
-            f"budget, and any real-robot motion need the human: the app shows them a card, so say in one sentence "
-            f"what needs them and stop.\n"
-            f"- When you start a long job, end your turn: Cortex wakes you with the result and you continue.")
+            + training +
+            "- When you start a long job, end your turn: Cortex wakes you with the result and you continue.")
 
 
 def notice(tone: str, text: str, ref_ids: list[str] | None = None) -> dict[str, Any]:

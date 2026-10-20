@@ -249,3 +249,18 @@ def test_cluster_training_waits_for_a_click_unless_allowed(tmp_path):
         cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob)
         assert cur.status == JobStatus.proposed and row["tone"] == "needs_you" and "cluster" in row["text"]
     run(go())
+
+
+async def test_mode_rules_dont_promise_auto_start_when_cluster_jobs_wait_for_a_click(tmp_path):
+    """#350: with Futurama and the default settings, approve_if_covered never starts training by itself."""
+    from cortex.config import Settings
+    from cortex.context import build_ctx
+
+    p = project_service.create_project(CreateProjectRequest(task_prompt="pick up the cube"))
+    ctx = await build_ctx(Settings(data_dir=tmp_path, futurama_ssh_host="futurama", _env_file=None))
+    rules = autonomy.mode_rules(p, ctx)
+    assert "don't ask the user to approve" not in rules and "wait for the user's click" in rules
+    ctx.settings.cortex_autonomy_cluster = True
+    assert "don't ask the user to approve" in autonomy.mode_rules(p, ctx)
+    ctx2 = await build_ctx(Settings(data_dir=tmp_path / "b", futurama_ssh_host=None, _env_file=None))
+    assert "wait for the user's click" not in autonomy.mode_rules(p, ctx2)  # no cluster: manual backend

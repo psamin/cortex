@@ -172,7 +172,7 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
            "--mcp-config", str(mcp_cfg), "--strict-mcp-config",
            "--allowedTools", "mcp__cortex__*,TodoWrite", "--max-turns", str(MAX_TURNS),
            "--append-system-prompt", SYSTEM.format(pid=pid, name=project.name, goal=project.spec.goal,
-                                                     mode_rules=autonomy.mode_rules(project))]
+                                                     mode_rules=autonomy.mode_rules(project, ctx))]
     if ctx.settings.claude_code_model:
         cmd += ["--model", ctx.settings.claude_code_model]
     thread = await chat_store.current(ctx, pid, tid)  # each chat thread is its own Claude Code session

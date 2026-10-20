@@ -85,6 +85,12 @@ def episodes_arg(eps: list[int]) -> str:
     return "[" + ",".join(str(i) for i in eps) + "]"
 
 
+def resolve_backend(ctx: Ctx, project: Project) -> str:
+    """Where this project's training runs: its Setup choice, or Futurama when an ssh host is configured."""
+    chosen = project.infra.training_backend
+    return chosen if chosen != "auto" else ("futurama_slurm" if ctx.settings.futurama_ssh_host else "manual")
+
+
 async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_type: str = "act",
                   steps: int | None = None, actor: str = "gui", base_checkpoint_id: str | None = None) -> TrainingJob:
     """Propose training a policy. With `base_checkpoint_id` the run continues fine-tuning that policy (from any
@@ -98,8 +104,7 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
     if base is not None:
         policy_type = base.policy_type if base.policy_type in ("act", "smolvla") else policy_type
     infra = project.infra
-    backend = infra.training_backend if infra.training_backend != "auto" else (
-        "futurama_slurm" if ctx.settings.futurama_ssh_host else "manual")
+    backend = resolve_backend(ctx, project)
     if backend == "futurama_slurm" and not ctx.settings.futurama_ssh_host:
         raise ValueError("Training on Futurama was chosen, but FUTURAMA_SSH_HOST is not set in .env.")
     steps = steps or (20_000 if policy_type == "act" else 20_000)
