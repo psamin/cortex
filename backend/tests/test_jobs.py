@@ -82,3 +82,34 @@ def test_shutdown_ends_workers_and_reports_the_job_as_interrupted(tmp_path):
     assert proc.returncode is not None  # the worker did not outlive the backend
     assert job.status == "running"  # not "stopped by user", and not a worker failure
     assert JobManager(EventBus(), persist=path).get(job.id).error.startswith("It stopped because Cortex restarted")
+
+
+async def test_stopping_a_worker_that_just_exited_is_still_a_stop():
+    """#363: on Windows, signalling a process that exited a moment ago raises ProcessLookupError."""
+    from cortex.services.jobs import EventBus, JobManager
+
+    class Gone:
+        returncode = None  # not reaped yet
+
+        def terminate(self):
+            raise ProcessLookupError
+
+        kill = terminate
+
+        async def wait(self):
+            self.returncode = 0
+            return 0
+
+    jm = JobManager(EventBus())
+    started = asyncio.Event()
+
+    async def work(job):
+        jm.procs[job.id].append(Gone())
+        started.set()
+        await asyncio.sleep(3600)
+
+    job = jm.submit("collect", "prj_1", work)
+    await started.wait()
+    await jm.cancel(job.id)
+    await asyncio.sleep(0.05)
+    assert job.status == "cancelled"

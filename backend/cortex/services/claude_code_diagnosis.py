@@ -10,6 +10,7 @@ as unverified hypotheses; a failed or timed-out run records an error, never inve
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import shutil
 from pathlib import Path
@@ -89,7 +90,8 @@ async def run_claude(prompt: str, workdir: Path, model: str | None = None) -> st
     try:
         out, err = await asyncio.wait_for(proc.communicate(), TIMEOUT_S)
     except TimeoutError:
-        proc.kill()
+        with contextlib.suppress(ProcessLookupError):  # it may have exited just now (#363)
+            proc.kill()
         await proc.wait()
         raise TimeoutError(f"Claude Code did not answer within {TIMEOUT_S} s") from None
     if proc.returncode:
