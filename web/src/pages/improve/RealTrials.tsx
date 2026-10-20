@@ -140,7 +140,10 @@ function CheckpointRow({ row }: { row: SimRealRow }) {
   return (
     <tr className="border-t border-line-soft">
       <td className="py-1.5 font-mono text-2xs">{row.checkpoint_id}</td>
-      <td className="py-1.5 text-ink">{rateText(row.real)}</td>
+      <td className="py-1.5 text-ink">
+        {rateText(row.real)}
+        {row.agent_logged > 0 && <span className="ml-1.5 text-2xs text-ink-3">· {row.agent_logged} via agent</span>}
+      </td>
       <td className="py-1.5 text-ink-2">{row.sim ? rateText(row.sim) : <span className="text-ink-4">not evaluated</span>}</td>
       <td className={cn("py-1.5", row.gap != null && row.gap < -0.15 ? "text-caution" : "text-ink-2")}>{gapText(row.gap)}</td>
     </tr>

@@ -1034,6 +1034,8 @@ export interface SimRealRow {
   checkpoint_id: string;
   condition: string;
   real: TrialRate;
+  /** how many of the real trials an agent recorded from a person's report */
+  agent_logged: number;
   sim: TrialRate | null;
   gap: number | null;
 }
