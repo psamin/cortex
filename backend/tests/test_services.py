@@ -38,14 +38,18 @@ def _ep(i, region="center", light="normal"):
                    success=True)
 
 
-def test_split_is_stratified_deterministic_and_complete():
-    eps = [_ep(i, r) for i, r in enumerate(["left"] * 5 + ["center"] * 5 + ["right"] * 2)]
+def test_split_is_per_condition_deterministic_and_complete():
+    eps = [_ep(i, r) for i, r in enumerate(["left"] * 60 + ["center"] * 60 + ["right"] * 2)]
+    for i, e in enumerate(eps):
+        e.id = f"ep_{i:03d}"  # fixed ids: the split is a pure function of them
     a = split_episodes(eps, 0.2, seed=0)
     b = split_episodes(eps, 0.2, seed=0)
     assert a == b and set(a) == {e.id for e in eps}
     by_region = {r: [a[e.id] for e in eps if e.condition.cube_region == r] for r in ("left", "center", "right")}
-    assert by_region["left"].count("eval") == 1 and by_region["center"].count("eval") == 1
+    # each episode is held out with probability eval_fraction (a stable hash, #368), so the share is approximate
+    assert 4 <= by_region["left"].count("eval") <= 24 and 4 <= by_region["center"].count("eval") <= 24
     assert by_region["right"].count("eval") == 0  # too few to hold out
+    assert split_episodes(eps, 0.2, seed=1) != a  # the seed still picks a different split
 
 
 def test_stats():
