@@ -19,6 +19,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import contextvars
 import logging
 import re
 import secrets
@@ -55,6 +56,12 @@ class Caller:
     client: str | None = None
     client_version: str | None = None
     key_id: str | None = None
+
+
+# The project of the studio chat that launched this MCP agent (X-Cortex-Project), for the length of its tool call and
+# the background jobs it starts. Lets the studio's standing approval tell its own chain's proposals from another
+# agent's (#357).
+STUDIO_CHAT: contextvars.ContextVar[str | None] = contextvars.ContextVar("cortex_studio_chat", default=None)
 
 
 def channel(owner: str) -> str:

@@ -265,3 +265,33 @@ async def test_mode_rules_dont_promise_auto_start_when_cluster_jobs_wait_for_a_c
     ctx2 = await build_ctx(Settings(data_dir=tmp_path / "b", futurama_ssh_host=None, _env_file=None))
     manual = autonomy.mode_rules(p, ctx2)  # no cluster: the manual backend, which never auto-starts either
     assert "training is manual" in manual and "don't ask the user to approve" not in manual
+
+
+def test_the_standing_approval_only_starts_the_studio_chains_own_proposals(tmp_path):
+    """#357: an external agent's proposal on the same project waits for a human; the studio's own one starts."""
+    async def go():
+        ctx, p = await setup(tmp_path)
+        theirs, ours = proposed(p), proposed(p)
+        theirs.proposed_by, ours.proposed_by = "mcp", "studio"
+        for t in (theirs, ours):
+            await ctx.repo.save("training_jobs", t)
+        assert await autonomy.approve_if_covered(ctx, p.id, theirs.id) is None
+        assert (await ctx.repo.get("training_jobs", theirs.id, TrainingJob)).status == JobStatus.proposed
+        row = await autonomy.approve_if_covered(ctx, p.id, ours.id)
+        assert row["tone"] == "auto"
+        assert (await ctx.repo.get("training_jobs", ours.id, TrainingJob)).status == JobStatus.queued
+    run(go())
+
+
+def test_proposals_record_who_made_them():
+    from cortex.services import agent_obs
+
+    assert training_service.proposer("agent", "prj_1") == "studio"
+    assert training_service.proposer("autopilot", "prj_1") == "studio"
+    assert training_service.proposer("mcp", "prj_1") == "mcp"  # an external agent
+    tok = agent_obs.STUDIO_CHAT.set("prj_1")  # an MCP agent a studio chat launched for this project
+    try:
+        assert training_service.proposer("mcp", "prj_1") == "studio"
+        assert training_service.proposer("mcp", "prj_2") == "mcp"
+    finally:
+        agent_obs.STUDIO_CHAT.reset(tok)

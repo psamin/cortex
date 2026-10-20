@@ -165,8 +165,29 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
                               request=StartAgentCollectionRequest(num_demos=1, collector="agent"),
                               totals=acs._empty_totals(0))
         await ctx.repo.save("agent_collections", col)
-    prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
-    seed = seed if seed is not None else acs.AGENT_SEED_BASE + len(prior)
+    reserved = None
+    if seed is None:  # a seed no attempt, planned collection or open session has (#357)
+        async with acs.alloc_lock(project.id):
+            seed = await acs.next_agent_seed(ctx, project.id, _open_seeds(project.id))
+            reserved = (project.id, seed)
+            _PENDING_SEEDS.add(reserved)
+    try:
+        return await _start(ctx, project, col, seed, scenario, cube_region, lighting, actor, attempt_index)
+    finally:
+        _PENDING_SEEDS.discard(reserved)  # type: ignore[arg-type]
+
+
+_PENDING_SEEDS: set[tuple[str, int]] = set()  # allocated, session not open yet
+
+
+def _open_seeds(project_id: str) -> list[int]:
+    return ([s.attempt.seed for s in SESSIONS.values() if s.project_id == project_id]
+            + [sd for pid, sd in _PENDING_SEEDS if pid == project_id])
+
+
+async def _start(ctx: Ctx, project: Project, col: AgentCollection, seed: int, scenario: Scenario | None,
+                 cube_region: str | None, lighting: str | None, actor: str, attempt_index: int | None
+                 ) -> dict[str, Any]:
     if scenario is None and (cube_region or lighting):
         cond = Condition(cube_region=cube_region or "center", lighting=lighting or "normal")  # type: ignore[arg-type]
         scenario = Scenario(cube_region=cond.cube_region, lighting=cond.lighting)

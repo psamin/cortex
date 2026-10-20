@@ -163,6 +163,11 @@ async def approve_if_covered(ctx: Ctx, pid: str, tj_id: str) -> dict[str, Any] |
     tj = await ctx.repo.get("training_jobs", tj_id, TrainingJob)
     if not is_autonomous(project) or tj is None or tj.status != JobStatus.proposed:
         return None
+    if tj.proposed_by not in (None, "studio"):
+        # another agent's proposal (an external MCP client on the same project): the studio's standing approval is
+        # for its own chain, so that agent asks the human itself (#357)
+        log.info("standing approval skips %s: proposed by %s, not the studio", tj.id, tj.proposed_by)
+        return None
     covered, why = standing_approval(project, tj)
     if covered and cluster_needs_click(ctx, tj):
         covered, why = False, CLUSTER_CLICK

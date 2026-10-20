@@ -1135,6 +1135,8 @@ async def call_tool(name: str, args: dict[str, Any], request: Request):
                           "view approval outside the MCP server's view channel")
         raise training_service.ApprovalRequired("Only the Cortex MCP App view can use a view approval. "
                                                 "Approve training in the Cortex studio.")
+    if bound:
+        agent_obs.STUDIO_CHAT.set(bound)  # this request's context only (and the jobs it starts)
     try:
         out = await orch.call_tool(ctx(), name, args, who, caller)
     except ValidationError as e:

@@ -17,6 +17,7 @@ from __future__ import annotations
 import asyncio
 import json
 import random
+from collections.abc import Iterable
 from typing import Any
 
 from ..context import Ctx
@@ -35,6 +36,24 @@ from .recording_service import (
 REGIONS = ["left", "center", "right"]
 LIGHTS = ["normal", "dim", "bright"]
 AGENT_SEED_BASE = 20_000  # disjoint from oracle demos (10_000+) and evaluation seeds (1_000+)
+_ALLOC_LOCKS: dict[str, asyncio.Lock] = {}
+
+
+def alloc_lock(project_id: str) -> asyncio.Lock:
+    """Serialises seed and episode-index allocation per project. Two collections (or a studio agent and an external
+    MCP agent) starting together read the same counts and got the same seeds and Episode.index values (#357)."""
+    return _ALLOC_LOCKS.setdefault(project_id, asyncio.Lock())
+
+
+async def next_agent_seed(ctx: Ctx, project_id: str, reserved: Iterable[int] = ()) -> int:
+    """The first agent seed nothing has used or planned: past every recorded attempt, every seed an existing
+    collection planned (attempts are saved only as they finish), and `reserved` (open robot sessions). Call it
+    under alloc_lock and save what you plan before releasing it."""
+    prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project_id)
+    cols = await ctx.repo.list("agent_collections", AgentCollection, project_id=project_id)
+    used = [a.seed for a in prior] + [int(sc["seed"]) for c in cols for sc in c.scenarios
+                                      if isinstance(sc.get("seed"), int)] + list(reserved)
+    return max([AGENT_SEED_BASE + len(prior), *(u + 1 for u in used if u >= AGENT_SEED_BASE)])
 MAX_CUBE_Y = 0.045  # keep the cube's start clear of the box
 
 
@@ -198,29 +217,29 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
         raise PlannerUnavailable(down)
     paid = bool(planner and planner["price_per_m"])
     cap = await check_budget(ctx, project, req) if req.collector == "agent" and paid else 0.0
-    prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
-    base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)
-    scenarios = plan_scenarios(project, req, base_seed)
-    col = AgentCollection(project_id=project.id, collector=req.collector, request=req, mode=mode,
-                          provider=planner["label"] if planner else None,
-                          model=planner["model"] if planner else "scripted_ik_oracle",
-                          scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
-                          reason=req.reason, totals=_empty_totals(cap))
-    attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
-                             seed=base_seed + i, scenario=s, status="failed", mode=mode,
-                             provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
-    cycle = None
-    if cycles:
-        from .intake_service import scene_payload
-        from .recording_service import reset_policy_for
+    async with alloc_lock(project.id):  # until the planned seeds are saved (#357)
+        base_seed = req.base_seed if req.base_seed is not None else await next_agent_seed(ctx, project.id)
+        scenarios = plan_scenarios(project, req, base_seed)
+        col = AgentCollection(project_id=project.id, collector=req.collector, request=req, mode=mode,
+                              provider=planner["label"] if planner else None,
+                              model=planner["model"] if planner else "scripted_ik_oracle",
+                              scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
+                              reason=req.reason, totals=_empty_totals(cap))
+        attempts = [AgentAttempt(project_id=project.id, collection_id=col.id, index=i, collector=req.collector,
+                                 seed=base_seed + i, scenario=s, status="failed", mode=mode,
+                                 provider=col.provider, model=col.model) for i, s in enumerate(scenarios)]
+        cycle = None
+        if cycles:
+            from .intake_service import scene_payload
+            from .recording_service import reset_policy_for
 
-        if scene_payload(ctx, project) is None:
-            raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
-        cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
-                 "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
-        col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
-        attempts = []  # one attempt per segment, created as the worker reports them
-    await ctx.repo.save("agent_collections", col)
+            if scene_payload(ctx, project) is None:
+                raise ValueError("the cycle protocol needs the project's intake scene: run build_simulation first")
+            cycle = {"cycles": cycles, "reset_policy": reset_policy_for(project), "seed": base_seed,
+                     "out_root": str(ctx.local(cycle_root(project.id, col.id)))}
+            col.totals["cycles"] = {"requested": cycles, "reset_policy": cycle["reset_policy"], "segments": {}}
+            attempts = []  # one attempt per segment, created as the worker reports them
+        await ctx.repo.save("agent_collections", col)
     await ctx.audit(actor, "start_agent_collection", project.id,
                     {**req.model_dump(mode="json"), "budget_cap_usd": cap, "provider": col.provider,
                      "model": col.model, "mode": mode, "cycles": cycles}, "ok",
@@ -329,15 +348,15 @@ async def _start_claude_code_collection(ctx: Ctx, project: Project, req: StartAg
     """The user's Claude Code plans every attempt (one headless run per attempt)."""
     from . import claude_code_collector as ccc
 
-    prior = await ctx.repo.list("agent_attempts", AgentAttempt, project_id=project.id)
-    base_seed = req.base_seed if req.base_seed is not None else AGENT_SEED_BASE + len(prior)
-    scenarios = plan_scenarios(project, req, base_seed)
-    model = ctx.settings.claude_code_model or "claude-code"
-    col = AgentCollection(project_id=project.id, collector="agent", request=req, mode="camera",
-                          provider="Claude Code (your agent) via MCP", model=model,
-                          scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
-                          reason=req.reason or "agent collection", totals=_empty_totals(0))
-    await ctx.repo.save("agent_collections", col)
+    async with alloc_lock(project.id):  # until the planned seeds are saved (#357)
+        base_seed = req.base_seed if req.base_seed is not None else await next_agent_seed(ctx, project.id)
+        scenarios = plan_scenarios(project, req, base_seed)
+        model = ctx.settings.claude_code_model or "claude-code"
+        col = AgentCollection(project_id=project.id, collector="agent", request=req, mode="camera",
+                              provider="Claude Code (your agent) via MCP", model=model,
+                              scenarios=[{"seed": base_seed + i, **s.model_dump()} for i, s in enumerate(scenarios)],
+                              reason=req.reason or "agent collection", totals=_empty_totals(0))
+        await ctx.repo.save("agent_collections", col)
     await ctx.audit(actor, "start_agent_collection", project.id,
                     {**req.model_dump(mode="json"), "planner": "claude_code"}, "ok",
                     f"{col.id}: {req.num_demos} attempts planned by Claude Code")
@@ -469,21 +488,23 @@ async def _record_attempt(ctx: Ctx, project: Project, col: AgentCollection, a: A
             a.artifacts[kind] = key(name)
             await ctx.publish_file(a.artifacts[kind])
     if success and "episode" in a.artifacts and a.num_frames:
-        eps = await list_episodes(ctx, project.id)
-        ep = Episode(project_id=project.id, index=len(eps), condition=a.scenario.condition, seed=a.seed,
-                     source=EpisodeSource.sim_agent if a.collector == "agent" else EpisodeSource.sim_scripted,
-                     num_frames=a.num_frames, fps=30, success=True,
-                     artifacts={k: v for k, v in a.artifacts.items()
-                                if k in ("episode", "front", "thumb", *(kind for kind, _ in HD_FILES))},
-                     provenance={"planner": a.model if a.collector == "agent" else "scripted_ik_oracle",
-                                 "provider": a.provider, "model": a.model, "mode": a.mode,
-                                 "attempt_id": a.id, "collection_id": col.id, "scenario": a.scenario.model_dump(),
-                                 **(segment or {}).get("provenance", {})},
-                     segment=(segment or {}).get("segment", "demo"))
-        ep.quality = quality_for(ctx, ep, blur_ref)
-        if ep.quality.score >= AUTO_ACCEPT_MIN_SCORE:
-            ep.status = EpisodeStatus.accepted
-        await ctx.repo.save("episodes", ep)
+        async with alloc_lock(project.id):  # Episode.index is unique per project, even with collections in parallel
+            eps = await list_episodes(ctx, project.id)
+            ep = Episode(project_id=project.id, index=max((e.index for e in eps), default=-1) + 1,
+                         condition=a.scenario.condition, seed=a.seed,
+                         source=EpisodeSource.sim_agent if a.collector == "agent" else EpisodeSource.sim_scripted,
+                         num_frames=a.num_frames, fps=30, success=True,
+                         artifacts={k: v for k, v in a.artifacts.items()
+                                    if k in ("episode", "front", "thumb", *(kind for kind, _ in HD_FILES))},
+                         provenance={"planner": a.model if a.collector == "agent" else "scripted_ik_oracle",
+                                     "provider": a.provider, "model": a.model, "mode": a.mode,
+                                     "attempt_id": a.id, "collection_id": col.id, "scenario": a.scenario.model_dump(),
+                                     **(segment or {}).get("provenance", {})},
+                         segment=(segment or {}).get("segment", "demo"))
+            ep.quality = quality_for(ctx, ep, blur_ref)
+            if ep.quality.score >= AUTO_ACCEPT_MIN_SCORE:
+                ep.status = EpisodeStatus.accepted
+            await ctx.repo.save("episodes", ep)
         a.episode_id = ep.id
         ctx.changed(project.id, "episodes", ep.id)
     await ctx.repo.save("agent_attempts", a)
