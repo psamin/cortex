@@ -122,8 +122,11 @@ class Runner:
                     result = {"id": call["id"], "status": r.status_code, "body": r.text}
                 tool = f"GET {path}"
             else:
+                # the runner's own key (not one relayed from the server) proves to the backend that this is the
+                # MCP server's channel, which alone may receive view approval nonces (#354)
                 r = await self.client.post(f"{self.api}/tools/{quote(tool, safe='')}", json=args,
-                                           headers=forward_headers(call.get("headers")), timeout=TOOL_TIMEOUT_S)
+                                           headers={**forward_headers(call.get("headers")), **self.auth},
+                                           timeout=TOOL_TIMEOUT_S)
                 result = {"id": call["id"], "status": r.status_code, "body": r.text}
         except httpx.HTTPError as e:
             detail = f"the Cortex runner could not reach the backend at {self.api} ({type(e).__name__}: {e})"

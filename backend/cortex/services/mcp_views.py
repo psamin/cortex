@@ -185,8 +185,10 @@ async def review_training_job(ctx: Ctx, a: ViewArgs.Review, actor: str) -> dict[
             "eval_episodes": sum(1 for ln in ds.links if ln.split == "eval"),
             "augmentations": [x.type for x in ds.augmentations]},
     }
-    if awaiting:
-        # The MCP server moves this into view-only result _meta; it never reaches the model.
+    if awaiting and actor == "mcp":
+        # The MCP server moves this into view-only result _meta; it never reaches the model. Only an MCP caller gets
+        # one: the studio's own agent engine (actor "agent") would see it in its tool result (#354). /api/tools also
+        # drops it for any caller that isn't the MCP server.
         out["view_approval_nonce"] = issue_nonce(tj.id)
     return out
 

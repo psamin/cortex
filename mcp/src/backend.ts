@@ -169,6 +169,9 @@ async function send(tool: string, args: Json, signal?: AbortSignal, who: Identit
     "Content-Type": "application/json",
     Accept: "application/json",
     "X-Cortex-Actor": "mcp",
+    // This server's channel: the backend hands MCP App view approval nonces only to it (it keeps them out of the
+    // model's view). With CORTEX_MCP_KEY set the backend checks the key instead (#354).
+    "X-Cortex-View-Channel": "1",
   };
   // Agent identity (#105) travels on both transports, so the studio can show this agent's session live.
   if (who.agentKey) headers["X-Cortex-Agent-Key"] = who.agentKey;

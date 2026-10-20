@@ -73,7 +73,8 @@ async def test_handle_forwards_to_backend_and_returns_raw_response():
                                   "headers": {"X-Cortex-Actor": "mcp", "Authorization": "Bearer leak"}})
     url, body, headers = posted["backend"]
     assert url == f"{API}/tools/get_next_actions" and body == {"project_id": "prj_1"}
-    assert headers["x-cortex-actor"] == "mcp" and "authorization" not in headers
+    # a relayed Authorization never passes; the runner presents its own key (#354)
+    assert headers["x-cortex-actor"] == "mcp" and headers["authorization"] == "Bearer k3y"
     url, auth, result = posted["result"]
     assert url == f"{SERVER}/relay/result" and auth == "Bearer k3y"
     assert result["id"] == "c7" and result["status"] == 422

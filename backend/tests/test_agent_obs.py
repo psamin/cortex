@@ -136,7 +136,8 @@ def test_agents_cannot_manage_keys_approve_or_drive_hardware(client):
 
     def req(h):
         return Request({"type": "http", "headers": [(a.lower().encode(), b.encode()) for a, b in h.items()]})
-    assert actor(req({})) == "gui"
+    assert actor(req({})) == "api"  # no header is not a human click (#354)
+    assert actor(req({"Origin": "http://localhost:5173"})) == "gui"  # the studio, in a browser
     assert actor(req({"X-Cortex-Agent-Key": k["key"]})) == "mcp"  # so training approval treats it as an agent
     assert actor(req({"X-Cortex-Agent-Session": "x", "X-Cortex-Actor": "gui"})) == "mcp"
 
@@ -159,9 +160,10 @@ def test_secrets_are_redacted_in_the_audit_and_on_the_bus(client, monkeypatch):
 
     monkeypatch.setitem(orch.TOOLS, "t_leak", orch.Tool("t_leak", "", orch.NoArgs, leak))
     q = _ctx().bus.subscribe(agent_obs.channel("local"))
-    r = client.post("/api/tools/t_leak", json={"approval_token": "op-secret", "note": "keep"}, headers=agent())
+    r = client.post("/api/tools/t_leak", json={"approval_token": "op-secret", "note": "keep"},
+                    headers={**agent(), "X-Cortex-View-Channel": "1"})
     assert r.status_code == 200, r.text
-    assert r.json()["view_approval_nonce"] == "nonce-secret"  # the caller still receives it
+    assert r.json()["view_approval_nonce"] == "nonce-secret"  # the MCP server's channel still receives it (#354)
     (s,) = client.get("/api/agents/sessions").json()
     (call,) = client.get(f"/api/agents/sessions/{s['id']}/calls").json()
     assert call["args"] == {"approval_token": "[redacted]", "note": "keep"}
