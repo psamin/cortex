@@ -1,0 +1,27 @@
+# Every text file is stored and checked out with LF, on Windows too. Without this, Windows editors and tools
+# rewrite LF to CRLF, every touched file shows as modified, and `git pull --ff-only` (CONTRIBUTING step 1, and the
+# dev machine's auto-pull) refuses to run (#352).
+* text=auto eol=lf
+
+# Shell and Slurm scripts run on Linux and break with CRLF.
+*.sh     text eol=lf
+*.sbatch text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets: never touch their bytes.
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.webp binary
+*.mp4  binary
+*.webm binary
+*.glb  binary
+*.stl  binary
+*.npz  binary
+*.parquet binary
+*.safetensors binary

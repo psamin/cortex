@@ -7,7 +7,9 @@ this file and the Claims table in [docs/ROADMAP.md](docs/ROADMAP.md) before you 
 ## Workflow: issue → claim → branch → PR
 
 1. **Sync first.** Run `git fetch && git switch main && git pull --ff-only`. Rebase your branch on
-   `main` before every push.
+   `main` before every push. The repo stores text with LF (`.gitattributes`). If the pull refuses because
+   of local changes and `git diff --ignore-cr-at-eol --stat` prints nothing, the changes are only CRLF
+   line endings a Windows tool wrote: `git add --renormalize .` clears them.
 2. **Check for overlap.** If an open issue, or a row in the ROADMAP Claims table, lists a file you need,
    coordinate on that issue first. Otherwise wait until it merges.
 3. **Open an issue** for the package. Give the goal, the **files touched** (`[new]`, `[mod]` or `[del]`,
