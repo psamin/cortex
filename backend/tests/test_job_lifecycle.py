@@ -35,7 +35,7 @@ async def _slurm_job(ctx, status=JobStatus.running) -> TrainingJob:
 
 
 def _fake_sh(calls, squeue=(0, "RUNNING\n"), tail=(0, "")):
-    async def sh(*args, timeout=600):
+    async def sh(*args, timeout=600, cwd=None, input=None):
         cmd = " ".join(args)
         calls.append(cmd)
         if "squeue" in cmd:

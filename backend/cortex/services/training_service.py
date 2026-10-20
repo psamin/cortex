@@ -13,8 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import hmac
+import json
 import logging
 import re
+import shlex
+import shutil
 from collections.abc import Awaitable
 from pathlib import Path
 
@@ -168,6 +171,8 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
         return tj  # idempotent
     if tj.status != JobStatus.approved:
         raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
+    if tj.backend == "futurama_slurm":
+        preflight_transfer_tools()
     if "dataset.episodes" not in tj.config:  # proposed before the train-only filter existed
         ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
         tj.config["dataset.episodes"] = train_episodes(ds) if ds is not None else None
@@ -204,14 +209,82 @@ def manual_command(ctx: Ctx, tj: TrainingJob) -> str:
             f"{{\"training_job_id\": \"{tj.id}\", \"path\": \"outputs/{tj.id}/checkpoints/last/pretrained_model\"}}\n")
 
 
-async def _sh(*args: str, timeout: float = 600) -> tuple[int, str]:
-    p = await asyncio.create_subprocess_exec(*args, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
+async def _sh(*args: str, timeout: float = 600, cwd: Path | None = None,
+              input: bytes | None = None) -> tuple[int, str]:
+    p = await asyncio.create_subprocess_exec(*args, cwd=str(cwd) if cwd else None,
+                                             stdin=asyncio.subprocess.PIPE if input is not None else None,
+                                             stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT)
     try:
-        out, _ = await asyncio.wait_for(p.communicate(), timeout)
+        out, _ = await asyncio.wait_for(p.communicate(input), timeout)
     except TimeoutError:
         p.kill()
         return 124, "timeout"
     return p.returncode or 0, out.decode(errors="replace")
+
+
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
+
+
+def _remote_q(path: str) -> str:
+    """Quote a remote path for the remote shell, keeping a leading ~/ expandable."""
+    return "~/" + shlex.quote(path[2:]) if path.startswith("~/") else shlex.quote(path)
+
+
+def _safe_job_dir(path: str) -> str:
+    """rm -rf only ever runs on a job's own directory under the configured jobs root, never on a short or empty
+    path (an unset FUTURAMA_REPO_DIR must not turn into rm -rf ~/)."""
+    parts = [p for p in path.replace("~/", "", 1).split("/") if p]
+    if len(parts) < 3 or "jobs" not in parts or ".." in parts:
+        raise ValueError(f"refusing to delete remote path {path!r}: not a job directory")
+    return path
+
+
+def preflight_transfer_tools() -> None:
+    """Refuse a cluster launch up front when this machine can't reach the cluster at all (no ssh, or neither
+    rsync nor scp), instead of failing later in the background."""
+    if not shutil.which("ssh"):
+        raise ValueError("Training on Futurama needs the ssh client on this machine, and none was found on PATH.")
+    if not (shutil.which("rsync") or shutil.which("scp")):
+        raise ValueError("Training on Futurama needs rsync or scp on this machine to copy the dataset, and neither "
+                         "was found on PATH.")
+
+
+# Local paths are always passed to rsync/scp relative to a working directory. An absolute Windows path
+# (C:\Users\...) has a colon before its first slash, so both tools read it as host "C" (#346).
+
+async def _push_dir(host: str, local: Path, remote_dir: str) -> None:
+    """Make host:remote_dir an exact copy of the local directory."""
+    if shutil.which("rsync"):
+        cmd = ["rsync", "-az", "--delete", f"{local.name}/", f"{host}:{remote_dir}/"]
+    else:  # e.g. Windows, which ships OpenSSH's scp but no rsync
+        rc, out = await _sh("ssh", *SSH_OPTS, host, f"rm -rf {_remote_q(_safe_job_dir(remote_dir))}", timeout=120)
+        if rc != 0:
+            raise RuntimeError(f"ssh failed ({rc}): {out[-400:]} — is the GT VPN up?")
+        cmd = ["scp", *SSH_OPTS, "-rq", local.name, f"{host}:{remote_dir}"]
+    rc, out = await _sh(*cmd, cwd=local.parent)
+    if rc != 0:
+        raise RuntimeError(f"{cmd[0]} of {local.name} failed ({rc}): {out[-400:]} — is the GT VPN up?")
+
+
+async def _pull_dir(host: str, remote_dir: str, local: Path) -> None:
+    """Copy host:remote_dir to the local directory (replacing it)."""
+    local.parent.mkdir(parents=True, exist_ok=True)
+    if shutil.which("rsync"):
+        cmd = ["rsync", "-az", f"{host}:{remote_dir}/", f"{local.name}/"]
+    else:
+        shutil.rmtree(local, ignore_errors=True)
+        cmd = ["scp", *SSH_OPTS, "-rq", f"{host}:{remote_dir}", local.name]
+    rc, out = await _sh(*cmd, cwd=local.parent)
+    if rc != 0:
+        raise RuntimeError(f"checkpoint fetch failed ({rc}): {out[-300:]}")
+
+
+async def _ship_text(host: str, remote_path: str, text: str, what: str) -> None:
+    """Write a small text file on the cluster through ssh's stdin: no local temp file, no rsync path parsing."""
+    rc, out = await _sh("ssh", *SSH_OPTS, host, f"cat > {_remote_q(remote_path)}", timeout=120,
+                        input=text.replace("\r\n", "\n").encode())
+    if rc != 0:
+        raise RuntimeError(f"copying the {what} failed ({rc}): {out[-400:]} — is the GT VPN up?")
 
 
 async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str], job=None) -> str:
@@ -247,8 +320,7 @@ async def scancel(ctx: Ctx, external_id: str) -> None:
     host = ctx.settings.futurama_ssh_host
     if not host:
         return
-    rc, out = await _sh("ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host, f"scancel {external_id}",
-                        timeout=60)
+    rc, out = await _sh("ssh", *SSH_OPTS, host, f"scancel {external_id}", timeout=60)
     if rc != 0:
         log.warning("scancel %s failed (%s): %s", external_id, rc, out[-300:])
 
@@ -258,38 +330,29 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     assert host
     remote = f"{ctx.settings.futurama_repo_dir}/jobs/{tj.id}"
     ds_local = ctx.local(tj.config["dataset.root"])
-    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host]
-    ctx.jobs.log(job, f"rsync dataset -> {host}:{remote}")
-    for cmd in (ssh + [f"mkdir -p {remote}"],
-                ["rsync", "-az", "--delete", f"{ds_local}/", f"{host}:{remote}/dataset/"],
-                ["rsync", "-az", str(SBATCH), f"{host}:{remote}/train_act.sbatch"]):
-        rc, out = await _sh(*cmd)
-        if rc != 0:
-            raise RuntimeError(f"{cmd[0]} failed ({rc}): {out[-400:]} — is the GT VPN up?")
+    ssh = ["ssh", *SSH_OPTS, host]
+    ctx.jobs.log(job, f"copy dataset -> {host}:{remote}")
+    rc, out = await _sh(*ssh, f"mkdir -p {_remote_q(remote)}")
+    if rc != 0:
+        raise RuntimeError(f"ssh failed ({rc}): {out[-400:]} — is the GT VPN up?")
+    await _push_dir(host, ds_local, f"{remote}/dataset")
+    # the job script as text: a Windows checkout with CRLF line endings would otherwise break bash on the cluster
+    await _ship_text(host, f"{remote}/train_act.sbatch", SBATCH.read_text(), "training job script")
     c = tj.config
     export = (f"ALL,STEPS={c['steps']},BATCH={c['batch_size']},SAVE={c['save_freq']},"
               f"REPO_ID={c['dataset.repo_id']}")
     base = c.get("policy.path")
     if base and Path(base).is_dir():  # a project checkpoint: ship it next to the dataset
-        rc, out = await _sh("rsync", "-az", "--delete", f"{base}/", f"{host}:{remote}/base/")
-        if rc != 0:
-            raise RuntimeError(f"rsync base checkpoint failed ({rc}): {out[-400:]}")
+        await _push_dir(host, Path(base), f"{remote}/base")
         export += ",POLICY_PATH=base"
     elif base:  # a hub id such as lerobot/smolvla_base
         export += f",POLICY_PATH={base}"
     if c.get("rename_map"):  # JSON has commas, which sbatch --export would split: ship it as a file
-        import json
-        import tempfile
-
-        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
-            json.dump(c["rename_map"], f)
-        rc, out = await _sh("rsync", "-az", f.name, f"{host}:{remote}/rename_map.json")
-        if rc != 0:
-            raise RuntimeError(f"rsync rename map failed ({rc}): {out[-400:]}")
+        await _ship_text(host, f"{remote}/rename_map.json", json.dumps(c["rename_map"]), "rename map")
     if c.get("dataset.episodes"):  # a list has commas too: ship it as a file the sbatch script reads
-        await _ship_text(f"{host}:{remote}/episodes.txt", episodes_arg(c["dataset.episodes"]), "train episode list")
+        await _ship_text(host, f"{remote}/episodes.txt", episodes_arg(c["dataset.episodes"]), "train episode list")
     slurm = c.get("slurm") or {}  # chosen in the studio; older jobs fall back to the .env defaults
-    rc, out = await _sh(*ssh, f"cd {remote} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
+    rc, out = await _sh(*ssh, f"cd {_remote_q(remote)} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
                               f"--gres={slurm.get('gres', ctx.settings.futurama_gres)} "
                               f"-t {int(slurm.get('time_min', 120))} --export={export} train_act.sbatch {remote}")
     m = re.search(r"^(\d+)", out.strip().splitlines()[-1] if out.strip() else "")
@@ -299,17 +362,6 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     await _save(ctx, tj, f"slurm job {tj.external_id} submitted")
     ctx.jobs.log(job, f"submitted slurm job {tj.external_id}")
     return await poll_slurm(ctx, tj, job)
-
-
-async def _ship_text(dest: str, text: str, what: str) -> None:
-    import tempfile
-
-    with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-        f.write(text)
-    rc, out = await _sh("rsync", "-az", f.name, dest)
-    Path(f.name).unlink(missing_ok=True)
-    if rc != 0:
-        raise RuntimeError(f"rsync {what} failed ({rc}): {out[-400:]}")
 
 
 def parse_loss(log: str) -> list[list[float]]:
@@ -324,7 +376,7 @@ def parse_loss(log: str) -> list[list[float]]:
 async def poll_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     host = ctx.settings.futurama_ssh_host
     remote = f"{ctx.settings.futurama_repo_dir}/jobs/{tj.id}"
-    ssh = ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=15", host]
+    ssh = ["ssh", *SSH_OPTS, host]
     seen, misses = 0, 0
     while True:
         rc, state = await _sh(*ssh, f"squeue -h -j {tj.external_id} -o %T", timeout=60)
@@ -369,9 +421,7 @@ async def poll_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
         await _save(ctx, tj, "failed")
         raise RuntimeError(tj.error)
     dest = ctx.local(f"projects/{tj.project_id}/training/{tj.id}/pretrained_model")
-    rc, out = await _sh("rsync", "-az", f"{host}:{remote}/output/checkpoints/last/pretrained_model/", f"{dest}/")
-    if rc != 0:
-        raise RuntimeError(f"checkpoint fetch failed: {out[-300:]}")
+    await _pull_dir(host, f"{remote}/output/checkpoints/last/pretrained_model", dest)
     await register_checkpoint(ctx, tj.project_id, tj.id, str(dest.relative_to(ctx.data_dir)), int(tj.config["steps"]))
     return tj.id
 
