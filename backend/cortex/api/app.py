@@ -570,8 +570,13 @@ class CheckpointReq(BaseModel):
 
 @app.post("/api/projects/{pid}/checkpoints")
 async def register_checkpoint(pid: str, req: CheckpointReq, request: Request) -> Checkpoint:
-    return await training_service.register_checkpoint(ctx(), pid, req.training_job_id, req.path, req.step,
-                                                      actor(request))
+    who = actor(request)
+    if who != "gui":  # only the studio registers freely; scripts and agents get the checked manual-job path
+        if not req.training_job_id:
+            raise training_service.ApprovalRequired("Register a checkpoint without a training job in the Cortex studio.")
+        return await training_service.register_manual_checkpoint(ctx(), pid, req.training_job_id, req.path, req.step,
+                                                                 who)
+    return await training_service.register_checkpoint(ctx(), pid, req.training_job_id, req.path, req.step, who)
 
 
 @app.get("/api/projects/{pid}/checkpoints")

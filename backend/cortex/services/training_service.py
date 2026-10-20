@@ -237,6 +237,16 @@ async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob
     return tj
 
 
+def manual_output_dir(ctx: Ctx, tj: TrainingJob) -> Path:
+    """Where a manual job's command writes its run: an absolute path in the data dir, so the checkpoint can be
+    registered from there whatever directory the command was run in."""
+    return ctx.local(f"projects/{tj.project_id}/training/{tj.id}/outputs").resolve()
+
+
+def manual_checkpoint_path(ctx: Ctx, tj: TrainingJob) -> Path:
+    return manual_output_dir(ctx, tj) / "checkpoints" / "last" / "pretrained_model"
+
+
 def manual_command(ctx: Ctx, tj: TrainingJob) -> str:
     c = tj.config
     eps = c.get("dataset.episodes")
@@ -247,9 +257,10 @@ def manual_command(ctx: Ctx, tj: TrainingJob) -> str:
             + (f"--dataset.episodes={episodes_arg(eps)} " if eps else "") +
             f"--policy.type={c['policy.type']} --policy.device=cuda --policy.push_to_hub=false "
             f"--steps={c['steps']} --batch_size={c['batch_size']} --save_freq={c['save_freq']} --seed={c['seed']} "
-            f"--output_dir=outputs/{tj.id} --job_name=cortex_{tj.id} --wandb.enable=false\n"
+            f"--output_dir={manual_output_dir(ctx, tj).as_posix()} --job_name=cortex_{tj.id} --wandb.enable=false\n"
+            f"# on another machine: copy that output folder back to the same path here\n"
             f"# then: POST /api/projects/{tj.project_id}/checkpoints "
-            f"{{\"training_job_id\": \"{tj.id}\", \"path\": \"outputs/{tj.id}/checkpoints/last/pretrained_model\"}}\n")
+            f"{{\"training_job_id\": \"{tj.id}\", \"path\": \"{manual_checkpoint_path(ctx, tj).as_posix()}\"}}\n")
 
 
 async def _sh(*args: str, timeout: float = 600, cwd: Path | None = None,
@@ -494,6 +505,25 @@ async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | 
     stored = await _publish_checkpoint(ctx, p)
     await ctx.audit(actor, "register_checkpoint", project_id, {"path": str(p)}, "ok", f"{ck.id} ({ptype}); {stored}")
     return ck
+
+
+async def register_manual_checkpoint(ctx: Ctx, project_id: str, training_job_id: str, path: str,
+                                     step: int | None = None, actor: str = "mcp") -> Checkpoint:
+    """The agent-callable way to finish a manual job: only for a launched (so human-approved) manual job of this
+    project, and only from that job's own output folder. Anything else goes through the studio."""
+    tj = await _get(ctx, training_job_id)
+    if tj.project_id != project_id:
+        raise ValueError(f"{training_job_id} belongs to another project")
+    if tj.backend != "manual" or tj.status != JobStatus.queued:
+        raise ValueError(f"{training_job_id} is a {tj.backend} job that is '{tj.status}': only a launched manual "
+                         "job takes a checkpoint this way")
+    own = manual_output_dir(ctx, tj)  # this job's own run folder: not another project's weights, nothing outside
+    p = Path(path) if Path(path).is_absolute() else ctx.local(path)
+    p = p.resolve()
+    if not p.is_relative_to(own):
+        raise ValueError(f"the checkpoint must be inside this job's output folder ({own.as_posix()}); expected "
+                         f"{manual_checkpoint_path(ctx, tj).as_posix()}")
+    return await register_checkpoint(ctx, project_id, training_job_id, str(p), step, actor)
 
 
 async def register_remote_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | None, remote: str,

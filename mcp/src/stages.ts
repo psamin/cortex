@@ -42,6 +42,7 @@ const META: Record<string, Meta> = {
   recommend_demonstrations: { stage: "improve", tier: "advanced" },
   create_dataset_version: { stage: "train", tier: "advanced" },
   propose_training_job: { stage: "train", tier: "advanced" },
+  register_training_checkpoint: { stage: "train", tier: "advanced" },
   launch_simulation_evaluation: { stage: "evaluate", tier: "advanced" },
   compare_experiments: { stage: "evaluate", tier: "advanced" },
   get_infrastructure: { stage: "anytime", tier: "advanced" },
