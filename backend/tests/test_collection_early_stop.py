@@ -140,3 +140,18 @@ async def test_a_stale_scene_fails_the_call_not_the_job(tmp_path, monkeypatch):
     with pytest.raises(ValueError, match="build_simulation"):
         await acs.start_collection(ctx, p, StartAgentCollectionRequest(num_demos=2, collector="oracle"))
     assert not await ctx.repo.list("agent_collections", acs.AgentCollection, project_id=p.id)
+
+
+async def test_a_budget_stop_keeps_its_reason_when_the_worker_then_fails(tmp_path, monkeypatch):
+    from cortex.errors import WorkerFailed
+
+    ctx, p = await _setup(tmp_path, monkeypatch)
+
+    async def budget_then_crash(job, module, cfg, cfg_path, on_event=None, env=None):
+        await on_event({"type": "budget_exhausted", "spent_usd": 1.0})
+        raise WorkerFailed("worker exited 1")
+    monkeypatch.setattr(ctx.jobs, "run_worker", budget_then_crash)
+    col = await acs.start_collection(ctx, p, StartAgentCollectionRequest(num_demos=2, collector="oracle"))
+    await _finish(ctx, col.job_id)
+    col = await acs.get_collection(ctx, col.id)
+    assert col.status == "budget_exhausted" and "budget" in col.totals["stopped_reason"]

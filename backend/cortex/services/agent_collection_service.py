@@ -348,7 +348,7 @@ async def _end_collection(ctx: Ctx, col: AgentCollection, e: BaseException, job:
         return
     if isinstance(e, asyncio.CancelledError) or ctx.jobs.stop_requested(job.id):
         col.status, col.error = "cancelled", None
-    elif col.status == "running" or not col.error:
+    elif col.status == "running" or (col.status == "failed" and not col.error):
         col.status, col.error = "failed", f"{type(e).__name__}: {e}"[:500]
     try:
         await _save(ctx, col)
