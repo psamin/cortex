@@ -113,3 +113,33 @@ async def test_stopping_a_worker_that_just_exited_is_still_a_stop():
     await jm.cancel(job.id)
     await asyncio.sleep(0.05)
     assert job.status == "cancelled"
+
+
+async def test_a_failing_event_handler_ends_the_worker(tmp_path):
+    """#361: when on_event raises, the worker process is ended, not left blocked on a full stdout pipe."""
+    import os
+
+    import pytest
+
+    (tmp_path / "chatty_worker.py").write_text(
+        "import json, time\n"
+        "i = 0\n"
+        "while True:\n"
+        "    print(json.dumps({'type': 'attempt', 'index': i}), flush=True)\n"
+        "    i += 1\n"
+        "    time.sleep(0.01)\n")
+    jm = JobManager(EventBus())
+    job = jm.submit("collect", "prj_1", lambda j: asyncio.sleep(3600))
+    seen: list = []
+
+    async def handler(ev):
+        seen.append(ev)
+        raise KeyError(ev["index"])  # e.g. attempts[ev["index"]] on a short list
+
+    env = {"PYTHONPATH": str(tmp_path) + os.pathsep + os.environ.get("PYTHONPATH", "")}
+    with pytest.raises(KeyError):
+        await jm.run_worker(job, "chatty_worker", {}, tmp_path / "cfg.json", handler, env=env)
+    (proc,) = jm.procs[job.id]
+    assert proc.returncode is not None  # ended, not still running
+    assert len(seen) == 1
+    await jm.cancel(job.id)
