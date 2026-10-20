@@ -564,7 +564,37 @@ async def _get(ctx: Ctx, tj_id: str) -> TrainingJob:
     return tj
 
 
+# (kind, patterns in the stored error), first match wins. The studio maps each kind to a plain sentence.
+FAILURE_KINDS: list[tuple[str, tuple[str, ...]]] = [
+    # Cortex's own prefixes first: they name where it failed, while the log tail after them can contain anything
+    # (a crash log saying "Read timed out" is still a crash, not an unreachable cluster).
+    ("interrupted", ("interrupted by a backend restart",)),
+    ("training_crashed", ("ended without completing",)),
+    ("checkpoint_missing", ("checkpoint fetch failed", "is not a LeRobot pretrained_model")),
+    ("cluster_rejected", ("sbatch failed", "sbatch: error")),
+    ("cluster_unreachable", ("lost contact with",)),
+    ("subprocesses_unavailable", ("NotImplementedError", "can't start child processes", "cannot start child processes")),
+    ("tool_missing", ("No such file or directory: 'rsync'", "No such file or directory: 'ssh'",
+                      "No such file or directory: 'scp'", "rsync: command not found", "is not installed")),
+    ("cluster_unreachable", ("(255)", "Could not resolve hostname", "Connection timed out", "Connection refused",
+                             "No route to host", "Permission denied (publickey", "timed out")),
+    ("upload_failed", ("rsync", "scp", "failed (")),
+]
+
+
+def failure_kind(tj: TrainingJob) -> str | None:
+    """A one-word cause for a failed job; None for anything that didn't fail (a user stop is 'cancelled')."""
+    if tj.status != JobStatus.failed:
+        return None
+    err = tj.error or ""
+    for kind, pats in FAILURE_KINDS:
+        if any(p in err for p in pats):
+            return kind
+    return "other"
+
+
 async def _save(ctx: Ctx, tj: TrainingJob, msg: str) -> None:
+    tj.failure_kind = failure_kind(tj)
     tj.updated_at = now()
     await ctx.repo.save("training_jobs", tj)
     ctx.changed(tj.project_id, "training_jobs", tj.id)

@@ -6,6 +6,7 @@ import {
   Check,
   CircleDashed,
   Play,
+  RotateCcw,
   ShieldCheck,
   Sparkles,
   X,
@@ -33,6 +34,7 @@ import { IsoIcon } from "../sketch";
 import { useChat } from "./ChatProvider";
 import { useViewerFocus } from "./focus";
 import { AUG_NOTE, datasetBreakdown } from "../lib/augment";
+import { canRetry, failureCause } from "../lib/trainingFailure";
 import { prefixOf } from "./model";
 import { GlowEdge } from "../components/ui/spotlight-card";
 
@@ -299,18 +301,49 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
           <Pill tone="ok">trained</Pill>
         ) : t.status === "approved" ? (
           <Pill tone="wait">approved</Pill>
+        ) : t.status === "failed" ? (
+          // failed is not "stopped": the cause is shown in plain words, the raw error stays in the logs (#328, #348)
+          <Pill tone="bad">failed</Pill>
         ) : (
-          // a failed run reads "stopped": its error stays in the backend logs (#328)
-          <Pill tone="muted">{t.status === "failed" ? "stopped" : t.status}</Pill>
+          <Pill tone="muted">{t.status === "cancelled" ? "stopped" : t.status}</Pill>
         )
       }
     >
       <div className="text-sm text-ink-2">{estimateLine(t)}</div>
+      {failureCause(t) && <p className="mt-1.5 text-sm text-fault">{failureCause(t)!.long}</p>}
+      {t.status === "cancelled" && <p className="mt-1 text-xs text-ink-3">Stopped before it finished.</p>}
+      {canRetry(t) && <TrainingRetry pid={pid} tj={t} />}
       {t.checkpoint_ids.length > 0 && <div className="mt-1 text-xs text-ink-3">{t.checkpoint_ids.length} checkpoint{t.checkpoint_ids.length === 1 ? "" : "s"}</div>}
       {t.backend === "manual" && t.status !== "succeeded" && (
         <div className="mt-1 text-xs text-ink-3">No GPU connected · command in Improve › Training</div>
       )}
     </CardShell>
+  );
+}
+
+/** Run a failed or stopped job again (the backend resets it to approved and launches it) and tell the agent. */
+function TrainingRetry({ pid, tj }: { pid: string; tj: TrainingJob }) {
+  const qc = useQueryClient();
+  const chat = useChat();
+  const m = useMutation({
+    mutationFn: () => api.launchTraining(tj.id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["training", pid] });
+      chat.send(`Retried training ${tj.id}`);
+    },
+  });
+  return (
+    <div className="mt-3 flex items-center gap-2">
+      <button
+        type="button"
+        disabled={m.isPending}
+        onClick={() => m.mutate()}
+        className="sk-pill inline-flex h-8 items-center gap-2 px-4 text-[13px] font-medium disabled:opacity-60"
+      >
+        {m.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Retry
+      </button>
+      {m.error && <InlineError error={m.error} fallback="Retry didn't go through. Try again." />}
+    </div>
   );
 }
 

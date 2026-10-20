@@ -340,6 +340,8 @@ export interface TrainingJob {
   external_id: string | null;
   checkpoint_ids: string[];
   error: string | null;
+  /** why a failed job failed, classified by the backend (lib/trainingFailure.ts has the wording) */
+  failure_kind?: string | null;
   created_at: ISODate;
   updated_at: ISODate;
   /** live training metrics; `loss_curve` is [[step, loss], ...] parsed from the trainer log */

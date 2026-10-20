@@ -150,7 +150,8 @@ def _training(tj: TrainingJob | None) -> dict[str, Any] | None:
         return None
     return {"id": tj.id, "status": str(tj.status), "backend": tj.backend, "policy_type": tj.policy_type,
             "external_id": tj.external_id, "gpu_hours_est": tj.estimate.gpu_hours,
-            "loss_curve": tj.metrics.get("loss_curve", []), "error": tj.error}
+            "loss_curve": tj.metrics.get("loss_curve", []), "error": tj.error,
+            "failure_kind": tj.failure_kind}
 
 
 async def _eval_summary(ctx: Ctx, run: EvaluationRun) -> dict[str, Any]:

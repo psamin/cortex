@@ -146,3 +146,40 @@ async def test_a_long_finished_slurm_job_counts_as_cancelled(tmp_path, monkeypat
     monkeypatch.setattr(ts, "_sh", sh)
     assert (await ts.launch(ctx, tj.id, "gui")).status == JobStatus.queued
     await ctx.jobs.shutdown()
+
+
+# ------------------------------------------------------- #348: the studio is told why it failed
+
+async def test_an_unreachable_cluster_is_stored_as_such_and_cleared_on_retry(tmp_path, monkeypatch):
+    ctx, p, tj = await _failed(tmp_path, monkeypatch, reached_cluster=False)
+    assert tj.failure_kind == "cluster_unreachable"
+    monkeypatch.setattr(ts, "_sh", _hang)
+    out = await ts.launch(ctx, tj.id, "gui")
+    assert out.failure_kind is None
+    await ctx.jobs.shutdown()
+
+
+@pytest.mark.parametrize("error,kind", [
+    ("RuntimeError: ssh failed (255): ssh: connect to host futurama port 22: Connection timed out", "cluster_unreachable"),
+    ("lost contact with futurama: squeue failed 5 times in a row ()", "cluster_unreachable"),
+    ("FileNotFoundError: [Errno 2] No such file or directory: 'rsync'", "tool_missing"),
+    ("NotImplementedError: ", "subprocesses_unavailable"),
+    ("interrupted by a backend restart before Slurm accepted it", "interrupted"),
+    ("RuntimeError: sbatch failed: sbatch: error: invalid partition specified", "cluster_rejected"),
+    ("RuntimeError: rsync failed (23): some files could not be transferred", "upload_failed"),
+    ("slurm job ended without completing: CUDA out of memory", "training_crashed"),
+    ("RuntimeError: checkpoint fetch failed: rsync: link_stat failed", "checkpoint_missing"),
+    ("KeyError: 'steps'", "other"),
+    # Cortex's prefix wins over whatever the log tail says
+    ("slurm job ended without completing: requests.exceptions.ReadTimeout: Read timed out", "training_crashed"),
+    ("RuntimeError: checkpoint fetch failed: ssh: connect to host futurama: Connection refused (255)",
+     "checkpoint_missing"),
+    ("RuntimeError: sbatch failed: sbatch: error: Socket timed out on send/recv operation", "cluster_rejected"),
+])
+def test_failures_are_classified(error, kind):
+    tj = TrainingJob(project_id="prj_1", dataset_version_id="ds_1", policy_type="act", backend="futurama_slurm",
+                     config={}, rationale="", status=JobStatus.failed, error=error,
+                     estimate=ts.estimate("act", 10, "futurama_slurm", 10))
+    assert ts.failure_kind(tj) == kind
+    tj.status = JobStatus.cancelled
+    assert ts.failure_kind(tj) is None
