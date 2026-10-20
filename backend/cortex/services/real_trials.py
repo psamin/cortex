@@ -61,7 +61,11 @@ class SimRealRow(BaseModel):
     real: Rate
     agent_logged: int = 0  # of the real trials, how many an agent recorded from a person's report
     sim: Rate | None  # None: no finished sim evaluation of this checkpoint covers the condition
-    gap: float | None  # real - sim, in rate points
+    # the real rate on only the conditions sim also measured; the gap and the ranking use this, so a checkpoint
+    # tried on the arm in more places than sim covered is compared like for like
+    real_matched: Rate | None = None
+    gap: float | None  # real_matched (or real, for one condition) - sim, in rate points
+    sim_elsewhere: bool = False  # sim evaluated this checkpoint, only on conditions with no real trials
 
 
 class SimRealReport(BaseModel):
@@ -170,20 +174,23 @@ async def report(ctx: Ctx, project: Project) -> SimRealReport:
     pairs: list[tuple[float, float]] = []
     for ck, conds in by.items():
         sim_ck = sim.get(ck, {})
-        rk = rn = sk = sn = ra = 0
+        rk = rn = sk = sn = ra = mk = mn = 0
         for key, (k, n, by_agent) in sorted(conds.items()):
             s = sim_ck.get(key)
             rows.append(SimRealRow(checkpoint_id=ck, condition=key, real=_rate(k, n), agent_logged=by_agent,
                                    sim=_rate(*s) if s else None, gap=(k / n - s[0] / s[1]) if s and s[1] else None))
             rk, rn, ra = rk + k, rn + n, ra + by_agent
-            if s:
-                sk, sn = sk + s[0], sn + s[1]
+            if s and s[1]:
+                sk, sn, mk, mn = sk + s[0], sn + s[1], mk + k, mn + n
         real = _rate(rk, rn)
         simr = _rate(sk, sn) if sn else None
+        matched = _rate(mk, mn) if mn else None
         per_ck.append(SimRealRow(checkpoint_id=ck, condition="all", real=real, sim=simr, agent_logged=ra,
-                                 gap=(real.rate - simr.rate) if simr and real.rate is not None else None))
-        if simr and real.rate is not None:  # only the conditions both measured: the same tasks on both sides
-            pairs.append((simr.rate, real.rate))  # type: ignore[arg-type]
+                                 real_matched=matched, sim_elsewhere=simr is None and bool(sim_ck),
+                                 gap=(matched.rate - simr.rate) if simr and matched and matched.rate is not None
+                                 else None))
+        if simr and matched and matched.rate is not None:  # the same conditions on both sides
+            pairs.append((simr.rate, matched.rate))  # type: ignore[arg-type]
     rho = spearman([p[0] for p in pairs], [p[1] for p in pairs]) if len(pairs) >= MIN_CHECKPOINTS else None
     return SimRealReport(checkpoints=per_ck, rows=rows, spearman=rho, checkpoints_compared=len(pairs),
                          summary=_summary(len(trials), len(by), len(pairs), rho))

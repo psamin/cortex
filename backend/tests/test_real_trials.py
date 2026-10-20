@@ -76,6 +76,21 @@ async def test_rank_agreement_across_checkpoints(tmp_path, monkeypatch):
     assert rep.checkpoints_compared == 4 and rep.spearman == pytest.approx(1.0) and "agree" in rep.summary
 
 
+async def test_the_gap_compares_only_conditions_both_measured(tmp_path, monkeypatch):
+    """Sim covered center only; the arm was also tried in dim light, where it failed. The gap must not blame sim
+    for a condition it never measured, and a checkpoint sim only saw elsewhere says so."""
+    sims = {0: [_branch("baseline", 8, 10)], 1: [_branch("dim", 5, 10, Condition(lighting="dim"))]}
+    ctx, p, cks = await _setup(tmp_path, monkeypatch, sims)
+    await rt.log_trials(ctx, p, trials(cks[0], 4, 5), "Ana", "studio", "gui")
+    await rt.log_trials(ctx, p, trials(cks[0], 0, 5, Condition(lighting="dim")), "Ana", "studio", "gui")
+    await rt.log_trials(ctx, p, trials(cks[1], 2, 5), "Ana", "studio", "gui")
+    by = {r.checkpoint_id: r for r in (await rt.report(ctx, p)).checkpoints}
+    first = by[cks[0]]
+    assert first.real.rate == pytest.approx(0.4) and first.real_matched.rate == pytest.approx(0.8)
+    assert first.gap == pytest.approx(0.0)
+    assert by[cks[1]].sim is None and by[cks[1]].sim_elsewhere and by[cks[1]].gap is None
+
+
 def test_spearman_handles_ties_and_flat_data():
     assert rt.spearman([1, 2, 3], [3, 2, 1]) == pytest.approx(-1.0)
     assert rt.spearman([1, 1, 2], [1, 2, 3]) == pytest.approx(0.866, abs=1e-3)

@@ -68,8 +68,8 @@ A **real trial** is one rollout of a checkpoint on the physical arm, judged by a
 - `log_real_trials` lets an agent record what the operator reported, with `judged_by` naming that person.
   Agent-logged trials are labelled as such everywhere.
 - `get_sim_real_report(project_id)` returns, per checkpoint and condition: real n, successes, Wilson 95% CI;
-  the sim rate on the same condition; the gap. Across checkpoints it returns the Spearman rank correlation of
-  sim vs real success, once 3 or more checkpoints have both. Below that it says there isn't enough data
+  the sim rate on the same condition; the gap. Per checkpoint, the gap and the ranking use only the conditions
+  both sides measured. Across checkpoints it returns the Spearman rank correlation of sim vs real success, once 3 or more checkpoints have both. Below that it says there isn't enough data
   instead of guessing.
 - `get_next_actions` suggests real trials for a checkpoint that passed sim evaluation but has none.
 
