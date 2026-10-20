@@ -285,3 +285,45 @@ def test_studio_chat_agent_works_in_its_chats_project(client):
     assert [c["tool"] for c in calls][-2:] == ["start_intake", "get_intake_status"]
     other = client.post("/api/tools/start_intake", json={"prompt": "x", "project_id": pid}, headers=bound)
     assert other.json()["project_id"] == pid  # an explicit project_id still wins
+
+
+# ------------------------------------------- #355: a store outage never decides a tool call
+
+def _store_down(ctx, monkeypatch, tables=("agent_sessions", "tool_audit_logs")):
+    import httpx
+
+    real = ctx.store.put
+
+    async def put(table, row, *a, **kw):
+        if table in tables:
+            raise httpx.ConnectError("[Errno 11001] getaddrinfo failed")
+        return await real(table, row, *a, **kw)
+    monkeypatch.setattr(ctx.store, "put", put)
+
+
+def test_a_tool_runs_and_returns_while_the_audit_store_is_down(client, monkeypatch):
+    from cortex.services import agent_orchestrator as orch
+
+    ran = []
+
+    async def work(ctx, a, actor):
+        ran.append(1)
+        return {"summary": "did it"}
+
+    monkeypatch.setitem(orch.TOOLS, "t_work", orch.Tool("t_work", "", orch.NoArgs, work))
+    _store_down(_ctx(), monkeypatch)
+    r = client.post("/api/tools/t_work", json={}, headers=agent())
+    assert r.status_code == 200 and r.json()["summary"] == "did it" and ran == [1]
+
+
+def test_approval_required_still_surfaces_while_the_audit_store_is_down(client, monkeypatch):
+    from cortex.services import agent_orchestrator as orch
+    from cortex.services.training_service import ApprovalRequired
+
+    async def gated(ctx, a, actor):
+        raise ApprovalRequired("Training must be approved by a human in the Cortex studio")
+
+    monkeypatch.setitem(orch.TOOLS, "t_gated", orch.Tool("t_gated", "", orch.NoArgs, gated))
+    _store_down(_ctx(), monkeypatch)
+    r = client.post("/api/tools/t_gated", json={}, headers=agent())
+    assert r.status_code == 403 and "approved by a human" in r.json()["detail"]
