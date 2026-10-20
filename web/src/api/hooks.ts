@@ -84,6 +84,10 @@ export const useFailureClusters = (pid: string) =>
 export const useDatasets = (pid: string) =>
   useQuery({ queryKey: ["datasets", pid], queryFn: () => api.datasets(pid) });
 
+/** Readiness of one dataset version (it reads every episode file, so it is fetched on demand and kept a while). */
+export const useDatasetReadiness = (dsid: string | null) =>
+  useQuery({ queryKey: ["readiness", dsid], queryFn: () => api.datasetReadiness(dsid!), enabled: !!dsid, staleTime: 5 * 60_000 });
+
 export const useTraining = (pid: string) =>
   useQuery({ queryKey: ["training", pid], queryFn: () => api.training(pid) });
 

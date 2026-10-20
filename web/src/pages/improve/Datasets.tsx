@@ -4,11 +4,12 @@ import { useMutation } from "@tanstack/react-query";
 import { CornerDownRight, Database, Plus } from "lucide-react";
 import { api } from "../../api/client";
 import { isJobActive, useJob, useTrackJob } from "../../api/events";
-import { useDatasets, useEpisodes } from "../../api/hooks";
+import { useDatasetReadiness, useDatasets, useEpisodes } from "../../api/hooks";
 import type { Augmentation, AugmentationType, DatasetVersion, Episode, Job } from "../../api/types";
 import { Badge, Button, Dialog, EmptyState, ErrorState, Field, InfoTip, Input, Meter, Panel, QueryState, Select, SkeletonRows, Toggle, InlineError } from "../../components/ui";
 import { ago, cn } from "../../lib/format";
 import { AUG_NOTE, augWords, datasetBreakdown } from "../../lib/augment";
+import { VERDICT, episodesLine, findingTitle } from "../../lib/readiness";
 
 function stats(d: DatasetVersion) {
   const sources = new Set(d.links.map((l) => l.episode_id));
@@ -76,7 +77,14 @@ export function DatasetsTab() {
           ) : (
             <div className="space-y-2">
               {lineage(ds).map(({ d, depth }) => (
-                <VersionRow key={d.id} d={d} depth={depth} parentName={ds.find((x) => x.id === d.parent_id)?.name} eps={epById} />
+                <VersionRow
+                  key={d.id}
+                  d={d}
+                  depth={depth}
+                  parentName={ds.find((x) => x.id === d.parent_id)?.name}
+                  eps={epById}
+                  latest={d.id === newest(ds)}
+                />
               ))}
             </div>
           )
@@ -97,7 +105,49 @@ export function DatasetsTab() {
   );
 }
 
-function VersionRow({ d, depth, parentName, eps }: { d: DatasetVersion; depth: number; parentName?: string; eps: Map<string, Episode> }) {
+const newest = (ds: DatasetVersion[]) => ds.reduce((a, b) => (a.created_at > b.created_at ? a : b)).id;
+
+/** Readiness of a version: checked automatically for the newest one, on request for the rest. */
+function ReadinessLine({ dsid, auto }: { dsid: string; auto: boolean }) {
+  const [asked, setAsked] = useState(auto);
+  const q = useDatasetReadiness(asked ? dsid : null);
+  if (!asked)
+    return (
+      <button type="button" className="text-2xs text-ink-3 underline-offset-2 hover:text-ink hover:underline" onClick={() => setAsked(true)}>
+        Check data readiness
+      </button>
+    );
+  if (q.isLoading) return <span className="text-2xs text-ink-3">Checking demos…</span>;
+  if (!q.data) return <InlineError error={q.error} fallback="Couldn't check this version." />;
+  const r = q.data;
+  const v = VERDICT[r.verdict];
+  const shown = r.findings.filter((f) => f.severity !== "info");
+  return (
+    <details className="group">
+      <summary className="flex cursor-pointer list-none items-center gap-2 text-2xs text-ink-3 hover:text-ink-2">
+        <Badge tone={v.tone}>{v.label}</Badge>
+        <span>
+          {shown.length ? `${shown.length} to look at` : "nothing to fix"} · {r.episodes_checked} episodes checked
+        </span>
+      </summary>
+      {r.findings.length > 0 && (
+        <ul className="mt-1.5 space-y-1 border-l border-line pl-3">
+          {r.findings.map((f) => (
+            <li key={f.code} className="flex flex-wrap items-baseline gap-x-2 text-2xs">
+              <span className={cn("font-medium", f.severity === "error" ? "text-fault" : f.severity === "warn" ? "text-caution" : "text-ink-3")}>
+                {findingTitle(f)}
+              </span>
+              <span className="text-ink-2">{f.message}</span>
+              {f.episode_ids.length > 0 && <span className="font-mono text-ink-4">{episodesLine(f.episode_ids)}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </details>
+  );
+}
+
+function VersionRow({ d, depth, parentName, eps, latest }: { d: DatasetVersion; depth: number; parentName?: string; eps: Map<string, Episode>; latest: boolean }) {
   const s = stats(d);
   const breakdown = datasetBreakdown(d, eps);
   const total = Math.max(1, s.original + s.aug);
@@ -143,6 +193,9 @@ function VersionRow({ d, depth, parentName, eps }: { d: DatasetVersion; depth: n
           </div>
         )}
         {breakdown.hasAug && <p className="mt-1.5 text-2xs text-ink-3">{AUG_NOTE}</p>}
+        <div className="mt-2.5 border-t border-line-soft pt-2">
+          <ReadinessLine dsid={d.id} auto={latest} />
+        </div>
       </div>
     </div>
   );

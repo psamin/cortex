@@ -10,6 +10,7 @@ import { useApprover } from "../../components/refs";
 import { ManualTraining } from "../Autopilot";
 import { Badge, Button, EmptyState, ErrorState, Field, Input, Panel, QueryState, Segmented, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
 import { ago, cn, evidenceValue, usd } from "../../lib/format";
+import { VERDICT } from "../../lib/readiness";
 import { canRetry, failureCause } from "../../lib/trainingFailure";
 
 export function TrainingTab() {
@@ -176,6 +177,12 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
             <span className="font-mono">{e.gpu}</span> · <span className="num">{e.gpu_hours.toFixed(2)}</span> GPU-h
           </div>
           {e.notes && <p className="mt-1.5 text-2xs text-ink-3">{e.notes}</p>}
+          {t.readiness && (
+            <p className="mt-1.5 flex items-center gap-1.5 text-2xs text-ink-3" title={t.readiness.summary}>
+              Data <Badge tone={VERDICT[t.readiness.verdict].tone}>{VERDICT[t.readiness.verdict].label}</Badge>
+              {t.readiness.errors + t.readiness.warnings > 0 && <span>{t.readiness.errors + t.readiness.warnings} to look at</span>}
+            </p>
+          )}
 
           <div className="mt-3 border-t border-line-soft pt-3">
             {t.status === "proposed" && (

@@ -48,6 +48,7 @@ import type {
   TrainingJob,
   DatasetVersion,
   RLSandboxView,
+  ReadinessReport,
 } from "./types";
 
 export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ||
@@ -241,6 +242,7 @@ export const api = {
     patch<Recommendation>(`/recommendations/${rid}`, { status }),
   createDataset: (pid: string, req: CreateDatasetVersionRequest) => post<Job>(`/projects/${pid}/datasets`, req),
   datasets: (pid: string) => get<DatasetVersion[]>(`/projects/${pid}/datasets`),
+  datasetReadiness: (dsid: string) => get<ReadinessReport>(`/datasets/${dsid}/readiness`),
   proposeTraining: (pid: string, dataset_version_id: string, policy_type?: PolicyType, steps?: number) =>
     post<TrainingJob>(`/projects/${pid}/training/proposals`, { dataset_version_id, policy_type, steps }),
   approveTraining: (tid: string, approver: string, approval_token?: string) =>
