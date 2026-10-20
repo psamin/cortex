@@ -170,6 +170,11 @@ async def test_an_unreachable_cluster_is_stored_as_such_and_cleared_on_retry(tmp
     ("slurm job ended without completing: CUDA out of memory", "training_crashed"),
     ("RuntimeError: checkpoint fetch failed: rsync: link_stat failed", "checkpoint_missing"),
     ("KeyError: 'steps'", "other"),
+    # Cortex's prefix wins over whatever the log tail says
+    ("slurm job ended without completing: requests.exceptions.ReadTimeout: Read timed out", "training_crashed"),
+    ("RuntimeError: checkpoint fetch failed: ssh: connect to host futurama: Connection refused (255)",
+     "checkpoint_missing"),
+    ("RuntimeError: sbatch failed: sbatch: error: Socket timed out on send/recv operation", "cluster_rejected"),
 ])
 def test_failures_are_classified(error, kind):
     tj = TrainingJob(project_id="prj_1", dataset_version_id="ds_1", policy_type="act", backend="futurama_slurm",
