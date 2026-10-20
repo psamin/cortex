@@ -8,6 +8,7 @@ demos and is unit-testable. Readiness only reports: it never edits or drops data
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from collections import Counter, defaultdict
@@ -19,7 +20,7 @@ from pydantic import BaseModel
 from ..context import Ctx
 from ..errors import NotFound
 from ..models import DatasetVersion, Episode, EpisodeSource, EpisodeStatus, Project
-from .recording_service import list_episodes, load_npz
+from .recording_service import list_episodes, npz_key
 
 log = logging.getLogger(__name__)
 
@@ -144,12 +145,13 @@ def dataset_findings(items: list[tuple[Episode, np.ndarray]], wanted_conditions:
         out.append(Finding(code="fps_mismatch", severity="error",
                            message="episodes were recorded at " + ", ".join(f"{f} fps ({n})" for f, n in fps.items()),
                            episode_ids=[e.id for e, _ in items if e.fps != common], evidence=dict(fps)))
-    dims = Counter(a.shape[1] if a.ndim == 2 else 0 for _, a in items)
+    dims = Counter(a.shape[1] if a.ndim == 2 else 0 for _, a in items)  # 0: not a (frames, joints) array
     if len(dims) > 1:
         common = dims.most_common(1)[0][0]
         out.append(Finding(code="shape_mismatch", severity="error",
                            message="action size differs: " + ", ".join(f"{d} values ({n})" for d, n in dims.items()),
-                           episode_ids=[e.id for e, a in items if a.shape[1] != common], evidence=dict(dims)))
+                           episode_ids=[e.id for e, a in items if (a.shape[1] if a.ndim == 2 else 0) != common],
+                           evidence=dict(dims)))
     # units: compare how far the joints travel in each source (degrees vs radians is ~57x)
     spans: dict[str, list[float]] = defaultdict(list)
     for e, a in items:
@@ -255,19 +257,32 @@ async def check(ctx: Ctx, project: Project, episode_ids: list[str] | None = None
     if len(eps) > MAX_EPISODES:
         rng = np.random.default_rng(0)
         eps = [eps[i] for i in sorted(rng.choice(len(eps), MAX_EPISODES, replace=False))]
+    return await asyncio.to_thread(_check_sync, ctx, project, eps, dataset_version_id)
+
+
+def _arrays(ctx: Ctx, e: Episode) -> tuple[np.ndarray, np.ndarray | None]:
+    """Only the action and state arrays: the camera frames in the same file are never decompressed."""
+    with np.load(ctx.local(npz_key(e)), allow_pickle=False) as z:
+        a = np.asarray(z["action"]) if "action" in z.files else np.zeros((0, 0))
+        return a, (np.asarray(z["state"]) if "state" in z.files else None)
+
+
+def _check_sync(ctx: Ctx, project: Project, eps: list[Episode], dataset_version_id: str | None) -> ReadinessReport:
+    """The file reading and numpy work, off the event loop (it reads up to MAX_EPISODES files)."""
     items: list[tuple[Episode, np.ndarray]] = []
     per_episode: list[Finding] = []
     for e in eps:
         try:
-            z = load_npz(ctx, e)
+            a, state = _arrays(ctx, e)
         except (OSError, KeyError, ValueError) as err:  # a missing or unreadable file is a finding, not a crash
             per_episode.append(Finding(code="unreadable", severity="error", episode_ids=[e.id],
                                        message="episode file missing or unreadable",
                                        evidence={"error": f"{type(err).__name__}"}))
             continue
-        a = np.asarray(z.get("action", np.zeros((0, 0))))
+        if a.ndim == 1:  # a single joint recorded as a flat array
+            a = a[:, None]
         items.append((e, a))
-        per_episode += episode_findings(e.id, a, z.get("state"), e.fps or 30,
+        per_episode += episode_findings(e.id, a, state, e.fps or 30,
                                         _gripper_index(project, a.shape[1] if a.ndim == 2 else 0))
     wanted_conditions = sorted({c.condition.key for c in project.plan.cells}) if project.plan.cells else None
     findings = dataset_findings(items, wanted_conditions) + _merge(per_episode)

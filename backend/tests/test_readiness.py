@@ -180,3 +180,20 @@ def test_the_summary_counts_episodes_not_findings():
          rd.Finding(code="length_outlier", severity="info", message="", episode_ids=["a"])]
     assert rd.summarize("ready_with_warnings", 9, f) == (
         "Ready, with warnings: 9 episodes checked; idle start (3 episodes), thin conditions")
+
+
+async def test_odd_files_are_findings_not_crashes(tmp_path):
+    """A flat (1-D) action array and a file without actions are reported, never a 500."""
+    ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+    p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube"))
+    for i, arrays in enumerate([{"action": np.linspace(0, 1, 90)}, {"state": np.zeros((90, 6))},
+                                {"action": demo()[0], "front": np.zeros((150, 8, 8, 3), np.uint8)}]):
+        ep = _ep(i)
+        ep.project_id = p.id
+        f = ctx.local(npz_key(ep))
+        f.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(f, **arrays)
+        await ctx.repo.save("episodes", ep)
+    rep = await rd.check(ctx, p)
+    found = {f.code: f for f in rep.findings}
+    assert rep.episodes_checked == 3 and "shape_mismatch" in found
