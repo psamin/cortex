@@ -45,6 +45,10 @@ MAX_SSH_FAILURES = 20  # consecutive failed squeue calls (~10 min at POLL_S) bef
 class ApprovalRequired(PermissionError):
     code = "training_approval"
 
+    def __init__(self, msg: str, project_id: str | None = None):
+        super().__init__(msg)
+        self.project_id = project_id  # lets the MCP server link the human to the right project (#359)
+
 
 def estimate(policy_type: str, steps: int, backend: str, n_frames: int, gres: str = "gpu:l40s:1") -> ResourceEstimate:
     # ACT (~52M params, 2x 96x128 cams, batch 8): ~12 it/s measured class on L40S-class GPUs is
@@ -171,7 +175,7 @@ async def approve(ctx: Ctx, tj_id: str, approver: str, actor: str, token: str | 
             await ctx.audit(actor, "approve_training_job", tj.project_id, {"id": tj_id}, "denied",
                             "agent approval refused: approve in the Cortex studio")
             raise ApprovalRequired("Training must be approved by a human in the Cortex studio "
-                                   "(or with the operator's approval token).")
+                                   "(or with the operator's approval token).", tj.project_id)
     if tj.status != JobStatus.proposed:
         return tj
     tj.status, tj.approved_by, tj.updated_at = JobStatus.approved, approver, now()
@@ -190,7 +194,7 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
         _preflight(tj)  # before the reset: a check that fails must leave the job failed, with its reason
         tj = await _reset_for_retry(ctx, tj, actor)
     if tj.status != JobStatus.approved:
-        raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
+        raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch", tj.project_id)
     _preflight(tj)
     if "dataset.episodes" not in tj.config:  # proposed before the train-only filter existed
         ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
@@ -235,11 +239,12 @@ def _preflight(tj: TrainingJob) -> None:
 async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob:
     """Put a failed or stopped job back to approved so it can run again, without re-proposing it."""
     if not tj.approved_by:
-        raise ApprovalRequired(f"{tj.id} was never approved; approve it in the Cortex studio first")
+        raise ApprovalRequired(f"{tj.id} was never approved; approve it in the Cortex studio first", tj.project_id)
     if actor != "gui" and retry_needs_human(tj):
         why = (f"already ran on the cluster (Slurm job {tj.external_id}), so running it again spends GPU time again"
                if tj.external_id else "was stopped by a person")
-        raise ApprovalRequired(f"{tj.id} {why}: ask the human to click Retry on the job in the Cortex studio.")
+        raise ApprovalRequired(f"{tj.id} {why}: ask the human to click Retry on the job in the Cortex studio.",
+                               tj.project_id)
     prev = f"{tj.status}: {tj.error}" if tj.error else str(tj.status)
     if tj.external_id and not await scancel(ctx, tj.external_id):
         # "lost contact" failures say the Slurm job may still run: it must be ended first, or the retry would share

@@ -128,8 +128,11 @@ async def _404(_, e: NotFound):
 
 @app.exception_handler(PermissionError)
 async def _403(_, e: PermissionError):
-    return JSONResponse({"detail": str(e), "code": getattr(e, "code", "approval_required"),
-                         "approval_required": getattr(e, "approval_required", True)}, 403)
+    body = {"detail": str(e), "code": getattr(e, "code", "approval_required"),
+            "approval_required": getattr(e, "approval_required", True)}
+    if getattr(e, "project_id", None):
+        body["project_id"] = e.project_id  # type: ignore[attr-defined]
+    return JSONResponse(body, 403)
 
 
 @app.exception_handler(RuntimeError)

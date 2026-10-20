@@ -264,7 +264,11 @@ export async function callTool(tool: string, args: Json, signal?: AbortSignal, w
       structuredContent: data,
     };
   }
-  if (res.status === 403 && data.approval_required === true) return approvalRequired(tool, args, detail);
+  if (res.status === 403 && data.approval_required === true) {
+    // launch_training_job's args have no project_id: the backend names the job's project, so the link opens it (#359)
+    const project = args.project_id ?? (typeof data.project_id === "string" ? data.project_id : undefined);
+    return approvalRequired(tool, project === undefined ? args : { ...args, project_id: project }, detail);
+  }
   if (res.status === 403) {
     return error(`Cortex backend refused access (403): ${detail}. When the backend is reached through a tunnel, set CORTEX_MCP_KEY on this MCP server to the backend's CORTEX_MCP_KEY.`);
   }
