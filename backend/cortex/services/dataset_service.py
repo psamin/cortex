@@ -148,7 +148,7 @@ async def create_version(ctx: Ctx, project: Project, req: CreateDatasetVersionRe
         }, ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
         for p in root.rglob("*"):
             if p.is_file():
-                await ctx.publish_file(str(p.relative_to(ctx.data_dir)))
+                await ctx.publish_file(p.relative_to(ctx.data_dir).as_posix())  # '/' keys on Windows too (#367)
         for ln in ds.links:
             lid = f"{ds.id}_{ln.lerobot_episode_index}"
             await ctx.store.put("dataset_episode_links", {

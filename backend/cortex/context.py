@@ -87,6 +87,7 @@ class Ctx:
         """Upload a local working file to the durable blob store (no-op for local disk)."""
         if isinstance(self.blobs, LocalBlobStore):
             return
+        key = key.replace("\\", "/")  # a Windows relative path would be stored under %5C-encoded names (#367)
         p = self.local(key)
         ctype = mimetypes.guess_type(p.name)[0] or "application/octet-stream"
         if hasattr(self.blobs, "put_file"):  # InsForge: REST, or the S3 gateway above the REST cap

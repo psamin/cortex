@@ -97,7 +97,7 @@ async def start_import(ctx: Ctx, project: Project, source: dict[str, Any], max_e
                             imported_from=label, eval_fraction=0.0)
         for k, r in enumerate(res["episodes"]):
             out = Path(r["out_dir"])
-            rel = lambda n, out=out: str((out / n).relative_to(ctx.data_dir))  # noqa: E731
+            rel = lambda n, out=out: (out / n).relative_to(ctx.data_dir).as_posix()  # noqa: E731 - '/' keys (#367)
             ep = Episode(project_id=project.id, index=start + k, source=EpisodeSource.imported,
                          condition=Condition(), seed=-1, num_frames=r["num_frames"], fps=int(res["fps"]),
                          success=None, status=EpisodeStatus.accepted,
