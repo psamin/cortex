@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import logging
 import shutil
 from typing import Any
 
@@ -20,6 +21,8 @@ from ..context import Ctx
 from ..models import AgentAttempt, AgentCollection, Project, Scenario
 from . import robot_session_service as rs
 from .claude_code_agent import MCP_URL
+
+log = logging.getLogger(__name__)
 
 ROBOT_TOOLS = ["robot_observe", "robot_state", "robot_propose_grasp", "robot_move", "robot_gripper",
                "robot_verify_grasp", "robot_place", "robot_check_success", "robot_finish_episode"]
@@ -107,11 +110,19 @@ async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario
             proc.kill()
         await rs.close(sid)
         raise
-    finished_by_agent = sid not in rs.SESSIONS
-    if not finished_by_agent:  # Claude stopped early: close it ourselves, judged by the simulator
-        await rs.finish(ctx, sid, believes_success=False,
-                        summary=f"agent stopped without finishing ({result.get('subtype') or 'no result'})",
-                        actor="claude-code-batch")
+    crashed = await rs.record_broken(ctx, sid)  # the simulator died under Claude: one failed attempt (#362)
+    finished_by_agent = crashed is None and sid not in rs.SESSIONS
+    if crashed is None and not finished_by_agent:  # Claude stopped early: close it ourselves, judged by the simulator
+        try:
+            await rs.finish(ctx, sid, believes_success=False,
+                            summary=f"agent stopped without finishing ({result.get('subtype') or 'no result'})",
+                            actor="claude-code-batch")
+        except rs.SessionBroken:  # it died at the finish: still one failed attempt, not a failed collection
+            crashed = await rs.record_broken(ctx, sid)
+    if crashed is not None:
+        log.warning("attempt %s: robot session worker crashed: %s", crashed["attempt_id"], crashed["error"])
+        return {"attempt_id": crashed["attempt_id"], "finished_by_agent": False, "turns": result.get("num_turns"),
+                "status": "failed", "error": crashed["error"]}
     a = await ctx.repo.get("agent_attempts", started["attempt_id"], AgentAttempt)
     if a is not None:  # record what Claude Code reported for this attempt
         a.usage = {**a.usage, "calls": result.get("num_turns") or 0, "cost_usd": 0.0,
