@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import time
 from datetime import datetime
 from typing import Any, Literal
@@ -178,7 +179,10 @@ def _spawn(ctx: Ctx, sb: RLSandbox, mode: str, scene: dict[str, Any] | None, on_
                 await ctx.jobs.run_worker(job, "cortex.workers.rl_worker", cfg, base / f"{mode}.json", on_event)
                 await on_done(holder)
             except asyncio.CancelledError:
-                sb.status, sb.reason = "stopped", f"stopped by {sb.stop_requested_by or 'user'} during the {mode}"
+                if ctx.jobs.closing:  # a backend restart, not a stop: say so (#365)
+                    sb.status, sb.reason = "failed", f"{INTERRUPTED} during the {mode}"
+                else:
+                    sb.status, sb.reason = "stopped", f"stopped by {sb.stop_requested_by or 'user'} during the {mode}"
                 await _save(ctx, sb)
                 raise
             except Exception as e:
@@ -192,6 +196,27 @@ def _spawn(ctx: Ctx, sb: RLSandbox, mode: str, scene: dict[str, Any] | None, on_
     _live[sb.id] = sb
     job = ctx.jobs.submit(f"rl_{mode}", sb.project_id, run, idempotency_key=f"rl:{mode}:{sb.id}")
     return job.id
+
+
+log = logging.getLogger(__name__)
+INTERRUPTED = "interrupted by a backend restart"
+ACTIVE = ("piloting", "accepted", "running")
+
+
+async def sweep_interrupted(ctx: Ctx) -> int:
+    """At startup: no RL worker survives a restart, so a sandbox still piloting, accepted or running was cut off.
+    Nothing would ever move it on (stop() writes a STOP file nobody reads, accept() wants 'ready'), so mark it
+    failed (#365). Returns how many."""
+    n = 0
+    for status in ACTIVE:
+        for sb in await ctx.repo.list("rl_sandboxes", RLSandbox, status=status):
+            sb.status, sb.reason = "failed", f"{INTERRUPTED} while {status}; propose it again to retry"
+            try:
+                await ctx.repo.save("rl_sandboxes", sb)
+                n += 1
+            except Exception as e:  # noqa: BLE001 - one bad row must not stop the backend
+                log.warning("startup sweep skipped rl_sandboxes %s: %s", sb.id, e)
+    return n
 
 
 # ------------------------------------------------------------------ propose / accept / stop
