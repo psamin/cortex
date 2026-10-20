@@ -109,3 +109,34 @@ async def test_a_claude_code_collection_stops_after_the_first_failures(tmp_path,
     assert col.status == "failed" and col.error.startswith("Stopped early: the first 3 attempts all failed")
     assert "agent stopped without finishing x1" in col.error
     assert j.status == "failed" and j.error == col.error
+
+
+# --------------------------------------------- #360: a collection never stays "running" after its job ends
+
+async def test_a_crashed_worker_leaves_the_collection_failed(tmp_path, monkeypatch):
+    from cortex.errors import WorkerFailed
+
+    ctx, p = await _setup(tmp_path, monkeypatch)
+
+    async def crash(*a, **kw):
+        raise WorkerFailed("worker exited 1: segfault in the renderer")
+    monkeypatch.setattr(ctx.jobs, "run_worker", crash)
+    col = await acs.start_collection(ctx, p, StartAgentCollectionRequest(num_demos=2, collector="oracle"))
+    j = await _finish(ctx, col.job_id)
+    col = await acs.get_collection(ctx, col.id)
+    assert j.status == "failed" and col.status == "failed" and "segfault" in col.error
+
+
+async def test_a_stale_scene_fails_the_call_not_the_job(tmp_path, monkeypatch):
+    from cortex.services import intake_service
+
+    ctx, p = await _setup(tmp_path, monkeypatch)
+
+    def stale(ctx, project):
+        raise ValueError("the sim scene is out of date with the intake; call build_simulation first")
+    monkeypatch.setattr(intake_service, "scene_payload", stale)
+    import pytest
+
+    with pytest.raises(ValueError, match="build_simulation"):
+        await acs.start_collection(ctx, p, StartAgentCollectionRequest(num_demos=2, collector="oracle"))
+    assert not await ctx.repo.list("agent_collections", acs.AgentCollection, project_id=p.id)
