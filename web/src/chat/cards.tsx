@@ -312,7 +312,7 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
       <div className="text-sm text-ink-2">{estimateLine(t)}</div>
       {failureCause(t) && <p className="mt-1.5 text-sm text-fault">{failureCause(t)!.long}</p>}
       {t.status === "cancelled" && <p className="mt-1 text-xs text-ink-3">Stopped before it finished.</p>}
-      {canRetry(t) && <TrainingRetry pid={pid} tj={t} />}
+      {(canRetry(t) || t.status === "approved") && <TrainingRetry pid={pid} tj={t} />}
       {t.checkpoint_ids.length > 0 && <div className="mt-1 text-xs text-ink-3">{t.checkpoint_ids.length} checkpoint{t.checkpoint_ids.length === 1 ? "" : "s"}</div>}
       {t.backend === "manual" && t.status !== "succeeded" && (
         <div className="mt-1 text-xs text-ink-3">No GPU connected · command in Improve › Training</div>
@@ -321,15 +321,17 @@ function TrainingCard({ pid, id, large }: { pid: string; id: string; large?: boo
   );
 }
 
-/** Run a failed or stopped job again (the backend resets it to approved and launches it) and tell the agent. */
+/** Start an approved job (approved elsewhere, or its launch failed after approval), or run a failed or stopped
+ * one again (the backend resets it to approved and launches it), and tell the agent. */
 function TrainingRetry({ pid, tj }: { pid: string; tj: TrainingJob }) {
   const qc = useQueryClient();
   const chat = useChat();
+  const retry = tj.status !== "approved";
   const m = useMutation({
     mutationFn: () => api.launchTraining(tj.id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["training", pid] });
-      chat.send(`Retried training ${tj.id}`);
+      chat.send(`${retry ? "Retried" : "Started"} training ${tj.id}`);
     },
   });
   return (
@@ -340,9 +342,16 @@ function TrainingRetry({ pid, tj }: { pid: string; tj: TrainingJob }) {
         onClick={() => m.mutate()}
         className="sk-pill inline-flex h-8 items-center gap-2 px-4 text-[13px] font-medium disabled:opacity-60"
       >
-        {m.isPending ? <CircleDashed className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />} Retry
+        {m.isPending ? (
+          <CircleDashed className="h-4 w-4 animate-spin" />
+        ) : retry ? (
+          <RotateCcw className="h-4 w-4" />
+        ) : (
+          <Play className="h-4 w-4" />
+        )}{" "}
+        {retry ? "Retry" : "Start training"}
       </button>
-      {m.error && <InlineError error={m.error} fallback="Retry didn't go through. Try again." />}
+      {m.error && <InlineError error={m.error} fallback={retry ? "Retry didn't go through. Try again." : "It didn't start. Try again."} />}
     </div>
   );
 }

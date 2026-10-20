@@ -87,7 +87,11 @@ export default function ApprovalView() {
             </span>
           ) : (
             <span className="ok">
-              {status === "approved" ? "Approved. The agent can now launch it." : `Status: ${status}`}
+              {status === "queued" || status === "running"
+                ? "Approved and started."
+                : status === "approved"
+                  ? "Approved, but it didn't start yet. Launch it from the studio or ask the agent."
+                  : `Status: ${status}`}
               {tj.approved_by && !done ? <span className="muted"> · by {tj.approved_by}</span> : null}
             </span>
           )}
