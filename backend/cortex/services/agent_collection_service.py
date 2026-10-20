@@ -155,6 +155,7 @@ async def planner_status(ctx: Ctx) -> dict[str, Any]:
 def plan_scenarios(project: Project, req: StartAgentCollectionRequest, base_seed: int) -> list[Scenario]:
     """Deterministic in (request, base_seed): matched scenes for A/B runs."""
     rng = random.Random(base_seed)
+    intake_scene = project.intake is not None and bool(project.scene)
     if req.conditions:
         cells = list(req.conditions)
     elif req.diversity == "plan":
@@ -166,8 +167,10 @@ def plan_scenarios(project: Project, req: StartAgentCollectionRequest, base_seed
     out = []
     for i in range(req.num_demos):
         c = cells[i % len(cells)]
-        dx, dy = rng.uniform(-span, span), rng.uniform(-span, span)
-        dy = min(dy, MAX_CUBE_Y - REGION_XY[c.cube_region][1])
+        ox, oy = req.cube_offset or (0.0, 0.0)  # a targeted shift (improve_policy, #366), then the jitter
+        dx, dy = ox + rng.uniform(-span, span), oy + rng.uniform(-span, span)
+        if not intake_scene:  # the cube task's box sits at +y; an intake scene has its own layout
+            dy = min(dy, MAX_CUBE_Y - REGION_XY[c.cube_region][1])
         box = (rng.uniform(-0.02, 0.02), rng.uniform(0.0, 0.02)) if req.diversity == "high" else (0.0, 0.0)
         out.append(Scenario(cube_region=c.cube_region, lighting=c.lighting, cube_offset=(round(dx, 4), round(dy, 4)),
                             box_offset=(round(box[0], 4), round(box[1], 4))))

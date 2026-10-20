@@ -569,6 +569,9 @@ class StartAgentCollectionRequest(BaseModel):
     num_demos: int = Field(6, ge=1, le=50, description="attempts to run (successes become demonstrations)")
     diversity: Literal["plan", "medium", "high"] = "medium"
     conditions: list[Condition] | None = Field(None, description="restrict scenes to these cells (targeted collection)")
+    cube_offset: tuple[float, float] | None = Field(
+        None, description="shift every scene's object start by this much (metres, before the diversity jitter), to "
+                          "reproduce an evaluation branch's shifted start")
     max_total_usd: float | None = Field(None, gt=0, description="planner spend cap for this collection")
     max_calls_per_episode: int = Field(16, ge=4, le=40)
     max_usd_per_episode: float = Field(1.5, gt=0, le=10)
