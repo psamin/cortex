@@ -232,6 +232,53 @@
       "needsApproval": false
     },
     {
+      "name": "check_dataset_readiness",
+      "mcpTools": [
+        "cortex.check_dataset_readiness"
+      ],
+      "description": "Before training: check demos for problems that don't show in the loss (idle starts/ends, an unused gripper, glitch steps, actions out of sync with state, mixed frame rates, shapes or units, thin conditions). Returns ready / ready_with_warnings / blocked with the episodes involved. Reports only; changes nothing.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "dataset_version_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "check a dataset version's episodes (ds_...)"
+          },
+          "episode_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "check these episodes; default: every accepted one"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "get_failure_clusters",
       "mcpTools": [
         "cortex.get_failure_clusters"

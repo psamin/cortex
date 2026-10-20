@@ -41,6 +41,7 @@ const META: Record<string, Meta> = {
   analyze_dataset: { stage: "improve", tier: "advanced" },
   get_failure_clusters: { stage: "improve", tier: "advanced" },
   recommend_demonstrations: { stage: "improve", tier: "advanced" },
+  check_dataset_readiness: { stage: "train", tier: "custom" }, // STACK_SPEC 2.1: before every training proposal
   create_dataset_version: { stage: "train", tier: "advanced" },
   propose_training_job: { stage: "train", tier: "custom" }, // AGENTS.md step 4 names it
   register_training_checkpoint: { stage: "train", tier: "advanced" },

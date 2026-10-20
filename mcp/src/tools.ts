@@ -247,6 +247,22 @@ const TOOLS: Def[] = [
     annotations: WRITE,
   },
   {
+    name: "check_dataset_readiness",
+    title: "Check dataset readiness",
+    description:
+      "Before training, check the demos for problems that never show in the loss: idle starts and ends, a gripper that never moves, " +
+      "glitch steps, actions out of sync with the recorded state, and mixed frame rates, action sizes or units (degrees vs radians between real and sim). " +
+      "Returns verdict ready / ready_with_warnings / blocked, each finding with the episodes involved, and a one-line summary. Reports only; changes nothing.\n" +
+      "USE WHEN: before cortex_create_dataset_version or cortex_propose_training_job, or after importing real demos.\n" +
+      "NEXT: if blocked or warned, exclude or re-record the listed episodes (cortex_create_dataset_version with episode_ids), then propose training.",
+    inputSchema: z.object({
+      project_id: projectId,
+      dataset_version_id: z.string().nullish().describe("Check this dataset version's episodes (ds_...)"),
+      episode_ids: z.array(z.string()).nullish().describe("Check these episodes; default: every accepted episode"),
+    }),
+    annotations: READ,
+  },
+  {
     name: "launch_simulation_evaluation",
     title: "Launch simulation evaluation",
     description:

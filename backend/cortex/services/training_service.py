@@ -20,6 +20,7 @@ import shlex
 import shutil
 from collections.abc import Awaitable
 from pathlib import Path
+from typing import Any
 
 from ..context import Ctx
 from ..errors import NotFound
@@ -157,15 +158,33 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
                f"{ds.num_source_episodes} source demos" + (f" recorded on {robot}" if robot else "") +
                (": a different robot than the base was trained on, so expect a larger adaptation" if
                 cfg["cross_embodiment"] else "") + ".")
+    ready = await _readiness(ctx, project, ds)
+    if ready and ready["verdict"] != "ready":
+        why += f" Data readiness: {ready['summary']}"
     tj = TrainingJob(project_id=project.id, dataset_version_id=ds.id, policy_type=policy_type,  # type: ignore[arg-type]
                      backend=backend, config=cfg, rationale=why,  # type: ignore[arg-type]
                      estimate=estimate(policy_type, steps, backend, ds.num_frames, infra.training_gres),
-                     proposed_by=proposer(actor, project.id))
+                     proposed_by=proposer(actor, project.id), readiness=ready)
     await ctx.repo.save("training_jobs", tj)
     ctx.changed(project.id, "training_jobs", tj.id)
     await ctx.audit(actor, "propose_training_job", project.id, {"dataset_version_id": ds.id, "policy": policy_type},
                     "ok", f"{tj.id} proposed ({backend})")
     return tj
+
+
+async def _readiness(ctx: Ctx, project: Project, ds: DatasetVersion) -> dict[str, Any] | None:
+    """The dataset's readiness verdict, shown to the approver with the proposal. A blocked dataset can still be
+    proposed: the person approving sees why (docs/STACK_SPEC.md 2.1). Never fails the proposal."""
+    from . import readiness
+
+    try:
+        rep = await readiness.check(ctx, project, dataset_version_id=ds.id)
+    except Exception:  # noqa: BLE001 - a check that can't run must not stop training
+        log.warning("readiness check of %s failed", ds.id, exc_info=True)
+        return None
+    errors = sum(f.severity == "error" for f in rep.findings)
+    warnings = sum(f.severity == "warn" for f in rep.findings)
+    return {"verdict": rep.verdict, "summary": rep.summary, "errors": errors, "warnings": warnings}
 
 
 async def approve(ctx: Ctx, tj_id: str, approver: str, actor: str, token: str | None,
