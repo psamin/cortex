@@ -1009,3 +1009,45 @@ export interface ReadinessReport {
   summary: string;
   dataset_version_id: string | null;
 }
+
+/** docs/STACK_SPEC.md 2.2: one rollout of a checkpoint on the physical arm, judged by a person. */
+export interface RealTrial {
+  id: string;
+  project_id: string;
+  checkpoint_id: string;
+  condition: Condition;
+  success: boolean;
+  failure_mode: string | null;
+  judged_by: string;
+  notes: string;
+  source: "studio" | "agent";
+  voided: boolean;
+  created_at: ISODate;
+}
+export interface TrialRate {
+  n: number;
+  successes: number;
+  rate: number | null;
+  ci95: [number, number];
+}
+export interface SimRealRow {
+  checkpoint_id: string;
+  condition: string;
+  real: TrialRate;
+  /** how many of the real trials an agent recorded from a person's report */
+  agent_logged: number;
+  sim: TrialRate | null;
+  /** the real rate on only the conditions sim also measured; the gap uses this */
+  real_matched?: TrialRate | null;
+  gap: number | null;
+  /** sim evaluated this checkpoint, but only on conditions with no real trials */
+  sim_elsewhere?: boolean;
+}
+export interface SimRealReport {
+  kind: "measured";
+  checkpoints: SimRealRow[];
+  rows: SimRealRow[];
+  spearman: number | null;
+  checkpoints_compared: number;
+  summary: string;
+}

@@ -85,8 +85,10 @@ In ranked order from the research:
 
 - **Improve › Datasets:** each version shows a readiness badge (Ready / Warnings / Blocked). Expanding it
   lists the findings, one line each, with the episodes involved.
-- **Improve › Evaluations:** a **Real robot** section per checkpoint: a trial logger (condition, ✓ / ✗), the
-  real rate with its interval next to the sim rate, and one line for sim ↔ real agreement.
+- **Improve › Evaluations:** one **Real arm** panel. A logger (checkpoint, condition, your name, ✓ / ✗, an
+  optional failure note) with the last few trials and an undo. A table with a row per checkpoint: real rate with
+  its interval, sim rate, gap on the conditions both measured. One line for whether sim ranks checkpoints like
+  the real arm.
 - Copy follows the v2 rules: short, measured values over adjectives, no raw error text.
 
 ## 4. MCP and REST
