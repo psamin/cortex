@@ -497,7 +497,7 @@ async def _llm(ctx: Ctx, pid: str, hist: list[dict[str, Any]]) -> AsyncIterator[
     project = await orch.get_project(ctx, pid)
     st = await orch.project_state(ctx, project)
     sysmsg = SYSTEM.format(project=f"{project.name}: {project.spec.goal} ({project.mode})",
-                           mode_rules=autonomy.mode_rules(project),
+                           mode_rules=autonomy.mode_rules(project, ctx),
                            state=json.dumps({"episodes": st.episode_counts, "evaluations": st.evaluations,
                                              "next": [n.action for n in st.next_actions]}, default=str))
     msgs: list[dict[str, Any]] = [{"role": "system", "content": sysmsg}, *hist[-20:]]
