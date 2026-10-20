@@ -177,6 +177,25 @@ async function follow(jobId: string, projectId: string | undefined, ctx: Ctx, re
 }
 
 /** Keep sending progress while a slow synchronous backend call runs. */
+/**
+ * Robot-session tools run synchronously in the simulator and can take minutes (a slow machine, a first reset that
+ * builds the scene). Without progress a client gives up at ~60 s while the backend keeps working, then retries into
+ * a session that is still busy (#356). These calls send heartbeats when the client asked for progress; their schema
+ * and description stay as they are.
+ */
+export const HEARTBEAT_TOOLS = new Set([
+  "robot_start_episode", "robot_observe", "robot_state", "robot_propose_grasp", "robot_move", "robot_gripper",
+  "robot_verify_grasp", "robot_place", "robot_check_success", "robot_finish_episode",
+]);
+
+export async function withToolHeartbeat<T>(name: string, run: () => Promise<T>, ctx: Ctx): Promise<T> {
+  const report = reporter(ctx);
+  if (!(await ctx.reportProgress(0, 100, `cortex.${name}: starting`))) return run();
+  const r = await withHeartbeat(run(), `cortex.${name}`, report);
+  await report(1, `cortex.${name}: done`, true);
+  return r;
+}
+
 async function withHeartbeat<T>(p: Promise<T>, label: string, report: ReturnType<typeof reporter>): Promise<T> {
   const started = Date.now();
   let n = 0;
