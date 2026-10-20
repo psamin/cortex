@@ -59,10 +59,10 @@ async def test_registering_is_refused_outside_a_launched_manual_job_or_the_data_
     ctx, p, tj, out = await _launched(tmp_path / "data")
     outside = tmp_path / "elsewhere" / "pretrained_model"
     _write_checkpoint(outside)
-    with pytest.raises(ValueError, match="inside the Cortex data dir"):
+    with pytest.raises(ValueError, match="inside this job's output folder"):
         await orch.call_tool(ctx, "register_training_checkpoint",
                              {"project_id": p.id, "training_job_id": tj.id, "path": str(outside)}, "mcp")
-    with pytest.raises(ValueError, match="inside the Cortex data dir"):
+    with pytest.raises(ValueError, match="inside this job's output folder"):
         await orch.call_tool(ctx, "register_training_checkpoint",
                              {"project_id": p.id, "training_job_id": tj.id, "path": "../elsewhere/pretrained_model"},
                              "mcp")
@@ -77,3 +77,14 @@ async def test_registering_is_refused_outside_a_launched_manual_job_or_the_data_
                              {"project_id": other.id, "training_job_id": tj.id,
                               "path": out["register_with"]["args"]["path"]}, "mcp")
     assert (await ctx.repo.get("training_jobs", proposed.id, TrainingJob)).status == JobStatus.proposed
+
+
+async def test_another_folder_in_the_data_dir_is_refused_too(tmp_path):
+    import pytest
+
+    ctx, p, tj, out = await _launched(tmp_path)
+    other = tmp_path / "projects" / "prj_other" / "training" / "tj_x" / "pretrained_model"
+    _write_checkpoint(other)
+    with pytest.raises(ValueError, match="this job's output folder"):
+        await orch.call_tool(ctx, "register_training_checkpoint",
+                             {"project_id": p.id, "training_job_id": tj.id, "path": str(other)}, "mcp")

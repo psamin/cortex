@@ -510,19 +510,19 @@ async def register_checkpoint(ctx: Ctx, project_id: str, training_job_id: str | 
 async def register_manual_checkpoint(ctx: Ctx, project_id: str, training_job_id: str, path: str,
                                      step: int | None = None, actor: str = "mcp") -> Checkpoint:
     """The agent-callable way to finish a manual job: only for a launched (so human-approved) manual job of this
-    project, and only from a directory inside the data dir. Anything else goes through the studio."""
+    project, and only from that job's own output folder. Anything else goes through the studio."""
     tj = await _get(ctx, training_job_id)
     if tj.project_id != project_id:
         raise ValueError(f"{training_job_id} belongs to another project")
     if tj.backend != "manual" or tj.status != JobStatus.queued:
         raise ValueError(f"{training_job_id} is a {tj.backend} job that is '{tj.status}': only a launched manual "
                          "job takes a checkpoint this way")
-    root = ctx.data_dir.resolve()
+    own = manual_output_dir(ctx, tj)  # this job's own run folder: not another project's weights, nothing outside
     p = Path(path) if Path(path).is_absolute() else ctx.local(path)
     p = p.resolve()
-    if not p.is_relative_to(root):
-        raise ValueError(f"the checkpoint must be inside the Cortex data dir ({root}); expected "
-                         f"{manual_checkpoint_path(ctx, tj)}")
+    if not p.is_relative_to(own):
+        raise ValueError(f"the checkpoint must be inside this job's output folder ({own.as_posix()}); expected "
+                         f"{manual_checkpoint_path(ctx, tj).as_posix()}")
     return await register_checkpoint(ctx, project_id, training_job_id, str(p), step, actor)
 
 
