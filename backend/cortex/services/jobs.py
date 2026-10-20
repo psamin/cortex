@@ -199,10 +199,14 @@ class JobManager:
         `on_event` may be sync or async; async handlers are awaited in order."""
         cfg_path.parent.mkdir(parents=True, exist_ok=True)
         cfg_path.write_text(json.dumps(config))
-        proc = await asyncio.create_subprocess_exec(
-            sys.executable, "-m", module, str(cfg_path), cwd=str(BACKEND_DIR),
-            env={**os.environ, **(env or {})},
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                sys.executable, "-m", module, str(cfg_path), cwd=str(BACKEND_DIR),
+                env={**os.environ, **(env or {})},
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+        except NotImplementedError as e:  # an event loop without subprocess support (#347)
+            from ..subprocs import WHY
+            raise WorkerFailed(WHY, user_facing=True) from e
         self.procs[job.id].append(proc)
         err_tail: list[str] = []
 

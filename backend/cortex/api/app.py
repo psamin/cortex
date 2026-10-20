@@ -59,6 +59,10 @@ async def lifespan(app: FastAPI):
     CTX = await build_ctx(settings())
     from ..services import autonomy
     autonomy.claim(CTX)  # an older backend still shutting down starts no more agent turns
+    from ..subprocs import unavailable_reason
+    if why := unavailable_reason():  # e.g. --reload on Windows (#347): say so at startup, not as silent failures
+        log.error(why)
+        CTX.notes.append(why)
     for n in CTX.notes:
         log.warning(n)
     await training_service.resume_pollers(CTX)
@@ -182,6 +186,7 @@ async def health():
     except Exception:
         lr = None
     from ..sim.so101 import ENVHUB_URI
+    from ..subprocs import unavailable_reason
     return {
         "db": {"provider": c.store.name, "fallback": not s.insforge_enabled},
         "storage": {"provider": c.blobs.name, "fallback": not s.insforge_enabled},
@@ -192,6 +197,7 @@ async def health():
         "executor": {"provider": "parallel local worker processes", "fallback": False},
         "training": {"provider": f"futurama slurm ({s.futurama_ssh_host})" if s.futurama_ssh_host
                      else "manual command bundle", "fallback": not s.futurama_ssh_host},
+        "subprocesses": {"ok": unavailable_reason() is None, "reason": unavailable_reason()},
         "lerobot_version": lr, "sim_env": ENVHUB_URI, "notes": c.notes,
     }
 

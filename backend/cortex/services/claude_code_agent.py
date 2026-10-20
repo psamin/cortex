@@ -64,7 +64,11 @@ def available() -> str | None:
     """None if Claude Code can run here, else why not (in words for the studio)."""
     if not shutil.which("claude"):
         return "Claude Code not found"
-    return None
+    from ..subprocs import unavailable_reason
+    try:
+        return unavailable_reason()  # e.g. uvicorn --reload on Windows (#347)
+    except RuntimeError:  # no running loop: decided again when a turn starts
+        return None
 
 
 def _kill(proc) -> None:
@@ -181,6 +185,9 @@ async def chat(ctx: Ctx, pid: str, message: str, sse, tid: str | None = None) ->
                                                     limit=16 * 1024 * 1024)
     except OSError as e:
         raise Unavailable(f"Claude Code could not start ({e.strerror or e})") from e
+    except NotImplementedError as e:  # this event loop has no subprocess support (#347)
+        from ..subprocs import WHY
+        raise Unavailable(WHY) from e
     autonomy.agent_process(ctx, pid, proc.pid)  # a hard restart may leave it running: the next start ends it
     err_tail = bytearray()
 
