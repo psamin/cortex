@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 import numpy as np
@@ -11,6 +12,8 @@ from ..errors import NotFound, UserError
 from ..models import Condition, Episode, EpisodeSource, EpisodeStatus, Project, new_id
 from .jobs import Job
 from .quality_analysis import analyze_episode
+
+log = logging.getLogger(__name__)
 
 SEED_BASE = 10_000
 AUTO_ACCEPT_MIN_SCORE = 0.6
@@ -31,7 +34,10 @@ def fresh_live_dir(ctx: Ctx, project_id: str):
     view streams live.jpg, and an old frame would show the previous simulation until the new one renders."""
     d = ctx.local(live_key(project_id))
     d.mkdir(parents=True, exist_ok=True)
-    (d / "live.jpg").unlink(missing_ok=True)
+    try:
+        (d / "live.jpg").unlink(missing_ok=True)
+    except OSError as e:  # Windows: the studio's live view has it open. A cosmetic frame must not fail a run (#364)
+        log.info("could not clear the last live frame (%s); the new run overwrites it", e)
     return d
 
 

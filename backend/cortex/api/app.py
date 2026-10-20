@@ -394,11 +394,13 @@ async def sim_live(pid: str, request: Request):
             try:
                 m = path.stat().st_mtime
                 if m != last:
-                    last, idle = m, 0
                     data = path.read_bytes()
+                    last, idle = m, 0  # only once read: a frame that couldn't be read is tried again
                     yield (b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: " +
                            str(len(data)).encode() + b"\r\n\r\n" + data + b"\r\n")
-            except FileNotFoundError:
+            except OSError:
+                # not there yet, or (Windows) mid-replace: PermissionError. Skip this tick; raising here would kill
+                # a stream whose headers were already sent (#364).
                 pass
             idle += 1
             if idle > 20 * 60 * 5:
@@ -1210,9 +1212,13 @@ async def rl_live(sid: str):
     from ..services import rl_service
     sb = await rl_service.get(ctx(), sid)
     path = ctx().local(f"projects/{sb.project_id}/rl/{sb.id}/live/live.jpg")
-    if not path.exists():
-        raise HTTPException(404, "no live frame yet")
-    return Response(path.read_bytes(), media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+    try:
+        data = path.read_bytes()
+    except FileNotFoundError:
+        raise HTTPException(404, "no live frame yet") from None
+    except OSError:  # Windows: the worker is replacing it right now (#364)
+        raise HTTPException(503, "the live frame is being replaced; try again", headers={"Retry-After": "1"}) from None
+    return Response(data, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
 
 
 class RLCloseReq(BaseModel):
