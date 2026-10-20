@@ -77,3 +77,19 @@ def test_slurm_submit_ships_the_base_and_the_rename_map(tmp_path, monkeypatch):
     assert "POLICY_PATH=base" in sbatch[0] and "POLICY_PATH=lerobot/smolvla_base" in sbatch[1]
     assert any(c.startswith("ssh") and c.endswith("cat > ~/cortex/jobs/" + c.split("/jobs/")[1].split("/")[0] + "/rename_map.json")
                for c in calls if "/jobs/" in c)
+
+
+def test_a_cortex_built_dataset_records_its_robot(tmp_path):
+    """#369: lerobot_root is relative to the data dir; the robot type was read relative to the cwd, so never found."""
+    async def go():
+        ctx = await build_ctx(Settings(data_dir=tmp_path, futurama_ssh_host="futurama", _env_file=None))
+        p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
+        rel = f"projects/{p.id}/datasets/v1/lerobot"
+        (tmp_path / rel / "meta").mkdir(parents=True)
+        (tmp_path / rel / "meta" / "info.json").write_text(json.dumps({"robot_type": "so101_follower"}))
+        ds = DatasetVersion(project_id=p.id, name="v1", links=[], lerobot_root=rel)
+        await ctx.repo.save("dataset_versions", ds, status="ready")
+        assert ts.robot_type_of(ctx, ds) == "so101_follower"
+        tj = await ts.propose(ctx, p, ds.id)
+        assert tj.config["robot_type"] == "so101_follower"
+    asyncio.run(go())

@@ -64,12 +64,16 @@ def estimate(policy_type: str, steps: int, backend: str, n_frames: int, gres: st
                + ("Free GT allocation; queue wait not included." if backend == "futurama_slurm" else "")))
 
 
-def robot_type_of(ds: DatasetVersion) -> str | None:
-    """The robot a dataset was recorded on (LeRobot info.json), e.g. so101_follower or so100."""
+def robot_type_of(ctx: Ctx, ds: DatasetVersion) -> str | None:
+    """The robot a dataset was recorded on (LeRobot info.json), e.g. so101_follower or so100.
+    lerobot_root is relative to the data dir for Cortex-built datasets (absolute for some imports), so resolve it
+    there, not against the process's working directory (#369)."""
     import json
 
-    info = Path(ds.lerobot_root or "") / "meta" / "info.json"
-    return json.loads(info.read_text()).get("robot_type") if ds.lerobot_root and info.exists() else None
+    if not ds.lerobot_root:
+        return None
+    info = ctx.local(ds.lerobot_root) / "meta" / "info.json"
+    return json.loads(info.read_text()).get("robot_type") if info.exists() else None
 
 
 def train_episodes(ds: DatasetVersion) -> list[int] | None:
@@ -132,7 +136,7 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
         "slurm": {"partition": ctx.settings.futurama_partition, "gres": infra.training_gres,
                   "time_min": infra.training_walltime_min},
     }
-    robot = robot_type_of(ds)
+    robot = robot_type_of(ctx, ds)
     cfg["robot_type"] = robot
     if base is not None:
         base_tj = await ctx.repo.get("training_jobs", base.training_job_id or "", TrainingJob)
