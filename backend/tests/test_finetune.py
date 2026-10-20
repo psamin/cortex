@@ -54,7 +54,7 @@ def test_continue_fine_tuning_records_lineage_and_robot(tmp_path):
 def test_slurm_submit_ships_the_base_and_the_rename_map(tmp_path, monkeypatch):
     calls = []
 
-    async def fake_sh(*args, timeout=600):
+    async def fake_sh(*args, timeout=600, cwd=None, input=None):
         calls.append(" ".join(args))
         return 0, "12345\n" if "sbatch --parsable" in " ".join(args) else ""
 
@@ -73,6 +73,7 @@ def test_slurm_submit_ships_the_base_and_the_rename_map(tmp_path, monkeypatch):
         return calls
     calls = asyncio.run(go())
     sbatch = [c for c in calls if "sbatch --parsable" in c]
-    assert any("/base/" in c and c.startswith("rsync") for c in calls)
+    assert any(c.endswith("/base/") and c.startswith("rsync") for c in calls)
     assert "POLICY_PATH=base" in sbatch[0] and "POLICY_PATH=lerobot/smolvla_base" in sbatch[1]
-    assert any(c.startswith("rsync") and c.endswith("rename_map.json") for c in calls)
+    assert any(c.startswith("ssh") and c.endswith("cat > ~/cortex/jobs/" + c.split("/jobs/")[1].split("/")[0] + "/rename_map.json")
+               for c in calls if "/jobs/" in c)

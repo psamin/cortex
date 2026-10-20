@@ -61,11 +61,10 @@ def test_slurm_submit_ships_the_train_episode_list(tmp_path, monkeypatch):
     shipped: dict[str, str] = {}
     calls: list[str] = []
 
-    async def fake_sh(*args, timeout=600):
+    async def fake_sh(*args, timeout=600, cwd=None, input=None):
         calls.append(" ".join(args))
-        if args[0] == "rsync" and args[-1].endswith("episodes.txt"):
-            with open(args[-2]) as f:
-                shipped[args[-1]] = f.read()
+        if args[0] == "ssh" and args[-1].endswith("episodes.txt"):  # shipped through ssh's stdin (#346)
+            shipped[args[-1]] = input.decode()
         return 0, "12345\n" if "sbatch --parsable" in " ".join(args) else ""
 
     async def no_poll(ctx, tj, job):

@@ -19,7 +19,7 @@ async def _ctx_with_approved_job(tmp_path):
 
 
 async def test_failed_submit_marks_the_training_job_failed(tmp_path, monkeypatch):
-    async def no_vpn(*args, timeout=600):
+    async def no_vpn(*args, timeout=600, cwd=None, input=None):
         return 255, "ssh: Could not resolve hostname futurama"
     monkeypatch.setattr(training_service, "_sh", no_vpn)
     ctx, tj = await _ctx_with_approved_job(tmp_path)
@@ -34,7 +34,7 @@ async def test_failed_submit_marks_the_training_job_failed(tmp_path, monkeypatch
 
 
 async def test_stopped_submit_marks_the_training_job_cancelled(tmp_path, monkeypatch):
-    async def hang(*args, timeout=600):
+    async def hang(*args, timeout=600, cwd=None, input=None):
         await asyncio.sleep(3600)
     monkeypatch.setattr(training_service, "_sh", hang)
     ctx, tj = await _ctx_with_approved_job(tmp_path)
