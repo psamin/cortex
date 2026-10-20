@@ -47,9 +47,11 @@ def test_targeted_demos_are_capped_on_the_train_split():
     assert 0 < len(chosen) < 30 and info["added"] == len(chosen) and info["offered"] == 30
     assert info["targeted_share"] <= MAX_TARGETED_SHARE and info["cap"] == pytest.approx(0.4)
     assert chosen == new[:len(chosen)]
-    # earlier rounds' targeted demos already in the dataset count towards the same cap
-    again, info2 = select_targeted(base + chosen, [ep(i, "rl_sandbox:rl_b") for i in range(10)], 0.2, 0)
-    assert again == [] and info2["targeted_share"] <= MAX_TARGETED_SHARE
+    # earlier rounds' targeted demos already in the dataset count towards the same cap: round 1 left little room
+    more = [ep(i, "rl_sandbox:rl_b") for i in range(100, 110)]  # distinct ids from round 1's
+    again, info2 = select_targeted(base + chosen, more, 0.2, 0)
+    assert len(again) < len(more) and info2["targeted_share"] <= MAX_TARGETED_SHARE
+    assert info2["targeted_train_episodes"] >= info["targeted_train_episodes"]
     assert select_targeted([], new[:3], 0.2, 0)[0] == []  # nothing to dilute into: never an all-targeted dataset
 
 

@@ -81,3 +81,17 @@ def test_slurm_submit_ships_the_train_episode_list(tmp_path, monkeypatch):
     assert list(shipped.values()) == ["[0,2,4]"]
     # the list never goes through sbatch --export (which splits on commas)
     assert not any("episodes" in c for c in calls if "sbatch --parsable" in c)
+
+
+def test_an_episodes_split_is_the_same_in_every_version():
+    """#368: adding episodes used to reshuffle the split, moving v1's held-out demos into v2's train split."""
+    from cortex.models import Condition, Episode
+    from cortex.services.dataset_service import split_episodes
+
+    def eps(n):
+        return [Episode(id=f"ep_{i:03d}", project_id="prj_1", index=i, source="sim_scripted", condition=Condition(),
+                        seed=i, num_frames=10, fps=30, success=True) for i in range(n)]
+    v1, v2 = split_episodes(eps(10), 0.2, 7), split_episodes(eps(40), 0.2, 7)
+    assert all(v2[k] == v for k, v in v1.items())
+    assert 0 < sum(v == "eval" for v in v2.values()) < 20  # still roughly the fraction
+    assert set(split_episodes(eps(2), 0.9, 7).values()) == {"train"}  # a tiny condition is all train

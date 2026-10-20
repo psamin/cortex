@@ -9,8 +9,8 @@ are never counted as additional demonstrations.
 
 from __future__ import annotations
 
+import hashlib
 import json
-import random
 import shutil
 from collections import Counter, defaultdict
 
@@ -29,17 +29,23 @@ from .jobs import Job
 from .recording_service import list_episodes, npz_key
 
 
+def _unit(episode_id: str, seed: int) -> float:
+    """A stable number in [0, 1) per (episode, seed)."""
+    h = hashlib.sha256(f"{seed}:{episode_id}".encode()).digest()
+    return int.from_bytes(h[:8], "big") / 2**64
+
+
 def split_episodes(eps: list[Episode], eval_fraction: float, seed: int) -> dict[str, str]:
+    """Each episode's split depends only on its id and the seed, never on which other episodes are in the version
+    (#368): v1's held-out demos stay held out in v2, so checkpoints from both can be compared on them. A condition
+    with fewer than 3 episodes keeps them all for training (an eval-only condition would never be learned)."""
     by_cond: dict[str, list[Episode]] = defaultdict(list)
-    for e in sorted(eps, key=lambda e: e.id):
+    for e in eps:
         by_cond[e.condition.key].append(e)
-    rng = random.Random(seed)
     split = {}
-    for _, group in sorted(by_cond.items()):
-        rng.shuffle(group)
-        n_eval = int(round(len(group) * eval_fraction)) if len(group) >= 3 else 0
-        for i, e in enumerate(group):
-            split[e.id] = "eval" if i < n_eval else "train"
+    for group in by_cond.values():
+        for e in group:
+            split[e.id] = "eval" if len(group) >= 3 and _unit(e.id, seed) < eval_fraction else "train"
     return split
 
 
