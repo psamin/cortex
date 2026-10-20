@@ -14,7 +14,8 @@ type Meta = { stage: Stage; tier: Tier; step?: number };
 
 const META: Record<string, Meta> = {
   create_policy_project: { stage: "setup", tier: "golden", step: 1 },
-  get_collection_progress: { stage: "collect", tier: "golden", step: 2 },
+  // anytime: improve_policy starts a collection after a checkpoint exists and says to poll this next
+  get_collection_progress: { stage: "anytime", tier: "golden", step: 2 },
   train_from_agent_demonstrations: { stage: "train", tier: "golden", step: 3 },
   launch_training_job: { stage: "train", tier: "golden", step: 5 },
   evaluate_learned_policy: { stage: "evaluate", tier: "golden", step: 7 },
@@ -41,12 +42,29 @@ const META: Record<string, Meta> = {
   get_failure_clusters: { stage: "improve", tier: "advanced" },
   recommend_demonstrations: { stage: "improve", tier: "advanced" },
   create_dataset_version: { stage: "train", tier: "advanced" },
-  propose_training_job: { stage: "train", tier: "advanced" },
+  propose_training_job: { stage: "train", tier: "custom" }, // AGENTS.md step 4 names it
   register_training_checkpoint: { stage: "train", tier: "advanced" },
   launch_simulation_evaluation: { stage: "evaluate", tier: "advanced" },
   compare_experiments: { stage: "evaluate", tier: "advanced" },
   get_infrastructure: { stage: "anytime", tier: "advanced" },
   set_infrastructure: { stage: "anytime", tier: "advanced" },
+  // Tools AGENTS.md's path uses, and their companions (#358). Without an entry a tool counts as
+  // {stage: "manual", tier: "advanced"}: ?toolset=core and ?project= would hide it.
+  get_session_link: { stage: "anytime", tier: "golden" }, // AGENTS.md step 5
+  register_agent: { stage: "anytime", tier: "advanced" },
+  log_decision: { stage: "anytime", tier: "advanced" },
+  list: { stage: "anytime", tier: "advanced" },
+  cancel_job: { stage: "anytime", tier: "advanced" },
+  show_training_review: { stage: "anytime", tier: "custom" },
+  show_collection: { stage: "anytime", tier: "custom" },
+  show_evaluation: { stage: "anytime", tier: "custom" },
+  get_policy_weaknesses: { stage: "improve", tier: "custom" }, // AGENTS.md step 8
+  propose_rl_sandboxes: { stage: "improve", tier: "custom" },
+  accept_rl_sandboxes: { stage: "improve", tier: "custom" },
+  get_rl_sandbox_status: { stage: "improve", tier: "custom" },
+  stop_rl_sandbox: { stage: "improve", tier: "advanced" },
+  close_rl_round: { stage: "improve", tier: "advanced" },
+  get_rl_rounds: { stage: "improve", tier: "advanced" },
 };
 const metaOf = (tool: string): Meta => META[tool.replace(/^cortex\./, "")] ?? { stage: "manual", tier: "advanced" };
 
