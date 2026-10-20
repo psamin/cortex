@@ -186,7 +186,7 @@ def dataset_findings(items: list[tuple[Episode, np.ndarray]], planned: dict[str,
                                message=f"{len(odd)} episode{'s' if len(odd) > 1 else ''} far from the "
                                        f"median length ({med:.0f} frames)", evidence={"median_frames": med}))
     if planned:
-        have = Counter(e.condition.key for e, _ in items if _group(e) == "sim")
+        have = Counter(e.condition.key for e, _ in items)  # real and sim demos both count toward the plan
         thin = {c: have.get(c, 0) for c, want in planned.items() if have.get(c, 0) < want}
         if thin:
             out.append(Finding(code="few_demos", severity="warn",

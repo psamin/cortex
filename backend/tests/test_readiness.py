@@ -93,6 +93,11 @@ def test_thin_conditions_and_idle_data_warn():
     assert found["few_demos"].evidence == {"left/dim": {"have": 0, "planned": 2}}  # center/normal met its target
 
 
+def test_real_demos_count_toward_the_plan():
+    items = [(_ep(i, EpisodeSource.real_teleop), demo(seed=i)[0]) for i in range(3)]
+    assert "few_demos" not in codes(rd.dataset_findings(items, {"center/normal": 3}))
+
+
 def test_planner_holds_are_not_idle_data():
     """A scripted oracle settles before each grasp; that's half its steps and is meant to be there."""
     items = [(_ep(i), demo(seed=i, lead=200)[0]) for i in range(3)]
