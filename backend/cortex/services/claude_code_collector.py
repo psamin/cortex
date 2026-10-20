@@ -106,9 +106,12 @@ async def run_attempt(ctx: Ctx, project: Project, col: AgentCollection, scenario
                 proc.kill()
             await proc.wait()
     except BaseException:  # job cancelled: stop Claude and release the simulator
-        if proc.returncode is None:
-            proc.kill()
-        await rs.close(sid)
+        try:
+            if proc.returncode is None:
+                with contextlib.suppress(ProcessLookupError):  # it exited between the check and the kill (#363)
+                    proc.kill()
+        finally:
+            await rs.close(sid)  # always: a leaked session holds a MuJoCo worker
         raise
     crashed = await rs.record_broken(ctx, sid)  # the simulator died under Claude: one failed attempt (#362)
     finished_by_agent = crashed is None and sid not in rs.SESSIONS

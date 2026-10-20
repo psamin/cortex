@@ -5,6 +5,7 @@ tables; a job only tracks the work in flight."""
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import os
 import logging
@@ -161,15 +162,19 @@ class JobManager:
 
     @staticmethod
     async def _terminate(procs: list[asyncio.subprocess.Process]) -> None:
+        # A worker can exit between the returncode check and the signal: on Windows that raises ProcessLookupError,
+        # which would replace the stop (a CancelledError) and turn it into a failure (#363).
         for p in procs:
             if p.returncode is None:
-                p.terminate()
+                with contextlib.suppress(ProcessLookupError):
+                    p.terminate()
         for p in procs:  # all signalled first, so the grace periods overlap
             if p.returncode is None:
                 try:
                     await asyncio.wait_for(p.wait(), 5)
                 except TimeoutError:
-                    p.kill()
+                    with contextlib.suppress(ProcessLookupError):
+                        p.kill()
                     await p.wait()
 
     async def cancel(self, job_id: str) -> Job | None:
