@@ -2,7 +2,7 @@ import type { MCPServer, ToolAnnotations } from "mcp-use";
 import { z } from "zod";
 import { callTool, identityOf } from "./backend.js";
 import { runIntake, withAskHuman } from "./intake.js";
-import { FOLLOW_NOTE, LONG_JOBS, runLong, withFollow } from "./progress.js";
+import { FOLLOW_NOTE, HEARTBEAT_TOOLS, LONG_JOBS, runLong, withFollow, withToolHeartbeat } from "./progress.js";
 import { touchProject } from "./resources.js";
 
 // Input schemas mirror the backend registry (GET /api/tools). Where the
@@ -912,7 +912,9 @@ export function registerTools(server: MCPServer) {
         if (intake) return runIntake(t.name as "start_intake" | "update_intake", args, ctx);
         const result = long
           ? await runLong(t.name, name, args, ctx, (p) => touchProject(server, p))
-          : await callTool(name, args, ctx.signal, identityOf(ctx));
+          : HEARTBEAT_TOOLS.has(t.name)
+            ? await withToolHeartbeat(t.name, () => callTool(name, args, ctx.signal, identityOf(ctx)), ctx)
+            : await callTool(name, args, ctx.signal, identityOf(ctx));
         const data = (result.structuredContent ?? {}) as Record<string, unknown>;
         const project = (args.project_id ?? data.project_id) as string | undefined;
         if (!result.isError && !t.annotations.readOnlyHint && typeof project === "string") {

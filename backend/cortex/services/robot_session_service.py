@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..context import Ctx
-from ..errors import NotFound
+from ..errors import NotFound, UserError
 from ..models import AgentAttempt, AgentCollection, Condition, Project, Scenario, StartAgentCollectionRequest, new_id
 from . import agent_collection_service as acs
 from .jobs import BACKEND_DIR
@@ -47,21 +47,54 @@ class RobotSession:
 SESSIONS: dict[str, RobotSession] = {}
 
 
+RPC_TIMEOUT_S = 180
+
+
+class SessionBroken(UserError, RuntimeError):
+    """The worker stopped answering in step: the session is closed, so start a new episode. A UserError, so the
+    agent gets this message (HTTP 400), not a generic internal error."""
+
+    user_facing = True
+
+
 async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:
+    """One request, one reply. The worker answers strictly in order, so a reply that arrives after we gave up would
+    be read as the answer to the *next* request (#356). Any timeout or I/O error therefore ends the session: it is
+    dropped and its worker killed, and the caller is told to start a new episode."""
     async with s.lock:
-        assert s.proc.stdin and s.proc.stdout
-        s.proc.stdin.write((json.dumps(req) + "\n").encode())
-        await s.proc.stdin.drain()
-        while True:
-            line = await asyncio.wait_for(s.proc.stdout.readline(), timeout=180)
-            if not line:
-                raise RuntimeError("robot session worker exited")
-            try:
-                out = json.loads(line)
-            except json.JSONDecodeError:
-                continue  # library noise on stdout
-            s.last_used = time.time()
-            return out
+        try:
+            assert s.proc.stdin and s.proc.stdout
+            s.proc.stdin.write((json.dumps(req) + "\n").encode())
+            await s.proc.stdin.drain()
+            while True:
+                line = await asyncio.wait_for(s.proc.stdout.readline(), timeout=RPC_TIMEOUT_S)
+                if not line:
+                    raise SessionBroken("the robot session's simulator exited; start a new episode")
+                try:
+                    out = json.loads(line)
+                except json.JSONDecodeError:
+                    continue  # library noise on stdout
+                s.last_used = time.time()
+                return out
+        except BaseException as e:
+            _kill(s)
+            if isinstance(e, TimeoutError):
+                raise SessionBroken(f"the robot session didn't answer {req.get('op')!r} within {RPC_TIMEOUT_S} s, "
+                                    "so it was closed; start a new episode") from e
+            if isinstance(e, (OSError, AssertionError)):
+                raise SessionBroken(f"lost the robot session's simulator ({type(e).__name__}); "
+                                    "start a new episode") from e
+            raise
+
+
+def _kill(s: RobotSession) -> None:
+    """Drop a session whose worker can't be trusted any more and kill the worker (no close handshake)."""
+    SESSIONS.pop(s.id, None)
+    if s.proc.returncode is None:
+        try:
+            s.proc.kill()
+        except ProcessLookupError:
+            pass
 
 
 def _phase(tool: str, args: dict[str, Any], holding: bool) -> str:
@@ -107,8 +140,12 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
     SESSIONS[s.id] = s
     from .intake_service import scene_payload
 
-    out = await _rpc(s, {"op": "reset", "seed": seed, "scenario": scenario.model_dump(), "mode": "camera",
-                         "live_dir": str(fresh_live_dir(ctx, project.id)), "scene": scene_payload(ctx, project)})
+    try:
+        out = await _rpc(s, {"op": "reset", "seed": seed, "scenario": scenario.model_dump(), "mode": "camera",
+                             "live_dir": str(fresh_live_dir(ctx, project.id)), "scene": scene_payload(ctx, project)})
+    except BaseException:  # the agent never got this session's id: don't leave its worker running (#356)
+        _kill(s)
+        raise
     if not out.get("ok"):
         await close(s.id)
         raise RuntimeError(out.get("error", "reset failed"))
