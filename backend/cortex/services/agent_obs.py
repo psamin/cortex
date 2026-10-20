@@ -244,10 +244,10 @@ async def observe(ctx: Ctx, caller: Caller | None, tool: str, raw_args: dict[str
             "owner": caller.owner if caller else None, "started_at": now().isoformat(),
             "created_at": now().isoformat()}
     if caller:
-        sess = await touch_session(ctx, caller, tool, pid)
+        sess = await _best_effort("touch the agent session", touch_session(ctx, caller, tool, pid))
         if sess and sess.get("agent_name"):
             base["agent_name"] = sess["agent_name"]
-    await _write(ctx, caller, base, "running", "tool_start")
+    await _best_effort("write the tool_start row", _write(ctx, caller, base, "running", "tool_start"))
     token = CURRENT_CALL.set(call)
     t0 = time.perf_counter()
     try:
@@ -255,13 +255,25 @@ async def observe(ctx: Ctx, caller: Caller | None, tool: str, raw_args: dict[str
     except Exception as e:
         approval = isinstance(e, PermissionError) and getattr(e, "approval_required", True)
         status = "approval_required" if approval else "error"
-        await _finish(ctx, caller, base, call, t0, status, None, f"{type(e).__name__}: {e}")
+        # the tool's own error (e.g. APPROVAL REQUIRED) is what the caller must see, not a store failure
+        await _best_effort("write the tool_end row", _finish(ctx, caller, base, call, t0, status, None,
+                                                             f"{type(e).__name__}: {e}"))
         raise
     finally:
         call["open"] = False
         CURRENT_CALL.reset(token)
-    await _finish(ctx, caller, base, call, t0, "ok", result, None)
+    await _best_effort("write the tool_end row", _finish(ctx, caller, base, call, t0, "ok", result, None))
     return result
+
+
+async def _best_effort(what: str, aw: Awaitable[Any]) -> Any:
+    """Observability never decides a tool call (#355): a store that is down (InsForge unreachable, say) must not
+    stop the tool from running, fail it after its side effects happened, or mask its own error."""
+    try:
+        return await aw
+    except Exception:
+        log.warning("agent_obs: could not %s; the tool call goes on", what, exc_info=True)
+        return None
 
 
 async def _finish(ctx: Ctx, caller: Caller | None, base: dict[str, Any], call: dict[str, Any], t0: float,
