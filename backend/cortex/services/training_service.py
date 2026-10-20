@@ -16,6 +16,7 @@ import hmac
 import json
 import logging
 import re
+import shlex
 import shutil
 from collections.abc import Awaitable
 from pathlib import Path
@@ -224,6 +225,20 @@ async def _sh(*args: str, timeout: float = 600, cwd: Path | None = None,
 SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=15"]
 
 
+def _remote_q(path: str) -> str:
+    """Quote a remote path for the remote shell, keeping a leading ~/ expandable."""
+    return "~/" + shlex.quote(path[2:]) if path.startswith("~/") else shlex.quote(path)
+
+
+def _safe_job_dir(path: str) -> str:
+    """rm -rf only ever runs on a job's own directory under the configured jobs root, never on a short or empty
+    path (an unset FUTURAMA_REPO_DIR must not turn into rm -rf ~/)."""
+    parts = [p for p in path.replace("~/", "", 1).split("/") if p]
+    if len(parts) < 3 or "jobs" not in parts or ".." in parts:
+        raise ValueError(f"refusing to delete remote path {path!r}: not a job directory")
+    return path
+
+
 def preflight_transfer_tools() -> None:
     """Refuse a cluster launch up front when this machine can't reach the cluster at all (no ssh, or neither
     rsync nor scp), instead of failing later in the background."""
@@ -242,7 +257,7 @@ async def _push_dir(host: str, local: Path, remote_dir: str) -> None:
     if shutil.which("rsync"):
         cmd = ["rsync", "-az", "--delete", f"{local.name}/", f"{host}:{remote_dir}/"]
     else:  # e.g. Windows, which ships OpenSSH's scp but no rsync
-        rc, out = await _sh("ssh", *SSH_OPTS, host, f"rm -rf {remote_dir}", timeout=120)
+        rc, out = await _sh("ssh", *SSH_OPTS, host, f"rm -rf {_remote_q(_safe_job_dir(remote_dir))}", timeout=120)
         if rc != 0:
             raise RuntimeError(f"ssh failed ({rc}): {out[-400:]} — is the GT VPN up?")
         cmd = ["scp", *SSH_OPTS, "-rq", local.name, f"{host}:{remote_dir}"]
@@ -266,7 +281,7 @@ async def _pull_dir(host: str, remote_dir: str, local: Path) -> None:
 
 async def _ship_text(host: str, remote_path: str, text: str, what: str) -> None:
     """Write a small text file on the cluster through ssh's stdin: no local temp file, no rsync path parsing."""
-    rc, out = await _sh("ssh", *SSH_OPTS, host, f"cat > {remote_path}", timeout=120,
+    rc, out = await _sh("ssh", *SSH_OPTS, host, f"cat > {_remote_q(remote_path)}", timeout=120,
                         input=text.replace("\r\n", "\n").encode())
     if rc != 0:
         raise RuntimeError(f"copying the {what} failed ({rc}): {out[-400:]} — is the GT VPN up?")
@@ -317,7 +332,7 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     ds_local = ctx.local(tj.config["dataset.root"])
     ssh = ["ssh", *SSH_OPTS, host]
     ctx.jobs.log(job, f"copy dataset -> {host}:{remote}")
-    rc, out = await _sh(*ssh, f"mkdir -p {remote}")
+    rc, out = await _sh(*ssh, f"mkdir -p {_remote_q(remote)}")
     if rc != 0:
         raise RuntimeError(f"ssh failed ({rc}): {out[-400:]} — is the GT VPN up?")
     await _push_dir(host, ds_local, f"{remote}/dataset")
@@ -337,7 +352,7 @@ async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
     if c.get("dataset.episodes"):  # a list has commas too: ship it as a file the sbatch script reads
         await _ship_text(host, f"{remote}/episodes.txt", episodes_arg(c["dataset.episodes"]), "train episode list")
     slurm = c.get("slurm") or {}  # chosen in the studio; older jobs fall back to the .env defaults
-    rc, out = await _sh(*ssh, f"cd {remote} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
+    rc, out = await _sh(*ssh, f"cd {_remote_q(remote)} && sbatch --parsable -p {slurm.get('partition', ctx.settings.futurama_partition)} "
                               f"--gres={slurm.get('gres', ctx.settings.futurama_gres)} "
                               f"-t {int(slurm.get('time_min', 120))} --export={export} train_act.sbatch {remote}")
     m = re.search(r"^(\d+)", out.strip().splitlines()[-1] if out.strip() else "")

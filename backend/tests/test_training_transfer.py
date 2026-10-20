@@ -63,3 +63,13 @@ async def test_real_subprocess_receives_stdin_and_cwd(tmp_path):
     rc, out = await ts._sh("sh", "-c", "pwd; cat", cwd=tmp_path, input=b"payload")
     assert rc == 0 and out.splitlines() == [str(tmp_path), "payload"]
     assert asyncio.get_running_loop()  # ran on the test loop
+
+
+def test_remote_paths_are_quoted_and_rm_only_hits_a_job_dir():
+    assert ts._remote_q("~/cortex/jobs/tj_1/dataset") == "~/cortex/jobs/tj_1/dataset"
+    assert ts._remote_q("~/my cortex/jobs/tj_1") == "~/'my cortex/jobs/tj_1'"
+    assert ts._remote_q("/srv/x; rm -rf /") == "'/srv/x; rm -rf /'"
+    assert ts._safe_job_dir("~/cortex/jobs/tj_1/dataset")
+    for bad in ("~/", "", "~/cortex", "/jobs", "~/cortex/jobs/../..", "~/x/y"):
+        with pytest.raises(ValueError, match="not a job directory"):
+            ts._safe_job_dir(bad)
