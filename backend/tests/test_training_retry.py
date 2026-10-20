@@ -133,3 +133,16 @@ async def test_a_retry_waits_when_the_old_slurm_job_cant_be_cancelled(tmp_path, 
         await ts.launch(ctx, tj.id, "gui")
     cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob)
     assert cur.status == JobStatus.failed and cur.external_id == "12345"
+
+
+async def test_a_long_finished_slurm_job_counts_as_cancelled(tmp_path, monkeypatch):
+    """Slurm forgets finished jobs after a few minutes; scancel then exits 1 with "Invalid job id"."""
+    ctx, p, tj = await _failed(tmp_path, monkeypatch, reached_cluster=True)
+
+    async def sh(*a, **kw):
+        if "scancel" in " ".join(a):
+            return 1, "scancel: error: Kill job error on job id 12345: Invalid job id specified"
+        return await _hang(*a, **kw)
+    monkeypatch.setattr(ts, "_sh", sh)
+    assert (await ts.launch(ctx, tj.id, "gui")).status == JobStatus.queued
+    await ctx.jobs.shutdown()

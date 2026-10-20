@@ -365,6 +365,8 @@ async def scancel(ctx: Ctx, external_id: str) -> bool:
     if not host:
         return False
     rc, out = await _sh("ssh", *SSH_OPTS, host, f"scancel {external_id}", timeout=60)
+    if rc != 0 and "Invalid job id" in out:  # Slurm forgot it: it ended long ago, which is as good as cancelled
+        return True
     if rc != 0:
         log.warning("scancel %s failed (%s): %s", external_id, rc, out[-300:])
     return rc == 0
