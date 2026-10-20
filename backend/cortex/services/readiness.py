@@ -32,7 +32,6 @@ JUMP_FACTOR = 8.0  # a step this many times the median step is a glitch
 LAG_FLAG = 3  # frames by which actions may trail the recorded state before it is a sync problem
 LAG_SEARCH = 10
 UNIT_RATIO = (30.0, 100.0)  # degrees / radians = 57.3
-FEW_DEMOS = 10
 IDLE_DATA_FRAC = 0.4
 MAX_EPISODES = 300  # beyond this, a seeded sample is checked
 PICK_WORDS = re.compile(r"\b(pick|grasp|grab|place|put|lift|move|stack|sort|insert)\b", re.I)
@@ -57,9 +56,19 @@ class ReadinessReport(BaseModel):
 # ------------------------------------------------------------------ per-episode
 
 def _idle_eps(action: np.ndarray) -> float:
-    """What counts as 'not moving', relative to how far the joints travel (works in radians or degrees)."""
+    """What counts as 'not moving': relative to how far the joints travel (works in radians or degrees), and above
+    the sensor or hand tremor of a teleop recording, so a still arm with a shaky reading still counts as idle."""
     span = np.percentile(action, 99, axis=0) - np.percentile(action, 1, axis=0)
-    return max(1e-3, 0.002 * float(np.median(span)))
+    return max(1e-3, 0.002 * float(np.median(span)), 4 * _noise(action))
+
+
+def _noise(action: np.ndarray) -> float:
+    """Per-step jitter of the noisiest joint. White noise of std s gives second differences of std sqrt(6)*s and
+    steps of std sqrt(2)*s; smooth motion has near-zero second differences, so this ignores real movement."""
+    if len(action) < 4:
+        return 0.0
+    d2 = np.abs(np.diff(action, n=2, axis=0))
+    return float((1.4826 * np.median(d2, axis=0) / np.sqrt(6) * np.sqrt(2)).max())
 
 
 def _edge_idle(steps: np.ndarray, eps: float) -> tuple[int, int]:
@@ -137,7 +146,8 @@ def _group(e: Episode) -> str:
     return "real" if e.source in (EpisodeSource.imported, EpisodeSource.real_teleop) else "sim"
 
 
-def dataset_findings(items: list[tuple[Episode, np.ndarray]], wanted_conditions: list[str] | None) -> list[Finding]:
+def dataset_findings(items: list[tuple[Episode, np.ndarray]], planned: dict[str, int] | None) -> list[Finding]:
+    """`planned`: demos the collection plan targets per condition key; a condition below its target is thin."""
     out: list[Finding] = []
     fps = Counter(e.fps for e, _ in items)
     if len(fps) > 1:
@@ -175,16 +185,18 @@ def dataset_findings(items: list[tuple[Episode, np.ndarray]], wanted_conditions:
             out.append(Finding(code="length_outlier", severity="info", episode_ids=odd,
                                message=f"{len(odd)} episode{'s' if len(odd) > 1 else ''} far from the "
                                        f"median length ({med:.0f} frames)", evidence={"median_frames": med}))
-    if wanted_conditions:
+    if planned:
         have = Counter(e.condition.key for e, _ in items if _group(e) == "sim")
-        thin = {c: have.get(c, 0) for c in wanted_conditions if have.get(c, 0) < FEW_DEMOS}
+        thin = {c: have.get(c, 0) for c, want in planned.items() if have.get(c, 0) < want}
         if thin:
             out.append(Finding(code="few_demos", severity="warn",
-                               message="under 10 demos for " + ", ".join(f"{c} ({n})" for c, n in thin.items()),
-                               evidence=thin))
+                               message="fewer demos than planned for "
+                                       + ", ".join(f"{c} ({n} of {planned[c]})" for c, n in thin.items()),
+                               evidence={c: {"have": n, "planned": planned[c]} for c, n in thin.items()}))
+    # idle share of human recordings only: planners hold still on purpose (settling before a grasp)
     idle, total = 0, 0
-    for _, a in items:
-        if a.ndim == 2 and len(a) > 2:
+    for e, a in items:
+        if e.source in HUMAN and a.ndim == 2 and len(a) > 2:
             steps = np.abs(np.diff(a, axis=0)).max(axis=1)
             idle += int((steps < _idle_eps(a)).sum())
             total += len(steps)
@@ -193,6 +205,9 @@ def dataset_findings(items: list[tuple[Episode, np.ndarray]], wanted_conditions:
                            message=f"{idle / total:.0%} of all steps are idle",
                            evidence={"idle_frac": round(idle / total, 3)}))
     return out
+
+
+HUMAN = {EpisodeSource.imported, EpisodeSource.real_teleop, EpisodeSource.sim_teleop}
 
 
 def verdict_of(findings: list[Finding]) -> Verdict:
@@ -257,6 +272,11 @@ async def check(ctx: Ctx, project: Project, episode_ids: list[str] | None = None
     if len(eps) > MAX_EPISODES:
         rng = np.random.default_rng(0)
         eps = [eps[i] for i in sorted(rng.choice(len(eps), MAX_EPISODES, replace=False))]
+    for e in eps:  # with a cloud store the files may not be on this machine yet
+        try:
+            await ctx.ensure_local(npz_key(e))
+        except Exception as err:  # noqa: BLE001 - reported per episode as unreadable below
+            log.info("readiness: %s not fetched: %s", e.id, type(err).__name__)
     return await asyncio.to_thread(_check_sync, ctx, project, eps, dataset_version_id)
 
 
@@ -284,8 +304,8 @@ def _check_sync(ctx: Ctx, project: Project, eps: list[Episode], dataset_version_
         items.append((e, a))
         per_episode += episode_findings(e.id, a, state, e.fps or 30,
                                         _gripper_index(project, a.shape[1] if a.ndim == 2 else 0))
-    wanted_conditions = sorted({c.condition.key for c in project.plan.cells}) if project.plan.cells else None
-    findings = dataset_findings(items, wanted_conditions) + _merge(per_episode)
+    planned = {c.condition.key: c.target for c in project.plan.cells if c.target > 0} or None
+    findings = dataset_findings(items, planned) + _merge(per_episode)
     findings.sort(key=lambda f: ["error", "warn", "info"].index(f.severity))
     v = verdict_of(findings)
     if not eps:

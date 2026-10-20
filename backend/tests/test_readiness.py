@@ -87,9 +87,27 @@ def test_degrees_mixed_with_radians_is_found():
 
 
 def test_thin_conditions_and_idle_data_warn():
+    items = [(_ep(i, EpisodeSource.sim_teleop), demo(seed=i, lead=200)[0]) for i in range(3)]
+    found = {f.code: f for f in rd.dataset_findings(items, {"center/normal": 3, "left/dim": 2})}
+    assert "mostly_idle_data" in found
+    assert found["few_demos"].evidence == {"left/dim": {"have": 0, "planned": 2}}  # center/normal met its target
+
+
+def test_planner_holds_are_not_idle_data():
+    """A scripted oracle settles before each grasp; that's half its steps and is meant to be there."""
     items = [(_ep(i), demo(seed=i, lead=200)[0]) for i in range(3)]
-    found = codes(rd.dataset_findings(items, ["center/normal", "left/dim"]))
-    assert {"few_demos", "mostly_idle_data"} <= found
+    assert "mostly_idle_data" not in codes(rd.dataset_findings(items, None))
+
+
+def test_teleop_tremor_is_not_motion_or_a_glitch():
+    """A teleop arm held still reads 0.1 degree of jitter; that's idle, and real motion isn't a glitch against it."""
+    a, s = demo(n=300, lead=60, scale=57.3)  # degrees
+    a = a + np.random.default_rng(3).normal(0, 0.1, a.shape)
+    f = {x.code: x for x in rd.episode_findings("ep", a, s, FPS, gripper=5)}
+    assert "action_jump" not in f
+    assert f["idle_head"].evidence["seconds"] >= 1.5
+    a[200, 1] += 40  # a real glitch still shows
+    assert "action_jump" in codes(rd.episode_findings("ep", a, s, FPS, gripper=5))
 
 
 async def test_check_reports_on_a_projects_episodes(tmp_path):
@@ -197,3 +215,22 @@ async def test_odd_files_are_findings_not_crashes(tmp_path):
     rep = await rd.check(ctx, p)
     found = {f.code: f for f in rep.findings}
     assert rep.episodes_checked == 3 and "shape_mismatch" in found
+
+
+async def test_episodes_in_a_cloud_store_are_fetched_first(tmp_path, monkeypatch):
+    """With InsForge storage the npz may only be in the bucket; readiness fetches it rather than calling it missing."""
+    ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+    p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube"))
+    ep = _ep(0)
+    ep.project_id = p.id
+    await ctx.repo.save("episodes", ep)
+    a, s = demo()
+
+    async def fetch(key):
+        f = ctx.local(key)
+        f.parent.mkdir(parents=True, exist_ok=True)
+        np.savez_compressed(f, action=a, state=s)
+        return f
+    monkeypatch.setattr(ctx, "ensure_local", fetch)
+    rep = await rd.check(ctx, p)
+    assert "unreadable" not in codes(rep.findings)
