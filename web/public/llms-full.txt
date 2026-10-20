@@ -207,19 +207,19 @@ JSON schema:
 
 MCP: `cortex.register_training_checkpoint` · REST: `POST /api/tools/register_training_checkpoint`
 
-Register a trained LeRobot checkpoint (a pretrained_model directory on the Cortex machine), e.g. the result of a manual training job's command. Marks that job succeeded.
+Finish a launched manual training job: register its trained LeRobot checkpoint (the pretrained_model directory launch_training_job named, inside the data dir). Marks that job succeeded.
 
 Arguments:
 
 - `project_id` (string, required)
-- `training_job_id` (string | null, default null): the manual training job this checkpoint came from
-- `path` (string, required): a LeRobot pretrained_model directory (config.json + model.safetensors) on the Cortex machine; relative paths are under the data dir
+- `training_job_id` (string, required): the launched manual training job (tj_...) this checkpoint came from
+- `path` (string, required): the job's pretrained_model directory (config.json + model.safetensors) inside the Cortex data dir; launch_training_job returns the exact path
 - `step` (integer | null, default null)
 
 JSON schema:
 
 ```json
-{"properties":{"project_id":{"type":"string"},"training_job_id":{"anyOf":[{"type":"string"},{"type":"null"}],"default":null,"description":"the manual training job this checkpoint came from"},"path":{"description":"a LeRobot pretrained_model directory (config.json + model.safetensors) on the Cortex machine; relative paths are under the data dir","type":"string"},"step":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}},"required":["project_id","path"],"type":"object"}
+{"properties":{"project_id":{"type":"string"},"training_job_id":{"description":"the launched manual training job (tj_...) this checkpoint came from","type":"string"},"path":{"description":"the job's pretrained_model directory (config.json + model.safetensors) inside the Cortex data dir; launch_training_job returns the exact path","type":"string"},"step":{"anyOf":[{"type":"integer"},{"type":"null"}],"default":null}},"required":["project_id","training_job_id","path"],"type":"object"}
 ```
 
 ### launch_simulation_evaluation

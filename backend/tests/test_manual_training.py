@@ -30,19 +30,50 @@ async def test_launch_returns_the_command_and_how_to_register(tmp_path):
     assert out["register_with"]["args"]["training_job_id"] == tj.id
 
 
+def _write_checkpoint(d):
+    d.mkdir(parents=True)
+    (d / "config.json").write_text(json.dumps({"type": "act"}))
+    (d / "model.safetensors").write_bytes(b"\0")
+
+
 async def test_next_actions_say_to_run_and_register_until_a_checkpoint_exists(tmp_path):
-    ctx, p, tj, _ = await _launched(tmp_path)
+    ctx, p, tj, out = await _launched(tmp_path)
     acts = (await orch.project_state(ctx, p)).next_actions
     reg = [n for n in acts if n.action == "register_training_checkpoint"]
     assert reg and reg[0].args["training_job_id"] == tj.id and "run its training command" in reg[0].reason
 
-    ck_dir = tmp_path / "trained" / "pretrained_model"
-    ck_dir.mkdir(parents=True)
-    (ck_dir / "config.json").write_text(json.dumps({"type": "act"}))
-    (ck_dir / "model.safetensors").write_bytes(b"\0")
-    out = await orch.call_tool(ctx, "register_training_checkpoint",
-                               {"project_id": p.id, "training_job_id": tj.id, "path": str(ck_dir)}, "mcp")
-    assert out["ref_ids"][0].startswith("ck_")
+    # the path the handoff names is absolute, inside the data dir, and is where the command writes
+    path = out["register_with"]["args"]["path"]
+    assert path.startswith(str(tmp_path.resolve()).replace("\\", "/")) and f"--output_dir={path.rsplit('/checkpoints', 1)[0]}" in out["command"]
+    _write_checkpoint(ts.manual_checkpoint_path(ctx, tj))
+    got = await orch.call_tool(ctx, "register_training_checkpoint", out["register_with"]["args"], "mcp")
+    assert got["ref_ids"][0].startswith("ck_")
     assert (await ctx.repo.get("training_jobs", tj.id, TrainingJob)).status == JobStatus.succeeded
     acts = (await orch.project_state(ctx, p)).next_actions
     assert not [n for n in acts if n.action == "register_training_checkpoint"]
+
+
+async def test_registering_is_refused_outside_a_launched_manual_job_or_the_data_dir(tmp_path):
+    import pytest
+
+    ctx, p, tj, out = await _launched(tmp_path / "data")
+    outside = tmp_path / "elsewhere" / "pretrained_model"
+    _write_checkpoint(outside)
+    with pytest.raises(ValueError, match="inside the Cortex data dir"):
+        await orch.call_tool(ctx, "register_training_checkpoint",
+                             {"project_id": p.id, "training_job_id": tj.id, "path": str(outside)}, "mcp")
+    with pytest.raises(ValueError, match="inside the Cortex data dir"):
+        await orch.call_tool(ctx, "register_training_checkpoint",
+                             {"project_id": p.id, "training_job_id": tj.id, "path": "../elsewhere/pretrained_model"},
+                             "mcp")
+    proposed = await ts.propose(ctx, p, tj.dataset_version_id)  # never approved
+    with pytest.raises(ValueError, match="only a launched manual job"):
+        await orch.call_tool(ctx, "register_training_checkpoint",
+                             {"project_id": p.id, "training_job_id": proposed.id,
+                              "path": str(ts.manual_checkpoint_path(ctx, proposed))}, "mcp")
+    other = await orch.create_project(ctx, CreateProjectRequest(task_prompt="stack the red block on the blue one"))
+    with pytest.raises(ValueError, match="another project"):
+        await orch.call_tool(ctx, "register_training_checkpoint",
+                             {"project_id": other.id, "training_job_id": tj.id,
+                              "path": out["register_with"]["args"]["path"]}, "mcp")
+    assert (await ctx.repo.get("training_jobs", proposed.id, TrainingJob)).status == JobStatus.proposed

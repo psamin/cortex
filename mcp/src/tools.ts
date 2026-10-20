@@ -231,14 +231,14 @@ const TOOLS: Def[] = [
     name: "register_training_checkpoint",
     title: "Register a trained checkpoint",
     description:
-      "Register a trained LeRobot checkpoint (a pretrained_model directory with config.json and model.safetensors, on the machine running " +
-      "Cortex) and attach it to its training job, which is then marked succeeded.\n" +
+      "Finish a launched manual training job: register its trained LeRobot checkpoint (the pretrained_model directory with config.json and " +
+      "model.safetensors that launch_training_job named, inside the Cortex data dir). The job is then marked succeeded. Refused for any other job.\n" +
       "USE WHEN: a manual training job's command finished (cortex_launch_training_job returned manual=true and register_with args).\n" +
       "NEXT: cortex_evaluate_learned_policy or cortex_launch_simulation_evaluation with the returned checkpoint id (ck_...).",
     inputSchema: z.object({
       project_id: projectId,
-      training_job_id: z.string().nullish().describe("The manual training job (tj_...) this checkpoint came from"),
-      path: z.string().describe("pretrained_model directory; absolute, or relative to the Cortex data dir"),
+      training_job_id: z.string().describe("The launched manual training job (tj_...) this checkpoint came from"),
+      path: z.string().describe("The job's pretrained_model directory inside the Cortex data dir (launch_training_job returns it)"),
       step: z.number().int().nullish().describe("Training step of the checkpoint, if known"),
     }),
     annotations: WRITE,

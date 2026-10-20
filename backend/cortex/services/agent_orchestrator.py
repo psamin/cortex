@@ -124,8 +124,7 @@ async def next_actions(ctx: Ctx, project: Project, st: ProjectState) -> list[Nex
             out.append(NextAction(action="register_training_checkpoint", requires_approval=True,
                                   reason=f"{t['id']} waits for someone to run its training command on a GPU machine "
                                          "(no GPU backend is connected), then register the checkpoint",
-                                  args={"project_id": pid, "training_job_id": t["id"],
-                                        "path": f"outputs/{t['id']}/checkpoints/last/pretrained_model"}))
+                                  args={"project_id": pid, "training_job_id": t["id"]}))
         latest = [u for u in st.training_jobs if u["dataset_version_id"] == t["dataset_version_id"]][-1]
         if t["status"] in training_service.RETRYABLE and latest is t:  # no newer job on the same data replaces it
             why = f"{t['id']} {t['status']}" + (f": {t['error']}" if t.get("error") else "")
@@ -234,9 +233,9 @@ class Args:
 
     class RegisterCheckpoint(BaseModel):
         project_id: str
-        training_job_id: str | None = Field(None, description="the manual training job this checkpoint came from")
-        path: str = Field(description="a LeRobot pretrained_model directory (config.json + model.safetensors) on "
-                                      "the Cortex machine; relative paths are under the data dir")
+        training_job_id: str = Field(description="the launched manual training job (tj_...) this checkpoint came from")
+        path: str = Field(description="the job's pretrained_model directory (config.json + model.safetensors) inside "
+                                      "the Cortex data dir; launch_training_job returns the exact path")
         step: int | None = None
 
     class LaunchEval(BaseModel):
@@ -372,7 +371,7 @@ async def t_launch_training(ctx, a, actor):
 def _manual_handoff(ctx: Ctx, tj: TrainingJob) -> dict[str, Any]:
     """No GPU backend is connected: nothing trains until someone runs the command and registers the result (#353).
     Say so, instead of a 'queued' that an agent would poll forever."""
-    ckpt = f"outputs/{tj.id}/checkpoints/last/pretrained_model"
+    ckpt = training_service.manual_checkpoint_path(ctx, tj).as_posix()
     return {"summary": f"{tj.id} is NOT training: no GPU backend is connected (manual). Run the command on a GPU "
                        f"machine, then call register_training_checkpoint with training_job_id={tj.id} and the "
                        f"pretrained_model path ({ckpt}), or ask the human to. Polling project state will not "
@@ -384,7 +383,8 @@ def _manual_handoff(ctx: Ctx, tj: TrainingJob) -> dict[str, Any]:
 
 
 async def t_register_checkpoint(ctx, a, actor):
-    ck = await training_service.register_checkpoint(ctx, a.project_id, a.training_job_id, a.path, a.step, actor)
+    ck = await training_service.register_manual_checkpoint(ctx, a.project_id, a.training_job_id, a.path, a.step,
+                                                           actor)
     return {"summary": f"Registered checkpoint {ck.id} ({ck.policy_type})"
                        + (f" for {a.training_job_id}" if a.training_job_id else "")
                        + ". Next: evaluate it with launch_simulation_evaluation.",
@@ -750,8 +750,9 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
     Tool("launch_training_job", "Launch an approved training job. Refused unless a human approved it in the "
          "studio or a valid operator approval_token is given.", Args.LaunchTraining, t_launch_training,
          agent_callable=False),
-    Tool("register_training_checkpoint", "Register a trained LeRobot checkpoint (a pretrained_model directory on the "
-         "Cortex machine), e.g. the result of a manual training job's command. Marks that job succeeded.",
+    Tool("register_training_checkpoint", "Finish a launched manual training job: register its trained LeRobot "
+         "checkpoint (the pretrained_model directory launch_training_job named, inside the data dir). Marks that "
+         "job succeeded.",
          Args.RegisterCheckpoint, t_register_checkpoint),
     Tool("launch_simulation_evaluation", "Evaluate a policy in parallel MuJoCo branches: baseline, shifted object, "
          "dim lighting. Records seeds, successes, rewards and videos.", Args.LaunchEval, t_eval),
