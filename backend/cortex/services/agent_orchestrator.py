@@ -1098,7 +1098,8 @@ from . import external_diagnosis  # noqa: E402
 
 TOOLS.update({n: Tool(n, d, a, f, agent_callable=False) for n, d, a, f in external_diagnosis.TOOLS})
 
-# Tools that start work the agent should not start without a human click.
+# Tools that start work the agent should not start without a human click. Not enforced here: it labels these tools
+# "needs approval" in the generated agent index (scripts/gen_agent_index.py), so keep it in step with the gates.
 NEEDS_GUI_APPROVAL = {"launch_simulation_evaluation", "propose_training_job"}
 
 

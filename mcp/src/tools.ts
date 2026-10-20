@@ -206,6 +206,9 @@ const TOOLS: Def[] = [
       dataset_version_id: z.string().describe("Dataset version id (ds_...), from cortex_create_dataset_version or get_project_state"),
       policy_type: z.enum(["act", "smolvla"]).optional().describe("'act' (default; fast, single-task) or 'smolvla' (language-conditioned, ~5x slower per step)"),
       steps: z.number().int().nullish().describe("Training steps (default 20000)"),
+      base_checkpoint_id: z.string().nullish().describe(
+        "Checkpoint (ck_...) to continue fine-tuning from, e.g. for this robot or new data; its policy type wins. Omit to train from scratch",
+      ),
     }),
     annotations: WRITE,
   },
@@ -493,6 +496,7 @@ const TOOLS: Def[] = [
       project_id: projectId,
       cube_region: z.enum(["left", "center", "right"]).optional(),
       lighting: z.enum(["dim", "normal", "bright"]).optional(),
+      seed: z.number().int().nullish().describe("Simulator seed, to replay a scene; omit for a fresh one"),
     }),
     annotations: ROBOT,
   },
@@ -612,7 +616,9 @@ const TOOLS: Def[] = [
       "environment.obstacles merge by `name` ({name, _delete: true} removes one; {name, confirm: true} confirms an object's " +
       "catalogue values). Units: metres and kilograms. " +
       "Object and obstacle `size` is in metres: box = [x, y, z] full extents; cylinder = [diameter, height] (diameter, NOT radius); sphere = [diameter]. " +
-      "World frame for every position (zone and obstacle center): metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right), z up from the table surface. Unknown " +
+      "World frame for every position: metres from the arm base, +x away from the arm (forward), +y to the arm's left (negative y is to its right). " +
+      "Zone and obstacle `center` is 2-D, [x, y] on the table (never [x, y, z]); an obstacle's height off the table is its own `z` (its bottom, default 0). " +
+      "Obstacles: {name, shape: 'box' | 'cylinder' | 'sphere', size (as above), center: [x, y], z?}. Unknown " +
       "keys are rejected with the reason. Returns the merged spec, `changed`, `still_assumed` and the remaining questions.\n" +
       "Moving conveyors: environment.conveyors is a list of {name, start: [x, y], end: [x, y] (the direction of travel), width (m), height (belt top above the table, m), speed_mps (m/s)}, merged by `name`; an object with `on: '<conveyor>'` starts on that belt and rides it (a missed object falls off the end). The feasibility report from cortex_build_simulation gives the reachable intercept window along the belt.\n" +
       "NEXT: call again until no questions remain, then cortex_build_simulation.",

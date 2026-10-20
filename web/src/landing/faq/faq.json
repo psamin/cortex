@@ -34,7 +34,7 @@
     {
       "id": "improve",
       "q": "How do I improve an ACT policy with targeted demonstrations or RL?",
-      "a": "cortex.improve_policy finds the weakest measured condition of the latest evaluation, collects new demonstrations there in fresh seeds, builds a new dataset version and proposes retraining. Reinforcement learning is not an agent tool yet: the planned RL sandbox tunes the pick-and-place skill under domain randomization, its successful rollouts become demonstrations that retrain ACT, and any uplift is shown as a labelled estimate."
+      "a": "cortex.improve_policy finds the weakest measured condition of the latest evaluation, collects new demonstrations there in fresh seeds, builds a new dataset version and proposes retraining. For reinforcement learning, cortex.get_policy_weaknesses lists the measured weak conditions and cortex.propose_rl_sandboxes proposes RL sandboxes for them, each with an estimated uplift and cost (a labelled estimate, not a measurement); you accept them with cortex.accept_rl_sandboxes. Successful RL rollouts become demonstrations that retrain ACT."
     },
     {
       "id": "mcp",
