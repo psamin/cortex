@@ -357,7 +357,7 @@ async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str], job=None) ->
         if cancelled and ctx.jobs.closing:
             if cur.external_id:
                 raise  # stays queued/running with its Slurm id; the next start polls it again
-            cur.status, cur.error = JobStatus.failed, "interrupted by a backend restart before Slurm accepted it"
+            cur.status, cur.error = JobStatus.failed, INTERRUPTED_BEFORE_SUBMIT
             await _save(ctx, cur, cur.status)
             raise
         stopped = cancelled or (job is not None and ctx.jobs.stop_requested(job.id))
@@ -576,8 +576,23 @@ async def _publish_checkpoint(ctx: Ctx, p: Path) -> str:
         return f"kept locally only, upload failed: {e}"[:300]
 
 
+INTERRUPTED_BEFORE_SUBMIT = "interrupted by a backend restart before Slurm accepted it"
+
+
 async def resume_pollers(ctx: Ctx) -> None:
-    """Re-attach to Slurm jobs that were in flight when the backend restarted."""
+    """At startup: re-attach to Slurm jobs that were in flight when the backend restarted, and fail the ones that
+    were still uploading. A hard kill (no graceful shutdown) between launch() and sbatch leaves a row 'queued' with
+    no Slurm id that nothing would ever pick up again: launch() would treat it as running and Autopilot would
+    wait on it forever (#349). Failing it makes it visible and retryable."""
+    for status in (JobStatus.queued, JobStatus.running):
+        for tj in await ctx.repo.list("training_jobs", TrainingJob, status=status):
+            if tj.backend == "manual" or tj.external_id:
+                continue
+            tj.status, tj.error = JobStatus.failed, INTERRUPTED_BEFORE_SUBMIT
+            try:
+                await _save(ctx, tj, "failed: " + INTERRUPTED_BEFORE_SUBMIT)
+            except Exception:  # one bad row must not stop the backend from starting
+                log.exception("could not mark %s as interrupted", tj.id)
     if not ctx.settings.futurama_ssh_host:
         return
     for status in (JobStatus.queued, JobStatus.running):
