@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import random
 from collections.abc import Iterable
 from typing import Any
@@ -35,6 +36,7 @@ from .recording_service import (
 
 REGIONS = ["left", "center", "right"]
 LIGHTS = ["normal", "dim", "bright"]
+log = logging.getLogger(__name__)
 AGENT_SEED_BASE = 20_000  # disjoint from oracle demos (10_000+) and evaluation seeds (1_000+)
 _ALLOC_LOCKS: dict[str, asyncio.Lock] = {}
 
@@ -201,6 +203,9 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
                               "hardware adapter with an operator present.")
     if req.planner == "auto":  # the project's planner choice from the studio's setup
         req = req.model_copy(update={"planner": project.infra.planner})
+    from .intake_service import scene_payload
+
+    scene_payload(ctx, project)  # a scene out of date with the intake fails this call, not the job after "started"
     # the scripted oracle always reads simulator object poses, so it is privileged by construction
     mode = "privileged" if req.collector == "oracle" else (req.mode or project.autopilot.planning_mode)
     if req.collector == "agent" and await use_claude_code(ctx, req):
@@ -249,78 +254,82 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
     async def run(job: Job) -> str:
         col.status, col.job_id = "running", job.id
         await _save(ctx, col)
-        blur_ref = await dataset_blur_reference(ctx, project.id)
-        live_dir = fresh_live_dir(ctx, project.id)
+        try:
+            blur_ref = await dataset_blur_reference(ctx, project.id)
+            live_dir = fresh_live_dir(ctx, project.id)
 
-        async def on_event(ev: dict[str, Any]) -> None:
-            t = ev.get("type")
-            if cycle is not None and t in ("segment_start", "segment", "operator_reset_required", "cycles_done"):
-                await _on_cycle_event(ctx, project, col, attempts, ev, blur_ref, job)
-                return
-            if t == "episode_start":  # oracle worker: same shape as the agent's attempt_start
-                a = attempts[ev["index"]]
-                ev = {"type": "attempt_start", "index": ev["index"], "total": ev["total"], "seed": a.seed,
-                      "scenario": a.scenario.model_dump()}
-                t = "attempt_start"
-            if t in ("attempt_start", "agent_step", "agent_thought"):
-                live = LIVE.setdefault(col.id, {"index": None, "start": None, "steps": []})
-                if t == "attempt_start":
-                    live.update(index=ev["index"], start=ev, steps=[])
-                else:
-                    live["steps"] = [*live["steps"][-200:], ev]
-                ctx.bus.publish(project.id, "agent_step", {"collection_id": col.id, **ev})
-                if t == "attempt_start":
-                    ctx.jobs.update(job, message=f"{req.collector} attempt {ev['index'] + 1}/{len(attempts)}",
-                                    progress=ev["index"] / len(attempts))
-            elif t in ("attempt", "episode"):
-                await _record_attempt(ctx, project, col, attempts[ev["index"]], ev, blur_ref)
-                ctx.jobs.update(job, progress=(ev["index"] + 1) / len(attempts))
-            elif t == "budget_exhausted":
-                col.status = "budget_exhausted"
-                col.totals["stopped_reason"] = f"collection budget reached after ${ev['spent_usd']:.2f}"
-            elif t == "stopped_early":  # the first attempts all failed: the worker ran no more
-                col.status, col.error = "failed", ev["reason"]
-                col.totals["stopped_reason"] = ev["reason"]
+            async def on_event(ev: dict[str, Any]) -> None:
+                t = ev.get("type")
+                if cycle is not None and t in ("segment_start", "segment", "operator_reset_required", "cycles_done"):
+                    await _on_cycle_event(ctx, project, col, attempts, ev, blur_ref, job)
+                    return
+                if t == "episode_start":  # oracle worker: same shape as the agent's attempt_start
+                    a = attempts[ev["index"]]
+                    ev = {"type": "attempt_start", "index": ev["index"], "total": ev["total"], "seed": a.seed,
+                          "scenario": a.scenario.model_dump()}
+                    t = "attempt_start"
+                if t in ("attempt_start", "agent_step", "agent_thought"):
+                    live = LIVE.setdefault(col.id, {"index": None, "start": None, "steps": []})
+                    if t == "attempt_start":
+                        live.update(index=ev["index"], start=ev, steps=[])
+                    else:
+                        live["steps"] = [*live["steps"][-200:], ev]
+                    ctx.bus.publish(project.id, "agent_step", {"collection_id": col.id, **ev})
+                    if t == "attempt_start":
+                        ctx.jobs.update(job, message=f"{req.collector} attempt {ev['index'] + 1}/{len(attempts)}",
+                                        progress=ev["index"] / len(attempts))
+                elif t in ("attempt", "episode"):
+                    await _record_attempt(ctx, project, col, attempts[ev["index"]], ev, blur_ref)
+                    ctx.jobs.update(job, progress=(ev["index"] + 1) / len(attempts))
+                elif t == "budget_exhausted":
+                    col.status = "budget_exhausted"
+                    col.totals["stopped_reason"] = f"collection budget reached after ${ev['spent_usd']:.2f}"
+                elif t == "stopped_early":  # the first attempts all failed: the worker ran no more
+                    col.status, col.error = "failed", ev["reason"]
+                    col.totals["stopped_reason"] = ev["reason"]
 
-        if req.collector == "agent":
-            p = planner or {}
-            from .intake_service import scene_payload
+            if req.collector == "agent":
+                p = planner or {}
+                from .intake_service import scene_payload
 
-            scene = scene_payload(ctx, project)
-            cfg = {"task": req.task or (scene or {}).get("task") or project.spec.goal, "mode": mode,
-                   "live_dir": str(live_dir), "scene": scene,
-                   "max_total_usd": cap if paid else 1e9,
-                   "planner": {"provider": p["provider"], "model": p["model"], "endpoint": p["endpoint"],
-                               "point_format": p["point_format"], "openrouter_extras": p["openrouter_extras"],
-                               "price_per_m": p["price_per_m"],
-                               "max_calls": req.max_calls_per_episode, "max_usd": req.max_usd_per_episode,
-                               "reasoning_effort": "low"},
-                   "attempts": [{"seed": a.seed, "scenario": a.scenario.model_dump(),
-                                 "out_dir": str(ctx.local(attempt_key(a)))} for a in attempts]}
-            if cycle is not None:
-                cfg.update(cycle, attempts=[{"seed": base_seed, "scenario": scenarios[0].model_dump()}])
-            await ctx.jobs.run_worker(job, "cortex.workers.agent_worker", cfg,
-                                      ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event,
-                                      env={"CORTEX_PLANNER_API_KEY": planner["api_key"]})  # type: ignore[index]
-        else:
-            from .intake_service import scene_payload
+                scene = scene_payload(ctx, project)
+                cfg = {"task": req.task or (scene or {}).get("task") or project.spec.goal, "mode": mode,
+                       "live_dir": str(live_dir), "scene": scene,
+                       "max_total_usd": cap if paid else 1e9,
+                       "planner": {"provider": p["provider"], "model": p["model"], "endpoint": p["endpoint"],
+                                   "point_format": p["point_format"], "openrouter_extras": p["openrouter_extras"],
+                                   "price_per_m": p["price_per_m"],
+                                   "max_calls": req.max_calls_per_episode, "max_usd": req.max_usd_per_episode,
+                                   "reasoning_effort": "low"},
+                       "attempts": [{"seed": a.seed, "scenario": a.scenario.model_dump(),
+                                     "out_dir": str(ctx.local(attempt_key(a)))} for a in attempts]}
+                if cycle is not None:
+                    cfg.update(cycle, attempts=[{"seed": base_seed, "scenario": scenarios[0].model_dump()}])
+                await ctx.jobs.run_worker(job, "cortex.workers.agent_worker", cfg,
+                                          ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event,
+                                          env={"CORTEX_PLANNER_API_KEY": planner["api_key"]})  # type: ignore[index]
+            else:
+                from .intake_service import scene_payload
 
-            cfg = {"mode": "record", "max_steps": 240, "live_dir": str(live_dir), "scene": scene_payload(ctx, project),
-                   "episodes": [{"seed": a.seed, "condition": a.scenario.condition.model_dump(),
-                                 "scenario": a.scenario.model_dump(), "out_dir": str(ctx.local(attempt_key(a)))}
-                                for a in attempts]}
-            if cycle is not None:
-                cfg.update(cycle, condition=scenarios[0].condition.model_dump(), episodes=[])
-            await ctx.jobs.run_worker(job, "cortex.workers.sim_worker", cfg,
-                                      ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
-        if col.status == "running":
-            col.status = "succeeded"
-        await _save(ctx, col)
-        await ctx.audit(ACTOR_SYSTEM, "agent_collection_finished", project.id, {"collection_id": col.id}, "ok",
-                        _summary(col))
-        if col.status == "failed" and col.error:  # stopped early: the job fails with the reason, in words
-            raise UserError(col.error)
-        return col.id
+                cfg = {"mode": "record", "max_steps": 240, "live_dir": str(live_dir), "scene": scene_payload(ctx, project),
+                       "episodes": [{"seed": a.seed, "condition": a.scenario.condition.model_dump(),
+                                     "scenario": a.scenario.model_dump(), "out_dir": str(ctx.local(attempt_key(a)))}
+                                    for a in attempts]}
+                if cycle is not None:
+                    cfg.update(cycle, condition=scenarios[0].condition.model_dump(), episodes=[])
+                await ctx.jobs.run_worker(job, "cortex.workers.sim_worker", cfg,
+                                          ctx.local(f"projects/{project.id}/jobs/{job.id}.json"), on_event)
+            if col.status == "running":
+                col.status = "succeeded"
+            await _save(ctx, col)
+            await ctx.audit(ACTOR_SYSTEM, "agent_collection_finished", project.id, {"collection_id": col.id}, "ok",
+                            _summary(col))
+            if col.status == "failed" and col.error:  # stopped early: the job fails with the reason, in words
+                raise UserError(col.error)
+            return col.id
+        except BaseException as e:  # never leave the durable row "running" (#360)
+            await _end_collection(ctx, col, e, job)
+            raise
 
     job = ctx.jobs.submit("agent_collect", project.id, run, idempotency_key=f"collect:{col.id}")
     col.job_id = job.id
@@ -329,6 +338,22 @@ async def start_collection(ctx: Ctx, project: Project, req: StartAgentCollection
 
 
 ACTOR_SYSTEM = "system"
+
+
+async def _end_collection(ctx: Ctx, col: AgentCollection, e: BaseException, job: Job) -> None:
+    """The collection's job raised: record how it ended, so get_collection_progress and the studio stop showing it
+    running. A backend shutdown is left alone (the next start marks it interrupted); a user stop is cancelled; an
+    outcome already recorded (stopped early, budget reached) keeps its reason."""
+    if isinstance(e, asyncio.CancelledError) and ctx.jobs.closing:
+        return
+    if isinstance(e, asyncio.CancelledError) or ctx.jobs.stop_requested(job.id):
+        col.status, col.error = "cancelled", None
+    elif col.status == "running" or (col.status == "failed" and not col.error):
+        col.status, col.error = "failed", f"{type(e).__name__}: {e}"[:500]
+    try:
+        await _save(ctx, col)
+    except Exception:  # the job's own error is what the caller must see
+        log.exception("could not record the end of collection %s", col.id)
 
 
 async def use_claude_code(ctx: Ctx, req: StartAgentCollectionRequest) -> bool:
