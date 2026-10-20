@@ -263,4 +263,5 @@ async def test_mode_rules_dont_promise_auto_start_when_cluster_jobs_wait_for_a_c
     ctx.settings.cortex_autonomy_cluster = True
     assert "don't ask the user to approve" in autonomy.mode_rules(p, ctx)
     ctx2 = await build_ctx(Settings(data_dir=tmp_path / "b", futurama_ssh_host=None, _env_file=None))
-    assert "wait for the user's click" not in autonomy.mode_rules(p, ctx2)  # no cluster: manual backend
+    manual = autonomy.mode_rules(p, ctx2)  # no cluster: the manual backend, which never auto-starts either
+    assert "training is manual" in manual and "don't ask the user to approve" not in manual

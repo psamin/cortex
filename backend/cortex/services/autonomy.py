@@ -121,7 +121,14 @@ def mode_rules(project: Project, ctx: Ctx | None = None) -> str:
         return ("- MANUAL MODE (the user's choice): do one stage per turn, then stop and suggest the next step.\n"
                 "- Training on the GPU cluster needs the human's approval in the app: propose it, then tell the "
                 "user to approve.")
-    if ctx is not None and cluster_waits_for_click(ctx, project):
+    if ctx is not None and training_service.resolve_backend(ctx, project) == "manual":
+        # standing_approval never covers manual jobs: nothing trains until a person runs the command
+        training = ("- No GPU backend is connected, so training is manual: propose it and tell the user in one "
+                    "sentence to approve it on the training card. Launching hands back a command a person runs on a "
+                    "GPU machine; nothing trains until then, so never say training has started. Spend outside the "
+                    "standing approval, a used-up planner budget, and any real-robot motion need the human too: the "
+                    "app shows them a card, so say in one sentence what needs them and stop.\n")
+    elif ctx is not None and cluster_waits_for_click(ctx, project):
         training = ("- Training runs on the shared Futurama cluster, and cluster jobs always wait for the user's click "
                     "(CORTEX_AUTONOMY_CLUSTER is off): propose it, then tell the user in one sentence to approve it "
                     "on the training card, and end your turn. Never say training has started until "
