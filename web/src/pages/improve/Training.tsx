@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useParams } from "react-router-dom";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Check, Cpu, Rocket, ShieldAlert, Terminal } from "lucide-react";
+import { Check, Cpu, Rocket, RotateCcw, ShieldAlert, Terminal } from "lucide-react";
 import { api } from "../../api/client";
 import { useLogs } from "../../api/events";
 import { useCheckpoints, useDatasets, useTraining } from "../../api/hooks";
@@ -10,6 +10,7 @@ import { useApprover } from "../../components/refs";
 import { ManualTraining } from "../Autopilot";
 import { Badge, Button, EmptyState, ErrorState, Field, Input, Panel, QueryState, Segmented, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
 import { ago, cn, evidenceValue, usd } from "../../lib/format";
+import { canRetry, failureCause } from "../../lib/trainingFailure";
 
 export function TrainingTab() {
   const { pid = "" } = useParams();
@@ -137,7 +138,13 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
               ))}
             </dl>
           </details>
-          {t.error && <InlineError error={t.error} fallback="Training stopped with an error." />}
+          {failureCause(t) ? (
+            <p className="text-sm text-fault" role="status">{failureCause(t)!.long}</p>
+          ) : t.status === "cancelled" ? (
+            <p className="text-sm text-ink-3">Stopped before it finished.</p>
+          ) : (
+            t.error && <InlineError error={t.error} fallback="Training stopped with an error." />
+          )}
           {t.backend === "manual" && t.status !== "proposed" && t.status !== "succeeded" && (
             <div>
               <div className="text-2xs font-medium uppercase tracking-[0.06em] text-ink-3">Manual · no GPU backend</div>
@@ -216,6 +223,11 @@ function TrainingCard({ t, pid }: { t: TrainingJob; pid: string }) {
                   </>
                 )}
               </p>
+            )}
+            {canRetry(t) && (
+              <Button variant="primary" size="sm" className="mt-2 w-full" loading={launch.isPending} onClick={() => launch.mutate()}>
+                <RotateCcw className="h-3.5 w-3.5" /> Retry
+              </Button>
             )}
             {(approve.error || launch.error) && <InlineError error={approve.error ?? launch.error} className="mt-2" />}
           </div>

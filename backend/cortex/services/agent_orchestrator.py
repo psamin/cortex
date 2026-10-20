@@ -91,7 +91,7 @@ async def project_state(ctx: Ctx, project: Project) -> ProjectState:
         dataset_versions=[d.id for d in dss],
         training_jobs=[{"id": t.id, "status": t.status, "policy_type": t.policy_type, "backend": t.backend,
                         "dataset_version_id": t.dataset_version_id, "checkpoint_ids": t.checkpoint_ids,
-                        "error": t.error, "reached_cluster": bool(t.external_id),
+                        "error": t.error, "failure_kind": t.failure_kind, "reached_cluster": bool(t.external_id),
                         "needs_human_to_retry": training_service.retry_needs_human(t)}
                        for t in tjs],
         evaluations=[{"id": e["run"].id, "name": e["run"].name, "status": e["run"].status,

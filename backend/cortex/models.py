@@ -375,6 +375,8 @@ class TrainingJob(BaseModel):
     checkpoint_ids: list[str] = []
     metrics: dict[str, Any] = {}  # e.g. loss_curve [[step, loss], ...] parsed from the training log
     error: str | None = None
+    # why a failed job failed, in a word the studio can show (training_service.FAILURE_KINDS); error keeps the detail
+    failure_kind: str | None = None
     created_at: datetime = Field(default_factory=now)
     updated_at: datetime = Field(default_factory=now)
 

@@ -5,6 +5,7 @@ import { isJobActive, useJobs } from "../api/events";
 import { useAutopilot, useEpisodes, useEvaluations, useHealth, usePlannerBudget, useTraining } from "../api/hooks";
 import { isImported, type AutopilotRun, type EvaluationWithBranches, type Iteration } from "../api/types";
 import { cn, pct } from "../lib/format";
+import { failureCause } from "../lib/trainingFailure";
 import { IsoPlate } from "../sketch";
 import { InfoTip } from "../components/ui";
 import { iterationSuccess, useIterations, wilson } from "./rollouts";
@@ -63,6 +64,9 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
     const trained = tjs.some((t) => t.status === "succeeded" || t.checkpoint_ids.length > 0);
     const evalRunning = has(/eval/) || evs.some((e) => e.branches.some((b) => b.status === "running" || b.status === "queued"));
     const learnedEval = evs.some(learned);
+    // the newest training job, when it failed and nothing newer replaced it
+    const newest = tjs.length ? tjs.reduce((a, b) => (a.created_at > b.created_at ? a : b)) : undefined;
+    const lastFailed = newest?.status === "failed" ? newest : undefined;
 
     if (run && (run.status === "running" || run.status === "waiting_approval" || run.state === "DONE" || run.status === "failed")) {
       const idx = run.state === "DONE" ? 5 : STATE_TO_STAGE[run.state] ?? 0;
@@ -70,9 +74,11 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
         if (i === 5) return { name, state: run.iteration > 1 ? "succeeded" : "waiting", note: run.iteration ? `iteration ${run.iteration}` : undefined };
         if (i < idx) return { name, state: "succeeded" };
         if (i > idx) return { name, state: "waiting" };
-        // a failed autopilot step shows as waiting, not red: the error stays in the backend logs (#328)
-        const st: StageState = run.status === "failed" ? "waiting" : run.status === "waiting_approval" ? "attention" : run.state === "DONE" ? "succeeded" : "running";
-        return { name, state: st, note: run.status === "waiting_approval" ? "needs your OK" : undefined };
+        // a failed step says so (#348); the raw error stays in the backend logs (#328)
+        const st: StageState = run.status === "failed" ? "failed" : run.status === "waiting_approval" ? "attention" : run.state === "DONE" ? "succeeded" : "running";
+        const failedTj = run.status === "failed" && name === "Train" ? lastFailed : undefined;
+        const note = run.status === "waiting_approval" ? "needs your OK" : run.status === "failed" ? (failedTj ? failureCause(failedTj)!.short : "didn't finish") : undefined;
+        return { name, state: st, note };
       });
     }
     // no active autopilot: derive from what exists, plus live jobs
@@ -89,8 +95,8 @@ function useStages(pid: string, run: AutopilotRun | null | undefined, iterations
       },
       {
         name: "Train",
-        state: trainRunning || has(/dataset/) ? "running" : trained ? "succeeded" : proposed ? "attention" : "waiting",
-        note: proposed && !trained ? `${proposed} to approve` : undefined,
+        state: trainRunning || has(/dataset/) ? "running" : trained ? "succeeded" : proposed ? "attention" : lastFailed ? "failed" : "waiting",
+        note: proposed && !trained ? `${proposed} to approve` : lastFailed && !trained && !trainRunning ? failureCause(lastFailed)!.short : undefined,
       },
       {
         name: "Evaluate",
