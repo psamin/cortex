@@ -46,6 +46,7 @@ from . import (
     recording_service,
     replay_service,
     simulation_runner,
+    real_trials,
     training_service,
 )
 from .augment import PRESETS
@@ -95,7 +96,7 @@ async def project_state(ctx: Ctx, project: Project) -> ProjectState:
                         "needs_human_to_retry": training_service.retry_needs_human(t)}
                        for t in tjs],
         evaluations=[{"id": e["run"].id, "name": e["run"].name, "status": e["run"].status,
-                      "policy": e["run"].policy_label,
+                      "policy": e["run"].policy_label, "checkpoint_id": e["run"].policy.checkpoint_id,
                       "branches": {b.spec.name: (f"{b.result.successes}/{b.result.n}" if b.result else b.status)
                                    for b in e["branches"]}} for e in evals],
         replays=[replay_service.brief(r) for r in await replay_service.list_replays(ctx, project.id)],
@@ -160,6 +161,15 @@ async def next_actions(ctx: Ctx, project: Project, st: ProjectState) -> list[Nex
             out.append(NextAction(action="launch_simulation_evaluation",
                                   reason=f"Checkpoint {ck.id} has not been evaluated in simulation",
                                   requires_approval=True, args={"project_id": pid, "policy": ck.id}))
+    tried = {t.checkpoint_id for t in await real_trials.list_trials(ctx, pid)}
+    for e in st.evaluations:
+        ck_id = e.get("checkpoint_id")
+        if e["status"] == JobStatus.succeeded and ck_id and ck_id not in tried and ctx.settings.cortex_enable_hardware:
+            out.append(NextAction(action="log_real_trials", requires_approval=True,
+                                  reason=f"{ck_id} passed sim evaluation but has no real trials: run it on the arm "
+                                         "and log each rollout, so sim results can be checked against real ones",
+                                  args={"project_id": pid, "checkpoint_id": ck_id}))
+            break
     if not st.evaluations:
         out.append(NextAction(action="launch_simulation_evaluation",
                               reason="Run the 3-condition evaluation with the scripted expert as a reference ceiling",
@@ -210,6 +220,12 @@ class Args:
         project_id: str
         dataset_version_id: str | None = Field(None, description="check a dataset version's episodes (ds_...)")
         episode_ids: list[str] | None = Field(None, description="check these episodes; default: every accepted one")
+
+    class RealTrials(BaseModel):
+        project_id: str
+        judged_by: str = Field(min_length=1, max_length=80,
+                               description="the person who watched the rollouts and judged them (never the agent)")
+        trials: list[real_trials.TrialIn] = Field(min_length=1, max_length=100)
 
     class Recommend(BaseModel):
         project_id: str
@@ -319,6 +335,20 @@ async def t_record(ctx, a, actor):
         await recommendation_service.set_status(ctx, a.recommendation_id, "accepted", actor)
     j = await _wait(ctx, job.id, a.wait_s)
     return {"summary": f"Recording {len(conds)} sim demos (job {job.id}: {j['status']})", "ref_ids": [job.id], "job": j}
+
+
+async def t_log_real_trials(ctx, a, actor):
+    p = await get_project(ctx, a.project_id)
+    out = await real_trials.log_trials(ctx, p, a.trials, a.judged_by, "studio" if actor == "gui" else "agent", actor)
+    rep = await real_trials.report(ctx, p)
+    k = sum(t.success for t in out)
+    return {"summary": f"Logged {len(out)} real trial(s) judged by {a.judged_by}: {k} succeeded. {rep.summary}",
+            "ref_ids": [t.id for t in out], "sim_real": real_trials.as_dict(rep)}
+
+
+async def t_sim_real(ctx, a, actor):
+    rep = await real_trials.report(ctx, await get_project(ctx, a.project_id))
+    return {"summary": rep.summary, "ref_ids": [], "sim_real": real_trials.as_dict(rep)}
 
 
 async def t_readiness(ctx, a, actor):
@@ -779,6 +809,13 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "starts/ends, an unused gripper, glitch steps, actions out of sync with state, mixed frame rates, shapes or "
          "units, thin conditions). Returns ready / ready_with_warnings / blocked with the episodes involved. Reports "
          "only; changes nothing.", Args.Readiness, t_readiness),
+    Tool("log_real_trials", "Record rollouts of a checkpoint on the real arm, as judged by the person who watched "
+         "them (judged_by names them; you never judge a real trial yourself). Each trial: checkpoint_id, success, "
+         "condition, optional failure_mode. Returns the updated sim-vs-real report.", Args.RealTrials,
+         t_log_real_trials),
+    Tool("get_sim_real_report", "Real-arm success per checkpoint and condition next to the sim rate for the same "
+         "checkpoint (Wilson 95% intervals, the gap), and how well sim ranks checkpoints the way the real arm does "
+         "(Spearman, once 3+ checkpoints have both).", Args.ProjectRef, t_sim_real),
     Tool("get_failure_clusters", "Current failure clusters with source (quality/evaluation/vlm), episodes and "
          "uncertainty.", Args.ProjectRef, t_clusters),
     Tool("recommend_demonstrations", "Rank which demonstrations to collect next (and augment/train/evaluate "

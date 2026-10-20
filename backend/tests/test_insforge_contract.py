@@ -91,10 +91,10 @@ async def test_migrations_records_and_agent_artifacts(fake):
     await store.init()
     assert [m["name"] for m in fake.migrations] == ["cortex-001-init", "cortex-002-autopilot", "cortex-003-agent-demos",
                                                     "cortex-004-enable-rls", "cortex-005-rl",
-                                                    "cortex-006-agent-obs", "cortex-007-policy-replays"]
+                                                    "cortex-006-agent-obs", "cortex-007-policy-replays", "cortex-008-real-trials"]
     assert "ENABLE ROW LEVEL SECURITY" in fake.migrations[-1]["sql"]
     await store.init()  # idempotent: history is read first
-    assert len(fake.migrations) == 7
+    assert len(fake.migrations) == 8
 
     repo = Repo(store)
     from cortex.models import CreateProjectRequest

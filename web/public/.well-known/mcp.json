@@ -279,6 +279,128 @@
       "needsApproval": false
     },
     {
+      "name": "log_real_trials",
+      "mcpTools": [
+        "cortex.log_real_trials"
+      ],
+      "description": "Record rollouts of a checkpoint on the real arm, as judged by the person who watched them (judged_by names them; you never judge a real trial yourself). Each trial: checkpoint_id, success, condition, optional failure_mode. Returns the updated sim-vs-real report.",
+      "inputSchema": {
+        "$defs": {
+          "Condition": {
+            "description": "A cell of the collection-condition grid. Sim and real share it.",
+            "properties": {
+              "cube_region": {
+                "default": "center",
+                "enum": [
+                  "left",
+                  "center",
+                  "right"
+                ],
+                "type": "string"
+              },
+              "lighting": {
+                "default": "normal",
+                "enum": [
+                  "bright",
+                  "normal",
+                  "dim"
+                ],
+                "type": "string"
+              }
+            },
+            "type": "object"
+          },
+          "TrialIn": {
+            "properties": {
+              "checkpoint_id": {
+                "description": "the checkpoint that ran (ck_...)",
+                "pattern": "^ck_",
+                "type": "string"
+              },
+              "success": {
+                "description": "did the task succeed, as the person watching judged it",
+                "type": "boolean"
+              },
+              "condition": {
+                "$ref": "#/$defs/Condition",
+                "description": "where the object was and the lighting"
+              },
+              "failure_mode": {
+                "anyOf": [
+                  {
+                    "maxLength": 80,
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "e.g. missed_grasp, dropped, collision"
+              },
+              "notes": {
+                "default": "",
+                "maxLength": 500,
+                "type": "string"
+              }
+            },
+            "required": [
+              "checkpoint_id",
+              "success"
+            ],
+            "type": "object"
+          }
+        },
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "judged_by": {
+            "description": "the person who watched the rollouts and judged them (never the agent)",
+            "maxLength": 80,
+            "minLength": 1,
+            "type": "string"
+          },
+          "trials": {
+            "items": {
+              "$ref": "#/$defs/TrialIn"
+            },
+            "maxItems": 100,
+            "minItems": 1,
+            "type": "array"
+          }
+        },
+        "required": [
+          "project_id",
+          "judged_by",
+          "trials"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
+      "name": "get_sim_real_report",
+      "mcpTools": [
+        "cortex.get_sim_real_report"
+      ],
+      "description": "Real-arm success per checkpoint and condition next to the sim rate for the same checkpoint (Wilson 95% intervals, the gap), and how well sim ranks checkpoints the way the real arm does (Spearman, once 3+ checkpoints have both).",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "project_id"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "get_failure_clusters",
       "mcpTools": [
         "cortex.get_failure_clusters"

@@ -263,6 +263,41 @@ const TOOLS: Def[] = [
     annotations: READ,
   },
   {
+    name: "log_real_trials",
+    title: "Log real-arm trials",
+    description:
+      "Record rollouts of a checkpoint on the physical arm as judged by the person who watched them. judged_by must name that person: " +
+      "you never judge a real trial yourself, and the record is labelled as logged by an agent. Each trial: checkpoint_id, success, " +
+      "condition (cube_region, lighting), optional failure_mode. Returns the updated sim-vs-real report.\n" +
+      "USE WHEN: a person ran a checkpoint on the real arm and told you the outcomes.\n" +
+      "NEXT: cortex_get_sim_real_report to see whether sim results predict real ones for this project.",
+    inputSchema: z.object({
+      project_id: projectId,
+      judged_by: z.string().min(1).describe("The person who watched the rollouts and judged success"),
+      trials: z.array(z.object({
+        checkpoint_id: z.string().describe("Checkpoint that ran (ck_...)"),
+        success: z.boolean().describe("Did the task succeed, as the person judged it"),
+        condition: z.object({
+          cube_region: z.enum(["left", "center", "right"]).optional(),
+          lighting: z.enum(["dim", "normal", "bright"]).optional(),
+        }).optional(),
+        failure_mode: z.string().max(80).nullish().describe("e.g. missed_grasp, dropped, collision"),
+        notes: z.string().max(500).optional(),
+      })).min(1).max(100),
+    }),
+    annotations: WRITE,
+  },
+  {
+    name: "get_sim_real_report",
+    title: "Sim vs real report",
+    description:
+      "For each checkpoint with real trials: real success with a Wilson 95% interval next to the sim rate on the same conditions, and the gap. " +
+      "Across checkpoints: how well sim ranks them the way the real arm does (Spearman), once 3 or more have both; below that it says so instead of guessing.\n" +
+      "USE WHEN: deciding whether sim evaluation can be trusted for this project, or comparing checkpoints on the real arm.",
+    inputSchema: z.object({ project_id: projectId }),
+    annotations: READ,
+  },
+  {
     name: "launch_simulation_evaluation",
     title: "Launch simulation evaluation",
     description:

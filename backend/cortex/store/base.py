@@ -11,7 +11,7 @@ TABLES = (
     "dataset_episode_links", "analyses", "failure_clusters", "recommendations",
     "training_jobs", "checkpoints", "evaluation_runs", "simulation_branches",
     "tool_audit_logs", "autopilot_runs", "agent_collections", "agent_attempts", "rl_sandboxes", "rl_rounds",
-    "agent_keys", "agent_sessions", "policy_replays",
+    "agent_keys", "agent_sessions", "policy_replays", "real_trials",
 )
 
 M = TypeVar("M", bound=BaseModel)
