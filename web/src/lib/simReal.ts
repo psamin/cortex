@@ -16,6 +16,6 @@ export function gapText(gap: number | null): string {
 
 /** Spearman of sim vs real success across checkpoints, in words. */
 export function agreementWord(rho: number): string {
-  const s = rho.toFixed(2);
+  const s = rho.toFixed(2).replace("-", "−");
   return rho >= 0.7 ? `yes (ρ ${s})` : rho >= 0.3 ? `partly (ρ ${s})` : `no (ρ ${s})`;
 }

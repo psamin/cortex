@@ -1037,7 +1037,11 @@ export interface SimRealRow {
   /** how many of the real trials an agent recorded from a person's report */
   agent_logged: number;
   sim: TrialRate | null;
+  /** the real rate on only the conditions sim also measured; the gap uses this */
+  real_matched?: TrialRate | null;
   gap: number | null;
+  /** sim evaluated this checkpoint, but only on conditions with no real trials */
+  sim_elsewhere?: boolean;
 }
 export interface SimRealReport {
   kind: "measured";

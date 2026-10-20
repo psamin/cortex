@@ -16,6 +16,6 @@ describe("sim vs real wording", () => {
   it("puts rank agreement in words", () => {
     expect(agreementWord(0.9)).toBe("yes (ρ 0.90)");
     expect(agreementWord(0.4)).toBe("partly (ρ 0.40)");
-    expect(agreementWord(-0.2)).toBe("no (ρ -0.20)");
+    expect(agreementWord(-0.2)).toBe("no (ρ −0.20)");
   });
 });

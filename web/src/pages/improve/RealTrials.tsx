@@ -50,7 +50,8 @@ export function RealTrialsPanel({ pid }: { pid: string }) {
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="min-w-0">
           {r && r.checkpoints.length > 0 ? (
-            <table className="w-full text-xs">
+            <div className="overflow-x-auto">
+            <table className="w-full min-w-[420px] text-xs">
               <thead>
                 <tr className="text-left text-2xs uppercase tracking-[0.06em] text-ink-3">
                   <th className="pb-1.5 font-medium">Checkpoint</th>
@@ -65,6 +66,7 @@ export function RealTrialsPanel({ pid }: { pid: string }) {
                 ))}
               </tbody>
             </table>
+            </div>
           ) : (
             <p className="text-xs text-ink-3">Run a checkpoint on the arm and log each rollout here. Sim results become trustworthy once they match real ones.</p>
           )}
@@ -116,7 +118,7 @@ export function RealTrialsPanel({ pid }: { pid: string }) {
                   <span className={cn("h-1.5 w-1.5 shrink-0 rounded-full", t.success ? "bg-pass" : "bg-fault")} />
                   <span className="truncate">
                     <span className="font-mono">{t.checkpoint_id}</span> · {t.condition.cube_region}/{t.condition.lighting}
-                    {t.failure_mode ? ` · ${t.failure_mode}` : ""}
+                    {t.failure_mode ? ` · ${t.failure_mode}` : ""} · {t.judged_by}
                   </span>
                   {t.source === "agent" && <Badge>agent</Badge>}
                   <button type="button" aria-label="Undo" title="Undo this trial" className="ml-auto text-ink-4 hover:text-ink" onClick={() => undo.mutate(t.id)}>
@@ -143,9 +145,21 @@ function CheckpointRow({ row }: { row: SimRealRow }) {
       <td className="py-1.5 text-ink">
         {rateText(row.real)}
         {row.agent_logged > 0 && <span className="ml-1.5 text-2xs text-ink-3">· {row.agent_logged} via agent</span>}
+        {row.real_matched && row.real_matched.n !== row.real.n && (
+          <div className="text-2xs text-ink-3" title="Real rate on the conditions sim also measured; the gap uses this">
+            {rateText(row.real_matched)} where sim ran
+          </div>
+        )}
       </td>
-      <td className="py-1.5 text-ink-2">{row.sim ? rateText(row.sim) : <span className="text-ink-4">not evaluated</span>}</td>
-      <td className={cn("py-1.5", row.gap != null && row.gap < -0.15 ? "text-caution" : "text-ink-2")}>{gapText(row.gap)}</td>
+      <td className="py-1.5 text-ink-2">
+        {row.sim ? rateText(row.sim) : <span className="text-ink-4">{row.sim_elsewhere ? "other conditions only" : "not evaluated"}</span>}
+      </td>
+      <td
+        className={cn("py-1.5", row.gap != null && row.gap < -0.15 ? "text-caution" : "text-ink-2")}
+        title={row.gap != null ? "Real minus sim, on the conditions both measured" : undefined}
+      >
+        {gapText(row.gap)}
+      </td>
     </tr>
   );
 }
