@@ -46,6 +46,8 @@ const META: Record<string, Meta> = {
   propose_training_job: { stage: "train", tier: "custom" }, // AGENTS.md step 4 names it
   register_training_checkpoint: { stage: "train", tier: "advanced" },
   launch_simulation_evaluation: { stage: "evaluate", tier: "advanced" },
+  log_real_trials: { stage: "evaluate", tier: "custom" }, // STACK_SPEC 2.2
+  get_sim_real_report: { stage: "evaluate", tier: "custom" },
   compare_experiments: { stage: "evaluate", tier: "advanced" },
   get_infrastructure: { stage: "anytime", tier: "advanced" },
   set_infrastructure: { stage: "anytime", tier: "advanced" },

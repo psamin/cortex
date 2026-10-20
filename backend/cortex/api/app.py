@@ -498,6 +498,39 @@ class AnalyzeReq(BaseModel):
     max_vlm_episodes: int = 6
 
 
+class RealTrialsReq(BaseModel):
+    judged_by: str = "studio user"
+    trials: list[Any]
+
+
+@app.post("/api/projects/{pid}/real-trials")
+async def log_real_trials(pid: str, req: RealTrialsReq, request: Request):
+    from ..services import real_trials
+    trials = [real_trials.TrialIn.model_validate(t) for t in req.trials]
+    who = actor(request)
+    out = await real_trials.log_trials(ctx(), await orch.get_project(ctx(), pid), trials, req.judged_by,
+                                       "studio" if who == "gui" else "agent", who)
+    return [t.model_dump(mode="json") for t in out]
+
+
+@app.get("/api/projects/{pid}/real-trials")
+async def real_trials_list(pid: str):
+    from ..services import real_trials
+    return await real_trials.list_trials(ctx(), pid)
+
+
+@app.post("/api/real-trials/{tid}/void")
+async def void_real_trial(tid: str, request: Request):
+    from ..services import real_trials
+    return await real_trials.void_trial(ctx(), tid, actor(request))
+
+
+@app.get("/api/projects/{pid}/sim-real")
+async def sim_real(pid: str):
+    from ..services import real_trials
+    return await real_trials.report(ctx(), await orch.get_project(ctx(), pid))
+
+
 class ReadinessReq(BaseModel):
     episode_ids: list[str] | None = None
 
