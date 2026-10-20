@@ -90,7 +90,9 @@ async def project_state(ctx: Ctx, project: Project) -> ProjectState:
         project=project, episode_counts=counts, latest_analysis_id=an.id if an else None,
         dataset_versions=[d.id for d in dss],
         training_jobs=[{"id": t.id, "status": t.status, "policy_type": t.policy_type, "backend": t.backend,
-                        "dataset_version_id": t.dataset_version_id, "checkpoint_ids": t.checkpoint_ids}
+                        "dataset_version_id": t.dataset_version_id, "checkpoint_ids": t.checkpoint_ids,
+                        "error": t.error, "reached_cluster": bool(t.external_id),
+                        "needs_human_to_retry": training_service.retry_needs_human(t)}
                        for t in tjs],
         evaluations=[{"id": e["run"].id, "name": e["run"].name, "status": e["run"].status,
                       "policy": e["run"].policy_label,
@@ -110,6 +112,19 @@ async def next_actions(ctx: Ctx, project: Project, st: ProjectState) -> list[Nex
     if running:
         out.append(NextAction(action="get_job", reason=f"{len(running)} job(s) in progress ({running[0].kind})",
                               args={"job_id": running[0].id}))
+    # training jobs first: an imported dataset trains without any recorded episodes
+    for t in st.training_jobs:
+        if t["status"] == JobStatus.proposed:
+            out.append(NextAction(action="approve_training_job", reason=f"{t['id']} is waiting for human approval",
+                                  requires_approval=True, args={"training_job_id": t["id"]}))
+        if t["status"] == JobStatus.approved:
+            out.append(NextAction(action="launch_training_job", reason=f"{t['id']} is approved",
+                                  args={"training_job_id": t["id"]}))
+        latest = [u for u in st.training_jobs if u["dataset_version_id"] == t["dataset_version_id"]][-1]
+        if t["status"] in training_service.RETRYABLE and latest is t:  # no newer job on the same data replaces it
+            why = f"{t['id']} {t['status']}" + (f": {t['error']}" if t.get("error") else "")
+            out.append(NextAction(action="launch_training_job", reason=f"{why[:300]} — launch it again to retry",
+                                  requires_approval=bool(t.get("needs_human_to_retry")), args={"training_job_id": t["id"]}))
     if c["total"] == 0:
         conds = [{"cube_region": cell.condition.cube_region, "lighting": cell.condition.lighting,
                   "count": cell.target} for cell in project.plan.cells]
@@ -133,13 +148,6 @@ async def next_actions(ctx: Ctx, project: Project, st: ProjectState) -> list[Nex
     if st.dataset_versions and not st.training_jobs:
         out.append(NextAction(action="propose_training_job", reason="A dataset version exists but no policy is trained",
                               args={"project_id": pid, "dataset_version_id": st.dataset_versions[-1]}))
-    for t in st.training_jobs:
-        if t["status"] == JobStatus.proposed:
-            out.append(NextAction(action="approve_training_job", reason=f"{t['id']} is waiting for human approval",
-                                  requires_approval=True, args={"training_job_id": t["id"]}))
-        if t["status"] == JobStatus.approved:
-            out.append(NextAction(action="launch_training_job", reason=f"{t['id']} is approved",
-                                  args={"training_job_id": t["id"]}))
     ckpts = await ctx.repo.list("checkpoints", Checkpoint, project_id=pid)
     evaluated = {e["run"].policy.checkpoint_id for e in await simulation_runner.list_evaluations(ctx, pid)}
     for ck in ckpts:

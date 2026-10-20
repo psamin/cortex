@@ -169,13 +169,12 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
     tj = await _get(ctx, tj_id)
     if tj.status in (JobStatus.queued, JobStatus.running, JobStatus.succeeded):
         return tj  # idempotent
+    if tj.status in RETRYABLE:
+        _preflight(tj)  # before the reset: a check that fails must leave the job failed, with its reason
+        tj = await _reset_for_retry(ctx, tj, actor)
     if tj.status != JobStatus.approved:
         raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
-    if tj.backend == "futurama_slurm":
-        from ..subprocs import unavailable_reason
-        if why := unavailable_reason():  # ssh/rsync/sbatch would all fail in the background (#347)
-            raise ValueError(why)
-        preflight_transfer_tools()
+    _preflight(tj)
     if "dataset.episodes" not in tj.config:  # proposed before the train-only filter existed
         ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
         tj.config["dataset.episodes"] = train_episodes(ds) if ds is not None else None
@@ -194,6 +193,47 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
                         idempotency_key=f"train:{tj.id}")
     await ctx.audit(actor, "launch_training_job", tj.project_id, {"id": tj.id, "backend": tj.backend}, "ok",
                     f"{tj.id} launched on {tj.backend}", approved=True)
+    return tj
+
+
+RETRYABLE = (JobStatus.failed, JobStatus.cancelled)
+
+
+def retry_needs_human(tj: TrainingJob) -> bool:
+    """A job that reached the cluster already spent GPU time, so running it again needs a fresh human click.
+    So does a job someone stopped: the stop was a decision, and only a person reverses it. One that failed before
+    Slurm accepted it (VPN down, a missing tool, a restart mid-upload) cost nothing and may be retried by anyone."""
+    return bool(tj.external_id) or tj.status == JobStatus.cancelled
+
+
+def _preflight(tj: TrainingJob) -> None:
+    """Local checks a cluster launch needs; they raise before anything is changed."""
+    if tj.backend == "futurama_slurm":
+        from ..subprocs import unavailable_reason
+        if why := unavailable_reason():  # ssh/rsync/sbatch would all fail in the background (#347)
+            raise ValueError(why)
+        preflight_transfer_tools()
+
+
+async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob:
+    """Put a failed or stopped job back to approved so it can run again, without re-proposing it."""
+    if not tj.approved_by:
+        raise ApprovalRequired(f"{tj.id} was never approved; approve it in the Cortex studio first")
+    if actor != "gui" and retry_needs_human(tj):
+        why = (f"already ran on the cluster (Slurm job {tj.external_id}), so running it again spends GPU time again"
+               if tj.external_id else "was stopped by a person")
+        raise ApprovalRequired(f"{tj.id} {why}: ask the human to click Retry on the job in the Cortex studio.")
+    prev = f"{tj.status}: {tj.error}" if tj.error else str(tj.status)
+    if tj.external_id and not await scancel(ctx, tj.external_id):
+        # "lost contact" failures say the Slurm job may still run: it must be ended first, or the retry would share
+        # its job directory (and its output) and spend the GPU twice. If Slurm can't be reached, retry later.
+        raise ValueError(f"couldn't cancel {tj.id}'s earlier Slurm job {tj.external_id}, which may still be "
+                         "running: retry once the cluster is reachable")
+    tj.status, tj.error, tj.external_id = JobStatus.approved, None, None
+    tj.metrics = {k: v for k, v in tj.metrics.items() if k != "loss_curve"}
+    await _save(ctx, tj, f"retrying after {prev}")
+    await ctx.audit(actor, "retry_training_job", tj.project_id, {"id": tj.id, "previous": prev[:300]}, "ok",
+                    f"{tj.id} reset for another run", approved=actor == "gui")
     return tj
 
 
@@ -318,14 +358,18 @@ async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str], job=None) ->
         raise
 
 
-async def scancel(ctx: Ctx, external_id: str) -> None:
-    """Best effort: the stop is recorded either way, and a failure is logged for the operator."""
+async def scancel(ctx: Ctx, external_id: str) -> bool:
+    """Best effort for a stop: the stop is recorded either way, and a failure is logged for the operator.
+    Returns whether Slurm confirmed it (a retry needs that, see _reset_for_retry)."""
     host = ctx.settings.futurama_ssh_host
     if not host:
-        return
+        return False
     rc, out = await _sh("ssh", *SSH_OPTS, host, f"scancel {external_id}", timeout=60)
+    if rc != 0 and "Invalid job id" in out:  # Slurm forgot it: it ended long ago, which is as good as cancelled
+        return True
     if rc != 0:
         log.warning("scancel %s failed (%s): %s", external_id, rc, out[-300:])
+    return rc == 0
 
 
 async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
