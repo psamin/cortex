@@ -151,7 +151,7 @@ How the demonstrations are made:
 
 | What | Command |
 |---|---|
-| Backend only | `cd backend && uv run uvicorn cortex.api.app:app --host 127.0.0.1 --port 8000` |
+| Backend only | `cd backend && uv run uvicorn cortex.api.app:app --host 127.0.0.1 --port 8000` (on Windows, don't add `--reload`: it disables child processes, which training, simulations and the chat agent need) |
 | Studio only | `cd web && pnpm install && pnpm dev` |
 | MCP server only | `cd mcp && npm ci && npm run dev` |
 | Unit tests | `cd backend && uv run pytest` |

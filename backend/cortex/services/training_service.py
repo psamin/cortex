@@ -172,6 +172,9 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
     if tj.status != JobStatus.approved:
         raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
     if tj.backend == "futurama_slurm":
+        from ..subprocs import unavailable_reason
+        if why := unavailable_reason():  # ssh/rsync/sbatch would all fail in the background (#347)
+            raise ValueError(why)
         preflight_transfer_tools()
     if "dataset.episodes" not in tj.config:  # proposed before the train-only filter existed
         ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
