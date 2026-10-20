@@ -121,3 +121,15 @@ async def test_only_a_person_restarts_a_stopped_job(tmp_path, monkeypatch):
     monkeypatch.setattr(ts, "_sh", _hang)
     assert (await ts.launch(ctx, tj.id, "gui")).status == JobStatus.queued
     await ctx.jobs.shutdown()
+
+
+async def test_a_retry_waits_when_the_old_slurm_job_cant_be_cancelled(tmp_path, monkeypatch):
+    ctx, p, tj = await _failed(tmp_path, monkeypatch, reached_cluster=True)
+
+    async def unreachable(*a, **kw):
+        return 255, "ssh: connect to host futurama: Connection timed out"
+    monkeypatch.setattr(ts, "_sh", unreachable)
+    with pytest.raises(ValueError, match="may still be running"):
+        await ts.launch(ctx, tj.id, "gui")
+    cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob)
+    assert cur.status == JobStatus.failed and cur.external_id == "12345"

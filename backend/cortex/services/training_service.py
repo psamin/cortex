@@ -224,15 +224,16 @@ async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob
                if tj.external_id else "was stopped by a person")
         raise ApprovalRequired(f"{tj.id} {why}: ask the human to click Retry on the job in the Cortex studio.")
     prev = f"{tj.status}: {tj.error}" if tj.error else str(tj.status)
-    if tj.external_id:
-        # "lost contact" failures say the Slurm job may still run: end it first, or the retry would share its
-        # job directory (and its output) and spend the GPU twice
-        await scancel(ctx, tj.external_id)
+    if tj.external_id and not await scancel(ctx, tj.external_id):
+        # "lost contact" failures say the Slurm job may still run: it must be ended first, or the retry would share
+        # its job directory (and its output) and spend the GPU twice. If Slurm can't be reached, retry later.
+        raise ValueError(f"couldn't cancel {tj.id}'s earlier Slurm job {tj.external_id}, which may still be "
+                         "running: retry once the cluster is reachable")
     tj.status, tj.error, tj.external_id = JobStatus.approved, None, None
     tj.metrics = {k: v for k, v in tj.metrics.items() if k != "loss_curve"}
     await _save(ctx, tj, f"retrying after {prev}")
     await ctx.audit(actor, "retry_training_job", tj.project_id, {"id": tj.id, "previous": prev[:300]}, "ok",
-                    f"{tj.id} reset for another run", approved=True)
+                    f"{tj.id} reset for another run", approved=actor == "gui")
     return tj
 
 
@@ -357,14 +358,16 @@ async def _tracked(ctx: Ctx, tj: TrainingJob, work: Awaitable[str], job=None) ->
         raise
 
 
-async def scancel(ctx: Ctx, external_id: str) -> None:
-    """Best effort: the stop is recorded either way, and a failure is logged for the operator."""
+async def scancel(ctx: Ctx, external_id: str) -> bool:
+    """Best effort for a stop: the stop is recorded either way, and a failure is logged for the operator.
+    Returns whether Slurm confirmed it (a retry needs that, see _reset_for_retry)."""
     host = ctx.settings.futurama_ssh_host
     if not host:
-        return
+        return False
     rc, out = await _sh("ssh", *SSH_OPTS, host, f"scancel {external_id}", timeout=60)
     if rc != 0:
         log.warning("scancel %s failed (%s): %s", external_id, rc, out[-300:])
+    return rc == 0
 
 
 async def _run_slurm(ctx: Ctx, tj: TrainingJob, job) -> str:
