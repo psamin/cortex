@@ -461,6 +461,54 @@
       "needsApproval": true
     },
     {
+      "name": "register_training_checkpoint",
+      "mcpTools": [
+        "cortex.register_training_checkpoint"
+      ],
+      "description": "Register a trained LeRobot checkpoint (a pretrained_model directory on the Cortex machine), e.g. the result of a manual training job's command. Marks that job succeeded.",
+      "inputSchema": {
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "training_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "description": "the manual training job this checkpoint came from"
+          },
+          "path": {
+            "description": "a LeRobot pretrained_model directory (config.json + model.safetensors) on the Cortex machine; relative paths are under the data dir",
+            "type": "string"
+          },
+          "step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null
+          }
+        },
+        "required": [
+          "project_id",
+          "path"
+        ],
+        "type": "object"
+      },
+      "agentCallable": true,
+      "needsApproval": false
+    },
+    {
       "name": "launch_simulation_evaluation",
       "mcpTools": [
         "cortex.launch_simulation_evaluation"

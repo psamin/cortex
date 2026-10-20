@@ -218,12 +218,30 @@ const TOOLS: Def[] = [
       "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.\n" +
       "RETRY: call this on a 'failed' or 'cancelled' job to run it again (training_jobs[].error says why it failed: fix that first). " +
       "A job that failed before reaching the cluster relaunches directly; one a person stopped, or one that already ran on the cluster, needs the human to click Retry in the studio.\n" +
+      "MANUAL BACKEND (no GPU cluster connected): the result has manual=true and a command; nothing trains until someone runs it on a GPU " +
+      "machine and calls cortex_register_training_checkpoint. Do not poll for a checkpoint: run it yourself if you have a GPU shell, or tell the human.\n" +
       "NEXT: poll cortex_get_project_state until training_jobs[].checkpoint_ids has a checkpoint (ck_...), then cortex_evaluate_learned_policy.",
     inputSchema: z.object({
       training_job_id: z.string().describe("Training job id (tj_...), from cortex_propose_training_job"),
       approval_token: z.string().nullish().describe("Operator approval token, only if the human gave you one; otherwise omit and have them approve in the studio"),
     }),
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: true },
+  },
+  {
+    name: "register_training_checkpoint",
+    title: "Register a trained checkpoint",
+    description:
+      "Register a trained LeRobot checkpoint (a pretrained_model directory with config.json and model.safetensors, on the machine running " +
+      "Cortex) and attach it to its training job, which is then marked succeeded.\n" +
+      "USE WHEN: a manual training job's command finished (cortex_launch_training_job returned manual=true and register_with args).\n" +
+      "NEXT: cortex_evaluate_learned_policy or cortex_launch_simulation_evaluation with the returned checkpoint id (ck_...).",
+    inputSchema: z.object({
+      project_id: projectId,
+      training_job_id: z.string().nullish().describe("The manual training job (tj_...) this checkpoint came from"),
+      path: z.string().describe("pretrained_model directory; absolute, or relative to the Cortex data dir"),
+      step: z.number().int().nullish().describe("Training step of the checkpoint, if known"),
+    }),
+    annotations: WRITE,
   },
   {
     name: "launch_simulation_evaluation",
