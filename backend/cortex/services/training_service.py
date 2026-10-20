@@ -91,6 +91,17 @@ def resolve_backend(ctx: Ctx, project: Project) -> str:
     return chosen if chosen != "auto" else ("futurama_slurm" if ctx.settings.futurama_ssh_host else "manual")
 
 
+STUDIO_ACTORS = ("gui", "agent", "autopilot", "cortex")
+
+
+def proposer(actor: str, project_id: str) -> str:
+    """'studio' for the studio itself (a person, its chat agent, Autopilot) or an MCP agent a studio chat launched
+    for this project; otherwise the actor, e.g. 'mcp' for an external agent."""
+    from .agent_obs import STUDIO_CHAT
+
+    return "studio" if actor in STUDIO_ACTORS or STUDIO_CHAT.get() == project_id else actor
+
+
 async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_type: str = "act",
                   steps: int | None = None, actor: str = "gui", base_checkpoint_id: str | None = None) -> TrainingJob:
     """Propose training a policy. With `base_checkpoint_id` the run continues fine-tuning that policy (from any
@@ -140,7 +151,8 @@ async def propose(ctx: Ctx, project: Project, dataset_version_id: str, policy_ty
                 cfg["cross_embodiment"] else "") + ".")
     tj = TrainingJob(project_id=project.id, dataset_version_id=ds.id, policy_type=policy_type,  # type: ignore[arg-type]
                      backend=backend, config=cfg, rationale=why,  # type: ignore[arg-type]
-                     estimate=estimate(policy_type, steps, backend, ds.num_frames, infra.training_gres))
+                     estimate=estimate(policy_type, steps, backend, ds.num_frames, infra.training_gres),
+                     proposed_by=proposer(actor, project.id))
     await ctx.repo.save("training_jobs", tj)
     ctx.changed(project.id, "training_jobs", tj.id)
     await ctx.audit(actor, "propose_training_job", project.id, {"dataset_version_id": ds.id, "policy": policy_type},
