@@ -346,6 +346,8 @@ export interface TrainingJob {
   updated_at: ISODate;
   /** live training metrics; `loss_curve` is [[step, loss], ...] parsed from the trainer log */
   metrics?: { loss_curve?: [number, number][] } & Record<string, unknown>;
+  /** the dataset's readiness when proposed */
+  readiness?: { verdict: ReadinessVerdict; summary: string; errors: number; warnings: number } | null;
 }
 
 export interface Checkpoint {
@@ -989,4 +991,21 @@ export interface PhysicalSkill {
   replays?: string[];
   /** on the live GPU server now (missing from a backend older than #308) */
   live?: boolean;
+}
+
+/** docs/STACK_SPEC.md 2.1: problems in the demos that never show in the training loss. */
+export type ReadinessVerdict = "ready" | "ready_with_warnings" | "blocked";
+export interface ReadinessFinding {
+  code: string;
+  severity: "info" | "warn" | "error";
+  message: string;
+  episode_ids: string[];
+  evidence: Record<string, unknown>;
+}
+export interface ReadinessReport {
+  verdict: ReadinessVerdict;
+  episodes_checked: number;
+  findings: ReadinessFinding[];
+  summary: string;
+  dataset_version_id: string | null;
 }

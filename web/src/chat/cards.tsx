@@ -547,6 +547,9 @@ export function TrainingApproval({ pid, tj, large }: { pid: string; tj: Training
       </div>
       {slurmLine(tj) && <p className="mt-1.5 text-xs text-ink-3">{slurmLine(tj)}</p>}
       {tj.backend === "manual" && <p className="mt-1.5 text-xs text-ink-3">No GPU connected · you get a command to run</p>}
+      {tj.readiness && tj.readiness.verdict !== "ready" && (
+        <p className={cn("mt-1.5 text-xs", tj.readiness.verdict === "blocked" ? "text-fault" : "text-caution")}>{tj.readiness.summary}</p>
+      )}
       <div className="mt-3.5 flex items-center gap-2">
         <button
           type="button"
