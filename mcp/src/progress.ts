@@ -176,7 +176,6 @@ async function follow(jobId: string, projectId: string | undefined, ctx: Ctx, re
   }
 }
 
-/** Keep sending progress while a slow synchronous backend call runs. */
 /**
  * Robot-session tools run synchronously in the simulator and can take minutes (a slow machine, a first reset that
  * builds the scene). Without progress a client gives up at ~60 s while the backend keeps working, then retries into
@@ -196,6 +195,7 @@ export async function withToolHeartbeat<T>(name: string, run: () => Promise<T>, 
   return r;
 }
 
+/** Keep sending progress while a slow synchronous backend call runs. */
 async function withHeartbeat<T>(p: Promise<T>, label: string, report: ReturnType<typeof reporter>): Promise<T> {
   const started = Date.now();
   let n = 0;

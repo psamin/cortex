@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..context import Ctx
-from ..errors import NotFound
+from ..errors import NotFound, UserError
 from ..models import AgentAttempt, AgentCollection, Condition, Project, Scenario, StartAgentCollectionRequest, new_id
 from . import agent_collection_service as acs
 from .jobs import BACKEND_DIR
@@ -50,8 +50,11 @@ SESSIONS: dict[str, RobotSession] = {}
 RPC_TIMEOUT_S = 180
 
 
-class SessionBroken(RuntimeError):
-    """The worker stopped answering in step: the session is closed, so start a new episode."""
+class SessionBroken(UserError, RuntimeError):
+    """The worker stopped answering in step: the session is closed, so start a new episode. A UserError, so the
+    agent gets this message (HTTP 400), not a generic internal error."""
+
+    user_facing = True
 
 
 async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:

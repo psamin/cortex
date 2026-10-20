@@ -48,3 +48,20 @@ async def test_replies_in_step_are_returned(monkeypatch):
     assert (await rss._rpc(s, {"op": "b"}))["n"] == 2
     proc.kill()
     await proc.wait()
+
+
+def test_a_broken_session_reaches_the_agent_as_its_own_message():
+    """It must come back as a 400 with the text ("start a new episode"), not a generic 500."""
+    from fastapi.testclient import TestClient
+
+    from cortex.api.app import app
+
+    @app.get("/__test/broken")
+    async def broken():
+        raise rss.SessionBroken("the robot session didn't answer 'call' within 180 s, so it was closed; "
+                                "start a new episode")
+    try:
+        r = TestClient(app, raise_server_exceptions=False).get("/__test/broken")
+    finally:
+        app.router.routes.pop()
+    assert r.status_code == 400 and "start a new episode" in r.json()["detail"]
