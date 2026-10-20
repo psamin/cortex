@@ -50,4 +50,6 @@ comments (the `Claim:` convention on #20 and the owning issue) remain the source
 | Package | Branch | Driver | Files touched |
 |---|---|---|---|
 | #52 redesign (Kinetic) | `52-landing`, then `52-*` | Claude Code, driven by @AneeshD04 | `web/src/landing/**`, `web/src/robotics/**`, small route edits in `web/src/App.tsx` and `layout/AppShell.tsx`, visual-only edits in `web/src/**` |
+| v3 readiness check (STACK_SPEC 2.1) | `v3-readiness`, `v3-readiness-ui` | Claude Code, driven by @AneeshD04 | new `backend/cortex/services/readiness.py`, small edits in `agent_orchestrator.py`, `training_service.py`, `app.py`, `mcp/src/tools.ts`, `web/src/pages/improve/Datasets.tsx` |
+| v3 real trials and sim ↔ real (STACK_SPEC 2.2) | `v3-real-trials`, `v3-real-trials-ui` | Claude Code, driven by @AneeshD04 | new `backend/cortex/services/real_trials.py`, small edits in `models.py`, `agent_orchestrator.py`, `app.py`, `mcp/src/tools.ts`, `web/src/pages/improve/Evaluations.tsx` |
 | P5/P6: sessions and collection on intake scenes | not started | Claude Code, driven by @AneeshD04 | will touch `backend/cortex/sim/manipulation.py` and `backend/cortex/services/robot_session_service.py`, coordinated on #16 |
