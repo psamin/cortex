@@ -212,8 +212,9 @@ export function registerViews(server: MCPServer) {
       description:
         "Show a proposed training job (cost, GPU hours, dataset, rationale) to the human in the chat, with an Approve " +
         "button only they can press. This does NOT approve anything, and you cannot approve on their behalf. Call it " +
-        "after cortex_propose_training_job or cortex_train_from_agent_demonstrations, then wait for the human. Once they " +
-        "say they approved, call cortex_launch_training_job.",
+        "after cortex_propose_training_job or cortex_train_from_agent_demonstrations, then wait for the human. Approving " +
+        "in this view also starts the job; if they approved in the studio instead, check cortex_get_project_state and call " +
+        "cortex_launch_training_job only if the job is still 'approved'.",
       inputSchema: z.object({ project_id: projectId, training_job_id: z.string().optional().describe("tj_...; default: latest proposed") }),
       outputSchema: reviewOut,
       annotations: { title: "Show training job for approval", ...READ, idempotentHint: false },

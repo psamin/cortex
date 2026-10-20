@@ -9,6 +9,7 @@ The model never sees the nonce, so it cannot approve training through this path.
 from __future__ import annotations
 
 import base64
+import logging
 import secrets
 import time
 from typing import Any, Literal
@@ -20,6 +21,8 @@ from ..errors import NotFound
 from ..models import DatasetVersion, JobStatus
 from . import agent_collection_service as acs
 from . import recording_service, simulation_runner, training_service
+
+log = logging.getLogger(__name__)
 
 NONCE_TTL_S = 600
 _NONCES: dict[str, tuple[str, float]] = {}  # nonce -> (training job id, expiry)
@@ -196,7 +199,17 @@ async def approve_from_view(ctx: Ctx, a: ViewArgs.Approve, actor: str) -> dict[s
             "This approval link is invalid, used or expired. Open the training review again and click Approve.")
     tj = await training_service.approve(ctx, a.training_job_id, "human click in the MCP App view", actor, None,
                                         human_verified=True)
-    return {"summary": f"{tj.id} approved by a human in the MCP App view. Launch it with launch_training_job.",
+    # The click is the gate, like the studio card's "Approve & start": start it now rather than relying on the
+    # agent to follow up with launch_training_job, which an ended turn never does (#351).
+    try:
+        tj = await training_service.launch(ctx, tj.id, actor)
+    except Exception as e:  # e.g. no ssh on this machine: it stays approved and the reason is returned
+        log.warning("view approval of %s: launch failed: %s", tj.id, e)
+        return {"summary": f"{tj.id} approved by a human in the MCP App view, but it didn't start: {e}. "
+                           "Fix that, then launch it with launch_training_job.",
+                "ref_ids": [tj.id], "training_job_id": tj.id, "status": str(tj.status)}
+    return {"summary": f"{tj.id} approved by a human in the MCP App view and launched on {tj.backend} "
+                       f"(status {tj.status}). Poll cortex_get_project_state for its checkpoint.",
             "ref_ids": [tj.id], "training_job_id": tj.id, "status": str(tj.status)}
 
 

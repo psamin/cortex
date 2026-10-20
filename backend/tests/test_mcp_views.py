@@ -21,7 +21,8 @@ async def _setup(tmp_path):
     ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
     p = await orch.create_project(ctx, CreateProjectRequest(task_prompt="pick up the cube and place it in the bowl"))
     tj = TrainingJob(project_id=p.id, dataset_version_id="ds_missing", policy_type="act", backend="manual",
-                     config={"steps": 100}, rationale="test",
+                     config={"steps": 100, "batch_size": 8, "save_freq": 50, "seed": 1, "policy.type": "act",
+                             "dataset.repo_id": "cortex/x", "dataset.root": "projects/x/lerobot"}, rationale="test",
                      estimate=ResourceEstimate(gpu="x", gpu_hours=0.1, est_cost_usd=0.0, paid=False, notes=""))
     await ctx.repo.save("training_jobs", tj)
     return ctx, p, tj
@@ -48,9 +49,9 @@ def test_view_nonce_approves_once_and_wrong_or_reused_nonces_are_refused(tmp_pat
         with pytest.raises(training_service.ApprovalRequired):
             await orch.call_tool(ctx, "approve_training_from_view", {**args, "nonce": "guessed"}, "mcp")
         out = await orch.call_tool(ctx, "approve_training_from_view", {**args, "nonce": nonce}, "mcp")
-        assert out["status"] == "approved"
+        assert out["status"] == "queued" and "launched" in out["summary"]  # the click also starts it (#351)
         saved = await training_service._get(ctx, tj.id)
-        assert saved.status == JobStatus.approved and "MCP App view" in saved.approved_by
+        assert saved.status == JobStatus.queued and "MCP App view" in saved.approved_by
         with pytest.raises(training_service.ApprovalRequired):
             await orch.call_tool(ctx, "approve_training_from_view", {**args, "nonce": nonce}, "mcp")
     run(go())
@@ -111,4 +112,18 @@ def test_snapshots_say_clearly_when_there_is_nothing_yet(tmp_path):
             await orch.call_tool(ctx, "collection_snapshot", {"project_id": p.id}, "mcp")
         with pytest.raises(KeyError, match="no evaluation"):
             await orch.call_tool(ctx, "evaluation_report", {"project_id": p.id}, "mcp")
+    run(go())
+
+
+def test_a_view_approval_whose_launch_fails_stays_approved_and_says_why(tmp_path, monkeypatch):
+    async def go():
+        ctx, p, tj = await _setup(tmp_path)
+
+        async def refuse(ctx, tj_id, actor="gui"):
+            raise ValueError("Training on Futurama needs the ssh client on this machine")
+        monkeypatch.setattr(training_service, "launch", refuse)
+        nonce = (await orch.call_tool(ctx, "review_training_job", {"project_id": p.id}, "mcp"))["view_approval_nonce"]
+        out = await orch.call_tool(ctx, "approve_training_from_view",
+                                   {"project_id": p.id, "training_job_id": tj.id, "nonce": nonce}, "mcp")
+        assert out["status"] == "approved" and "didn't start" in out["summary"] and "ssh client" in out["summary"]
     run(go())
