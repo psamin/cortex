@@ -42,6 +42,8 @@ class RobotSession:
     last_used: float = field(default_factory=time.time)
     holding: bool = False
     steps: int = 0
+    err_tail: list[str] = field(default_factory=list)  # last stderr lines: why the worker died (#362)
+    err_task: asyncio.Task | None = None
 
 
 SESSIONS: dict[str, RobotSession] = {}
@@ -57,6 +59,17 @@ class SessionBroken(UserError, RuntimeError):
     user_facing = True
 
 
+# Sessions ended by a broken worker, with the reason, so a batch collector can record the attempt as failed
+# instead of mistaking the missing session for one the agent finished (#362). Bounded: oldest dropped first.
+BROKEN: dict[str, tuple[RobotSession, str]] = {}
+BROKEN_KEEP = 50
+
+
+def _why(s: RobotSession) -> str:
+    tail = " | ".join(s.err_tail[-3:])
+    return f" (worker stderr: {tail[-400:]})" if tail else ""
+
+
 async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:
     """One request, one reply. The worker answers strictly in order, so a reply that arrives after we gave up would
     be read as the answer to the *next* request (#356). Any timeout or I/O error therefore ends the session: it is
@@ -69,7 +82,8 @@ async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:
             while True:
                 line = await asyncio.wait_for(s.proc.stdout.readline(), timeout=RPC_TIMEOUT_S)
                 if not line:
-                    raise SessionBroken("the robot session's simulator exited; start a new episode")
+                    await asyncio.sleep(0.2)  # let the stderr reader catch the last lines
+                    raise SessionBroken("the robot session's simulator exited; start a new episode" + _why(s))
                 try:
                     out = json.loads(line)
                 except json.JSONDecodeError:
@@ -77,7 +91,7 @@ async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:
                 s.last_used = time.time()
                 return out
         except BaseException as e:
-            _kill(s)
+            _kill(s, f"{type(e).__name__}: {e}")
             if isinstance(e, TimeoutError):
                 raise SessionBroken(f"the robot session didn't answer {req.get('op')!r} within {RPC_TIMEOUT_S} s, "
                                     "so it was closed; start a new episode") from e
@@ -87,14 +101,43 @@ async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:
             raise
 
 
-def _kill(s: RobotSession) -> None:
+def _kill(s: RobotSession, reason: str | None = None) -> None:
     """Drop a session whose worker can't be trusted any more and kill the worker (no close handshake)."""
-    SESSIONS.pop(s.id, None)
+    if SESSIONS.pop(s.id, None) is not None and reason:
+        BROKEN[s.id] = (s, reason + _why(s))
+        while len(BROKEN) > BROKEN_KEEP:
+            BROKEN.pop(next(iter(BROKEN)))
     if s.proc.returncode is None:
         try:
             s.proc.kill()
         except ProcessLookupError:
             pass
+
+
+async def _drain_err(s: RobotSession) -> None:
+    """Keep the worker's last stderr lines (and keep its stderr pipe from filling up)."""
+    if s.proc.stderr is None:
+        return
+    async for raw in s.proc.stderr:
+        line = raw.decode(errors="replace").rstrip()
+        if line:
+            s.err_tail.append(line)
+            del s.err_tail[:-20]
+
+
+async def record_broken(ctx: Ctx, session_id: str) -> dict[str, Any] | None:
+    """A session whose worker broke (crashed, stopped answering): record its attempt as one failed attempt, judged
+    by nobody, so a batch collection counts it and moves on. None if the session didn't break."""
+    got = BROKEN.pop(session_id, None)
+    if got is None:
+        return None
+    s, reason = got
+    ev = {"success": False, "usage": {"calls": 0, "cost_usd": 0.0}, "recoveries": 0, "counters": {},
+          "num_frames": 0, "wall_s": 0.0, "model_claimed_success": None, "stop_reason": "session worker crashed",
+          "error": reason[:500], "trace_len": 0, "endpoint": "mcp"}
+    project = await ctx.repo.get("projects", s.project_id, Project)
+    await acs._record_attempt(ctx, project, s.collection, s.attempt, ev, None)  # type: ignore[arg-type]
+    return {"attempt_id": s.attempt.id, "error": reason}
 
 
 def _phase(tool: str, args: dict[str, Any], holding: bool) -> str:
@@ -132,17 +175,20 @@ async def start(ctx: Ctx, project: Project, cube_region: str | None = None, ligh
     attempt = AgentAttempt(project_id=project.id, collection_id=col.id, index=index,
                            collector="agent", seed=seed, scenario=scenario, status="failed", mode="camera",
                            provider=col.provider, model=col.model)
+    from .intake_service import scene_payload
+
+    scene = scene_payload(ctx, project)  # before spawning: a stale scene must not leave a worker behind (#362)
     proc = await asyncio.create_subprocess_exec(
         sys.executable, "-m", "cortex.workers.session_worker", cwd=str(BACKEND_DIR),
-        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
         limit=32 * 1024 * 1024)
     s = RobotSession(id=new_id("rs"), project_id=project.id, collection=col, attempt=attempt, proc=proc)
+    s.err_task = asyncio.create_task(_drain_err(s))
     SESSIONS[s.id] = s
-    from .intake_service import scene_payload
 
     try:
         out = await _rpc(s, {"op": "reset", "seed": seed, "scenario": scenario.model_dump(), "mode": "camera",
-                             "live_dir": str(fresh_live_dir(ctx, project.id)), "scene": scene_payload(ctx, project)})
+                             "live_dir": str(fresh_live_dir(ctx, project.id)), "scene": scene})
     except BaseException:  # the agent never got this session's id: don't leave its worker running (#356)
         _kill(s)
         raise

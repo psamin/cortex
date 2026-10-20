@@ -357,6 +357,7 @@ async def _start_claude_code_collection(ctx: Ctx, project: Project, req: StartAg
                 col.totals = fresh.totals
                 await _save(ctx, col)
                 outcomes.append((out.get("status") == "success", None if out.get("finished_by_agent")
+                                 else "session worker crashed" if out.get("error")
                                  else "agent stopped without finishing"))
                 if stopped := early_stop_reason(outcomes):
                     break
