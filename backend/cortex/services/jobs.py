@@ -177,6 +177,14 @@ class JobManager:
                         p.kill()
                     await p.wait()
 
+    async def _reap(self, proc: asyncio.subprocess.Process, err_task: asyncio.Task) -> None:
+        try:
+            await self._terminate([proc])
+        except Exception:  # noqa: BLE001 - best effort; the original error is what matters
+            log.warning("could not end worker %s", proc.pid, exc_info=True)
+        err_task.cancel()
+        await asyncio.gather(err_task, return_exceptions=True)
+
     async def cancel(self, job_id: str) -> Job | None:
         job = self.jobs.get(job_id)
         if job is not None and job.status not in TERMINAL:
@@ -226,19 +234,26 @@ class JobManager:
         err_task = asyncio.create_task(drain_err())
         result_error, user_facing = None, False
         assert proc.stdout
-        async for raw in proc.stdout:
-            try:
-                ev = json.loads(raw)
-            except json.JSONDecodeError:
-                self.log(job, raw.decode(errors="replace").rstrip())
-                continue
-            if ev.get("type") == "result" and not ev.get("ok"):
-                result_error, user_facing = ev.get("error"), bool(ev.get("user_facing"))
-                self.log(job, ev.get("trace", ""))
-            if on_event:
-                r = on_event(ev)
-                if asyncio.iscoroutine(r):
-                    await r
+        try:
+            async for raw in proc.stdout:
+                try:
+                    ev = json.loads(raw)
+                except json.JSONDecodeError:
+                    self.log(job, raw.decode(errors="replace").rstrip())
+                    continue
+                if ev.get("type") == "result" and not ev.get("ok"):
+                    result_error, user_facing = ev.get("error"), bool(ev.get("user_facing"))
+                    self.log(job, ev.get("trace", ""))
+                if on_event:
+                    r = on_event(ev)
+                    if asyncio.iscoroutine(r):
+                        await r
+        except BaseException:
+            # an event handler raised (a store error, a bad index) or the job was cancelled: nobody reads the
+            # worker's stdout any more, so it would block on a full pipe forever, holding its GL context and files
+            # (#361). End it before the error propagates.
+            await asyncio.shield(self._reap(proc, err_task))
+            raise
         rc = await proc.wait()
         await err_task
         if rc != 0:
