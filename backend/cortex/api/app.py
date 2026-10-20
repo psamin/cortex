@@ -166,13 +166,42 @@ async def _409(_, e: FileNotFoundError):
     return JSONResponse({"detail": str(e)}, 409)
 
 
+def studio_origin(request: Request) -> bool:
+    """Did this request come from the studio page in a browser? Browsers always send Origin on a cross-origin
+    request and on a POST, and page code can't change it; a script (curl, an agent's shell) sends none unless it
+    deliberately forges one. Allowed: CORS_ORIGINS, PUBLIC_URL, and this backend's own origin (a studio build it
+    serves)."""
+    origin = (request.headers.get("origin") or "").rstrip("/")
+    if not origin or origin == "null":
+        return False
+    s = settings()
+    allowed = {o.strip().rstrip("/") for o in s.cors_origins.split(",") if o.strip()}
+    allowed.add(s.public_url.rstrip("/"))
+    if host := request.headers.get("host"):
+        allowed.add(f"{request.url.scheme}://{host}")
+    return origin in allowed
+
+
 def actor(request: Request) -> str:
+    """Who is calling. "gui" (a human click, which training approval trusts) needs the studio's browser Origin:
+    a missing header is not a human (#354). Anything else claiming to be the studio is "api"."""
     from ..services.agent_obs import has_agent_headers
 
     if has_agent_headers(request.headers):  # an agent key or session is never a human click (#105)
         return "mcp"
     a = request.headers.get("x-cortex-actor", "gui")
-    return a if a in ("gui", "agent", "mcp") else "gui"
+    if a in ("agent", "mcp"):
+        return a
+    return "gui" if studio_origin(request) else "api"
+
+
+def from_mcp_server(request: Request) -> bool:
+    """Is this the Cortex MCP server (directly, or through the local runner)? With CORTEX_MCP_KEY set it must present
+    the key; without one, the server's channel header. Only it may receive and redeem MCP App view approval nonces."""
+    key = settings().cortex_mcp_key
+    if key:
+        return hmac.compare_digest(request.headers.get("authorization") or "", f"Bearer {key}")
+    return request.headers.get("x-cortex-view-channel") == "1"
 
 
 # ------------------------------------------------------------------ health
@@ -1096,10 +1125,19 @@ async def call_tool(name: str, args: dict[str, Any], request: Request):
     tool = orch.TOOLS.get(name)
     if bound and tool and "project_id" in tool.args.model_fields and not args.get("project_id"):
         args = {**args, "project_id": bound}
+    mcp_server = who == "mcp" and from_mcp_server(request)
+    if name == "approve_training_from_view" and not mcp_server:
+        await ctx().audit(who, name, args.get("project_id"), {"id": args.get("training_job_id")}, "refused",
+                          "view approval outside the MCP server's view channel")
+        raise training_service.ApprovalRequired("Only the Cortex MCP App view can use a view approval. "
+                                                "Approve training in the Cortex studio.")
     try:
-        return await orch.call_tool(ctx(), name, args, who, caller)
+        out = await orch.call_tool(ctx(), name, args, who, caller)
     except ValidationError as e:
         raise HTTPException(422, e.errors(include_url=False)) from e
+    if isinstance(out, dict) and "view_approval_nonce" in out and not mcp_server:
+        out = {k: v for k, v in out.items() if k != "view_approval_nonce"}  # REST clients never see it (#354)
+    return out
 
 
 # ------------------------------------------------------------------ RL sandboxes (#80)
