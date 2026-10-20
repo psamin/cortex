@@ -177,7 +177,11 @@ def studio_origin(request: Request) -> bool:
     s = settings()
     allowed = {o.strip().rstrip("/") for o in s.cors_origins.split(",") if o.strip()}
     allowed.add(s.public_url.rstrip("/"))
-    if host := request.headers.get("host"):
+    # A studio build served by this backend posts with this backend's own origin. Trust the Host header for that only
+    # when it names this machine: otherwise a web page reaching us through DNS rebinding (its own hostname, pointed
+    # at 127.0.0.1) would send a matching Host and Origin and count as a human click.
+    host = request.headers.get("host") or ""
+    if host.rsplit(":", 1)[0].strip("[]") in LOCAL - {"testclient"}:
         allowed.add(f"{request.url.scheme}://{host}")
     return origin in allowed
 

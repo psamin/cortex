@@ -47,9 +47,18 @@ def test_the_studio_in_a_browser_approves(client):
     c, _, _, tj = client
     r = c.post(f"/api/training/{tj.id}/approve", json={"approver": "ana"}, headers=STUDIO)
     assert r.status_code == 200 and r.json()["status"] == "approved"
-    # the backend's own origin (a studio build it serves) counts too
-    r = c.post(f"/api/training/{tj.id}/approve", json={}, headers={"Origin": "http://testserver"})
+    # the backend's own origin (a studio build it serves) counts too, when it names this machine
+    r = c.post(f"/api/training/{tj.id}/approve", json={},
+               headers={"Origin": "http://127.0.0.1:8000", "Host": "127.0.0.1:8000"})
     assert r.status_code == 200
+
+
+def test_a_rebound_hostname_is_not_the_studio(client):
+    """DNS rebinding: evil.example resolves to 127.0.0.1, so the browser sends a matching Host and Origin."""
+    c, _, _, tj = client
+    r = c.post(f"/api/training/{tj.id}/approve", json={},
+               headers={"Origin": "http://evil.example:8000", "Host": "evil.example:8000", "X-Cortex-Actor": "gui"})
+    assert r.status_code == 403 and c.status(tj.id) == JobStatus.proposed
 
 
 def test_rest_clients_never_get_the_view_nonce_and_cannot_redeem_one(client):
