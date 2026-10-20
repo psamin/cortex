@@ -125,3 +125,16 @@ async def test_a_stale_scene_spawns_no_worker(tmp_path, monkeypatch):
     monkeypatch.setattr(rss.asyncio, "create_subprocess_exec", no_spawn)
     with pytest.raises(ValueError, match="build_simulation"):
         await rss.start(ctx, p)
+
+
+async def test_a_cancelled_call_closes_the_session_but_is_not_a_crash(monkeypatch):
+    monkeypatch.setattr(rss, "BROKEN", {})  # independent of earlier tests' sessions
+    s, proc = await _session(monkeypatch)
+    monkeypatch.setattr(rss, "RPC_TIMEOUT_S", 30)
+    t = asyncio.create_task(rss._rpc(s, {"op": "call"}))
+    await asyncio.sleep(0.2)
+    t.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await t
+    assert s.id not in rss.SESSIONS and s.id not in rss.BROKEN
+    await proc.wait()

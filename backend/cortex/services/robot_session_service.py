@@ -91,7 +91,8 @@ async def _rpc(s: RobotSession, req: dict[str, Any]) -> dict[str, Any]:
                 s.last_used = time.time()
                 return out
         except BaseException as e:
-            _kill(s, f"{type(e).__name__}: {e}")
+            # a cancelled call (the client went away) ends the session too, but it is not a crash: don't record it
+            _kill(s, None if isinstance(e, asyncio.CancelledError) else f"{type(e).__name__}: {e}")
             if isinstance(e, TimeoutError):
                 raise SessionBroken(f"the robot session didn't answer {req.get('op')!r} within {RPC_TIMEOUT_S} s, "
                                     "so it was closed; start a new episode") from e
