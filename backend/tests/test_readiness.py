@@ -239,3 +239,15 @@ async def test_episodes_in_a_cloud_store_are_fetched_first(tmp_path, monkeypatch
     monkeypatch.setattr(ctx, "ensure_local", fetch)
     rep = await rd.check(ctx, p)
     assert "unreadable" not in codes(rep.findings)
+
+
+async def test_a_failed_download_leaves_no_partial_copy(tmp_path):
+    ctx = await build_ctx(Settings(data_dir=tmp_path, _env_file=None))
+
+    class Broken:
+        async def get_bytes(self, key):
+            raise OSError("connection reset")
+    ctx.blobs = Broken()
+    with pytest.raises(OSError):
+        await ctx.ensure_local("projects/p/episodes/ep_0.npz")
+    assert not ctx.local("projects/p/episodes/ep_0.npz").exists()
