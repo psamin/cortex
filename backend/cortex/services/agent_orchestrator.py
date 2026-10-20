@@ -578,35 +578,59 @@ async def t_eval_learned(ctx, a, actor):
                                              episodes_per_branch=a.episodes_per_branch), actor)
 
 
+def _weak_offset(p: Project, region: str, offset: tuple[float, float], target_region: str
+                 ) -> tuple[float, float] | None:
+    """The start shift that reproduces a weak branch's object position in the collection scenes. An intake scene
+    ignores cube_region and places the object at its nominal start plus the offset, so the branch's own offset is
+    the answer; the cube task starts at the target region's centre, so it is the rest of the way from there."""
+    from ..sim.so101 import REGION_XY
+
+    if p.intake is not None and p.scene:
+        out = offset
+    else:
+        out = (REGION_XY[region][0] + offset[0] - REGION_XY[target_region][0],
+               REGION_XY[region][1] + offset[1] - REGION_XY[target_region][1])
+    out = (round(out[0], 4), round(out[1], 4))
+    return out if out != (0.0, 0.0) else None
+
+
 async def t_improve(ctx, a, actor):
     from . import agent_collection_service as acs
 
     p = await get_project(ctx, a.project_id)
-    evals = [e for e in await simulation_runner.list_evaluations(ctx, p.id) if e["run"].policy.kind == "checkpoint"]
-    target, evidence = None, ""
+    # the latest *finished* evaluation of a learned checkpoint: a running one has partial or no results (#366)
+    evals = [e for e in await simulation_runner.list_evaluations(ctx, p.id)
+             if e["run"].policy.kind == "checkpoint" and e["run"].status == JobStatus.succeeded]
+    target, evidence, offset, base_ck = None, "", None, None
     if evals:
         scored = [(b.result.success_rate, b) for b in evals[-1]["branches"] if b.result]
         if scored:
             rate, b = min(scored, key=lambda t: t[0])
             region = recommendation_service.region_of(b.spec.condition.cube_region, b.spec.cube_offset)
             target = Condition(cube_region=region, lighting=b.spec.condition.lighting)  # type: ignore[arg-type]
+            offset = _weak_offset(p, b.spec.condition.cube_region, b.spec.cube_offset, region)
             evidence = (f"weakest branch of {evals[-1]['run'].id}: {b.spec.name} {b.result.successes}/{b.result.n} "
-                        f"(measured) -> cell {target.key}")
+                        f"(measured) -> cell {target.key}"
+                        + (f", object shifted by ({offset[0]:+.3f}, {offset[1]:+.3f}) m" if offset else ""))
+            ck_id = evals[-1]["run"].policy.checkpoint_id
+            base_ck = await ctx.repo.get("checkpoints", ck_id, Checkpoint) if ck_id else None
     if target is None:
         recs = [r for r in await recommendation_service.recommend(ctx, p, actor=actor) if r.action == "collect"]
         if not recs:
             return {"summary": "Nothing to improve: no learned-policy evaluation and no coverage gap.", "ref_ids": []}
         target, evidence = recs[0].condition, f"top recommendation ({recs[0].support}): {recs[0].title}"
     col = await acs.start_collection(ctx, p, StartAgentCollectionRequest(
-        num_demos=a.max_new_demos, conditions=[target] * a.max_new_demos, max_total_usd=a.max_usd,
-        reason=evidence), actor)
+        num_demos=a.max_new_demos, conditions=[target] * a.max_new_demos, cube_offset=offset,
+        max_total_usd=a.max_usd, reason=evidence), actor)
 
     async def chain(job):
         ctx.jobs.update(job, message=f"collecting targeted demos ({col.id})")
         await _await_job(ctx, col.job_id)
         ds_job = await dataset_service.create_version(ctx, p, CreateDatasetVersionRequest(name="improve"), actor)
         ds = await _await_job(ctx, ds_job.id)
-        tj = await training_service.propose(ctx, p, ds.result_ref, "act", actor=actor)
+        # fine-tune the policy that was evaluated (its type wins), rather than a fresh ACT (#366)
+        tj = await training_service.propose(ctx, p, ds.result_ref, base_ck.policy_type if base_ck else "act",
+                                            actor=actor, base_checkpoint_id=base_ck.id if base_ck else None)
         ctx.jobs.update(job, message=f"proposed retraining {tj.id}; needs approval")
         return tj.id
 
