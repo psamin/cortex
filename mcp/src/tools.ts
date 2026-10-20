@@ -216,6 +216,8 @@ const TOOLS: Def[] = [
       "Launch a proposed training job. It only runs if a human has already approved the job in the Cortex studio, or if you were " +
       "given the operator's approval_token. Otherwise nothing is launched and the result says APPROVAL REQUIRED: stop, ask the human " +
       "to approve it in the studio, and call this again after they confirm. Never guess or invent an approval_token.\n" +
+      "RETRY: call this on a 'failed' or 'cancelled' job to run it again (training_jobs[].error says why it failed: fix that first). " +
+      "A job that never reached the cluster relaunches directly; one that already ran on the cluster needs the human to click Retry in the studio.\n" +
       "NEXT: poll cortex_get_project_state until training_jobs[].checkpoint_ids has a checkpoint (ck_...), then cortex_evaluate_learned_policy.",
     inputSchema: z.object({
       training_job_id: z.string().describe("Training job id (tj_...), from cortex_propose_training_job"),

@@ -169,6 +169,8 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
     tj = await _get(ctx, tj_id)
     if tj.status in (JobStatus.queued, JobStatus.running, JobStatus.succeeded):
         return tj  # idempotent
+    if tj.status in RETRYABLE:
+        tj = await _reset_for_retry(ctx, tj, actor)
     if tj.status != JobStatus.approved:
         raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
     if tj.backend == "futurama_slurm":
@@ -194,6 +196,32 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
                         idempotency_key=f"train:{tj.id}")
     await ctx.audit(actor, "launch_training_job", tj.project_id, {"id": tj.id, "backend": tj.backend}, "ok",
                     f"{tj.id} launched on {tj.backend}", approved=True)
+    return tj
+
+
+RETRYABLE = (JobStatus.failed, JobStatus.cancelled)
+
+
+def retry_needs_human(tj: TrainingJob) -> bool:
+    """A job that reached the cluster already spent GPU time, so running it again needs a fresh human click.
+    One that failed before Slurm accepted it (VPN down, a missing tool, a restart mid-upload) cost nothing."""
+    return bool(tj.external_id)
+
+
+async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob:
+    """Put a failed or stopped job back to approved so it can run again, without re-proposing it."""
+    if not tj.approved_by:
+        raise ApprovalRequired(f"{tj.id} was never approved; approve it in the Cortex studio first")
+    if actor != "gui" and retry_needs_human(tj):
+        raise ApprovalRequired(f"{tj.id} already ran on the cluster (Slurm job {tj.external_id}) and is "
+                               f"'{tj.status}'. Running it again spends GPU time again: ask the human to click "
+                               "Retry on the job in the Cortex studio.")
+    prev = f"{tj.status}: {tj.error}" if tj.error else str(tj.status)
+    tj.status, tj.error, tj.external_id = JobStatus.approved, None, None
+    tj.metrics = {k: v for k, v in tj.metrics.items() if k != "loss_curve"}
+    await _save(ctx, tj, f"retrying after {prev}")
+    await ctx.audit(actor, "retry_training_job", tj.project_id, {"id": tj.id, "previous": prev[:300]}, "ok",
+                    f"{tj.id} reset for another run", approved=True)
     return tj
 
 
