@@ -206,6 +206,11 @@ class Args:
         use_vlm: bool = True
         wait_s: int = Field(0, ge=0, le=600)
 
+    class Readiness(BaseModel):
+        project_id: str
+        dataset_version_id: str | None = Field(None, description="check a dataset version's episodes (ds_...)")
+        episode_ids: list[str] | None = Field(None, description="check these episodes; default: every accepted one")
+
     class Recommend(BaseModel):
         project_id: str
         budget: int | None = None
@@ -314,6 +319,14 @@ async def t_record(ctx, a, actor):
         await recommendation_service.set_status(ctx, a.recommendation_id, "accepted", actor)
     j = await _wait(ctx, job.id, a.wait_s)
     return {"summary": f"Recording {len(conds)} sim demos (job {job.id}: {j['status']})", "ref_ids": [job.id], "job": j}
+
+
+async def t_readiness(ctx, a, actor):
+    from . import readiness
+
+    rep = await readiness.check(ctx, await get_project(ctx, a.project_id), a.episode_ids, a.dataset_version_id)
+    return {"summary": rep.summary, "ref_ids": [a.dataset_version_id] if a.dataset_version_id else [],
+            "readiness": rep.model_dump(mode="json")}
 
 
 async def t_analyze(ctx, a, actor):
@@ -762,6 +775,10 @@ TOOLS: dict[str, Tool] = {t.name: t for t in [
          "(simulation only; cube_region applies to the built-in cube task only).", Args.Record, t_record),
     Tool("analyze_dataset", "Run quality checks, telemetry failure analysis and VLM hypotheses; builds failure "
          "clusters.", Args.Analyze, t_analyze),
+    Tool("check_dataset_readiness", "Before training: check demos for problems that don't show in the loss (idle "
+         "starts/ends, an unused gripper, glitch steps, actions out of sync with state, mixed frame rates, shapes or "
+         "units, thin conditions). Returns ready / ready_with_warnings / blocked with the episodes involved. Reports "
+         "only; changes nothing.", Args.Readiness, t_readiness),
     Tool("get_failure_clusters", "Current failure clusters with source (quality/evaluation/vlm), episodes and "
          "uncertainty.", Args.ProjectRef, t_clusters),
     Tool("recommend_demonstrations", "Rank which demonstrations to collect next (and augment/train/evaluate "

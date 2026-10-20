@@ -374,6 +374,8 @@ class TrainingJob(BaseModel):
     # "studio" (the studio's chat agent, Autopilot or a person in the studio) or the actor of another agent that
     # proposed it; the studio's standing approval only starts its own chain's proposals (#357). None: older jobs.
     proposed_by: str | None = None
+    # the dataset's readiness when proposed: {verdict, summary, errors, warnings} (docs/STACK_SPEC.md 2.1)
+    readiness: dict[str, Any] | None = None
     external_id: str | None = None
     checkpoint_ids: list[str] = []
     metrics: dict[str, Any] = {}  # e.g. loss_curve [[step, loss], ...] parsed from the training log

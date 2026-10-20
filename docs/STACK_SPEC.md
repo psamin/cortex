@@ -40,7 +40,7 @@ Per-episode checks (pure numpy, sim and real alike):
 
 | Code | Severity | What it catches |
 |---|---|---|
-| `idle_head` / `idle_tail` | warn | more than 1 s of no motion at the start or end; the policy learns to wait |
+| `idle_head` / `idle_tail` | warn | more than 1 s of no motion at the start or end; the policy learns to wait. Teleop jitter counts as no motion |
 | `gripper_unused` | warn | the gripper never opens or closes in a pick task |
 | `action_jump` | warn | a single step more than 8× the episode's median step: a teleop glitch or dropped frames |
 | `action_state_lag` | warn | actions trail the recorded state by 3+ frames: the streams are out of sync |
@@ -53,8 +53,8 @@ Dataset-level checks:
 | `shape_mismatch` | error | state or action dimension differs between episodes |
 | `unit_mismatch` | error | one source's joint range is ~57× another's (degrees vs radians), so real and sim can't be mixed as-is |
 | `length_outlier` | info | an episode is more than 3 MADs from the median length |
-| `few_demos` | warn | fewer than 10 accepted demos for a condition the dataset is meant to cover |
-| `mostly_idle_data` | warn | over 40% of all steps are idle |
+| `few_demos` | warn | fewer demos than the collection plan targets for a condition |
+| `mostly_idle_data` | warn | over 40% of human-recorded steps are idle (planner holds are deliberate and not counted) |
 
 Verdict: `ready`, `ready_with_warnings` or `blocked` (any error). `propose_training_job` runs the check and puts
 the verdict in its result and rationale. A blocked dataset can still be proposed: the human approver sees why.

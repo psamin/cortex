@@ -99,7 +99,9 @@ class Ctx:
         p = self.local(key)
         if not p.exists():
             p.parent.mkdir(parents=True, exist_ok=True)
-            p.write_bytes(await self.blobs.get_bytes(key))
+            part = p.with_name(p.name + ".part")  # an interrupted download must not leave a truncated copy behind
+            part.write_bytes(await self.blobs.get_bytes(key))
+            part.replace(p)
         return p
 
     async def media_url(self, key: str, ttl_s: int = 3600) -> str:

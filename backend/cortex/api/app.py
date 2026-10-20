@@ -27,6 +27,7 @@ from ..models import (
     Checkpoint,
     Condition,
     CreateDatasetVersionRequest,
+    DatasetVersion,
     CreateProjectRequest,
     Episode,
     EpisodeStatus,
@@ -495,6 +496,25 @@ async def media(key: str):
 class AnalyzeReq(BaseModel):
     use_vlm: bool = True
     max_vlm_episodes: int = 6
+
+
+class ReadinessReq(BaseModel):
+    episode_ids: list[str] | None = None
+
+
+@app.post("/api/projects/{pid}/readiness")
+async def readiness_check(pid: str, req: ReadinessReq):
+    from ..services import readiness
+    return await readiness.check(ctx(), await orch.get_project(ctx(), pid), req.episode_ids)
+
+
+@app.get("/api/datasets/{dsid}/readiness")
+async def dataset_readiness(dsid: str):
+    from ..services import readiness
+    ds = await ctx().repo.get("dataset_versions", dsid, DatasetVersion)
+    if ds is None:
+        raise NotFound(dsid)
+    return await readiness.check(ctx(), await orch.get_project(ctx(), ds.project_id), dataset_version_id=dsid)
 
 
 @app.post("/api/projects/{pid}/analyses")
