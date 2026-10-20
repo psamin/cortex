@@ -91,7 +91,8 @@ async def project_state(ctx: Ctx, project: Project) -> ProjectState:
         dataset_versions=[d.id for d in dss],
         training_jobs=[{"id": t.id, "status": t.status, "policy_type": t.policy_type, "backend": t.backend,
                         "dataset_version_id": t.dataset_version_id, "checkpoint_ids": t.checkpoint_ids,
-                        "error": t.error, "reached_cluster": bool(t.external_id)}
+                        "error": t.error, "reached_cluster": bool(t.external_id),
+                        "needs_human_to_retry": training_service.retry_needs_human(t)}
                        for t in tjs],
         evaluations=[{"id": e["run"].id, "name": e["run"].name, "status": e["run"].status,
                       "policy": e["run"].policy_label,
@@ -123,7 +124,7 @@ async def next_actions(ctx: Ctx, project: Project, st: ProjectState) -> list[Nex
         if t["status"] in training_service.RETRYABLE and latest is t:  # no newer job on the same data replaces it
             why = f"{t['id']} {t['status']}" + (f": {t['error']}" if t.get("error") else "")
             out.append(NextAction(action="launch_training_job", reason=f"{why[:300]} — launch it again to retry",
-                                  requires_approval=bool(t.get("reached_cluster")), args={"training_job_id": t["id"]}))
+                                  requires_approval=bool(t.get("needs_human_to_retry")), args={"training_job_id": t["id"]}))
     if c["total"] == 0:
         conds = [{"cube_region": cell.condition.cube_region, "lighting": cell.condition.lighting,
                   "count": cell.target} for cell in project.plan.cells]

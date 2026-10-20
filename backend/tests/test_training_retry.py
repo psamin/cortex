@@ -34,6 +34,8 @@ async def _failed(tmp_path, monkeypatch, reached_cluster: bool):
 
 
 async def _hang(*a, **kw):
+    if "scancel" in " ".join(a):  # a retry of a cluster job cancels the old one first
+        return 0, ""
     await asyncio.sleep(3600)
 
 
@@ -79,3 +81,43 @@ async def test_a_newer_job_on_the_same_data_replaces_the_retry_hint(tmp_path, mo
     await ts.propose(ctx, p, tj.dataset_version_id)
     acts = [n.action for n in (await orch.project_state(ctx, p)).next_actions]
     assert "launch_training_job" not in acts and "approve_training_job" in acts
+
+
+async def test_a_retry_cancels_the_old_slurm_job_first(tmp_path, monkeypatch):
+    ctx, p, tj = await _failed(tmp_path, monkeypatch, reached_cluster=True)
+    calls: list[str] = []
+
+    async def record(*a, **kw):
+        calls.append(" ".join(a))
+        if "sbatch" in " ".join(a) or "rsync" in a[0]:
+            await asyncio.sleep(3600)
+        return 0, ""
+    monkeypatch.setattr(ts, "_sh", record)
+    await ts.launch(ctx, tj.id, "gui")
+    assert any(c.endswith("scancel 12345") for c in calls)
+    await ctx.jobs.shutdown()
+
+
+async def test_a_failed_launch_check_leaves_the_job_failed(tmp_path, monkeypatch):
+    ctx, p, tj = await _failed(tmp_path, monkeypatch, reached_cluster=True)
+
+    def no_tools():
+        raise ValueError("Training on Futurama needs the ssh client on this machine")
+    monkeypatch.setattr(ts, "preflight_transfer_tools", no_tools)
+    with pytest.raises(ValueError, match="ssh client"):
+        await ts.launch(ctx, tj.id, "gui")
+    cur = await ctx.repo.get("training_jobs", tj.id, TrainingJob)
+    assert cur.status == JobStatus.failed and cur.external_id == "12345"  # nothing reset, still needs a human
+
+
+async def test_only_a_person_restarts_a_stopped_job(tmp_path, monkeypatch):
+    ctx, p, tj = await _failed(tmp_path, monkeypatch, reached_cluster=False)
+    tj.status, tj.error = JobStatus.cancelled, "stopped by user"
+    await ctx.repo.save("training_jobs", tj)
+    nxt = [n for n in (await orch.project_state(ctx, p)).next_actions if n.action == "launch_training_job"]
+    assert nxt and nxt[0].requires_approval
+    with pytest.raises(ts.ApprovalRequired, match="stopped by a person"):
+        await ts.launch(ctx, tj.id, "mcp")
+    monkeypatch.setattr(ts, "_sh", _hang)
+    assert (await ts.launch(ctx, tj.id, "gui")).status == JobStatus.queued
+    await ctx.jobs.shutdown()

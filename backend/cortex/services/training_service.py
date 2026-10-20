@@ -170,14 +170,11 @@ async def launch(ctx: Ctx, tj_id: str, actor: str = "gui") -> TrainingJob:
     if tj.status in (JobStatus.queued, JobStatus.running, JobStatus.succeeded):
         return tj  # idempotent
     if tj.status in RETRYABLE:
+        _preflight(tj)  # before the reset: a check that fails must leave the job failed, with its reason
         tj = await _reset_for_retry(ctx, tj, actor)
     if tj.status != JobStatus.approved:
         raise ApprovalRequired(f"{tj.id} is '{tj.status}'; it must be approved before launch")
-    if tj.backend == "futurama_slurm":
-        from ..subprocs import unavailable_reason
-        if why := unavailable_reason():  # ssh/rsync/sbatch would all fail in the background (#347)
-            raise ValueError(why)
-        preflight_transfer_tools()
+    _preflight(tj)
     if "dataset.episodes" not in tj.config:  # proposed before the train-only filter existed
         ds = await ctx.repo.get("dataset_versions", tj.dataset_version_id, DatasetVersion)
         tj.config["dataset.episodes"] = train_episodes(ds) if ds is not None else None
@@ -204,8 +201,18 @@ RETRYABLE = (JobStatus.failed, JobStatus.cancelled)
 
 def retry_needs_human(tj: TrainingJob) -> bool:
     """A job that reached the cluster already spent GPU time, so running it again needs a fresh human click.
-    One that failed before Slurm accepted it (VPN down, a missing tool, a restart mid-upload) cost nothing."""
-    return bool(tj.external_id)
+    So does a job someone stopped: the stop was a decision, and only a person reverses it. One that failed before
+    Slurm accepted it (VPN down, a missing tool, a restart mid-upload) cost nothing and may be retried by anyone."""
+    return bool(tj.external_id) or tj.status == JobStatus.cancelled
+
+
+def _preflight(tj: TrainingJob) -> None:
+    """Local checks a cluster launch needs; they raise before anything is changed."""
+    if tj.backend == "futurama_slurm":
+        from ..subprocs import unavailable_reason
+        if why := unavailable_reason():  # ssh/rsync/sbatch would all fail in the background (#347)
+            raise ValueError(why)
+        preflight_transfer_tools()
 
 
 async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob:
@@ -213,10 +220,14 @@ async def _reset_for_retry(ctx: Ctx, tj: TrainingJob, actor: str) -> TrainingJob
     if not tj.approved_by:
         raise ApprovalRequired(f"{tj.id} was never approved; approve it in the Cortex studio first")
     if actor != "gui" and retry_needs_human(tj):
-        raise ApprovalRequired(f"{tj.id} already ran on the cluster (Slurm job {tj.external_id}) and is "
-                               f"'{tj.status}'. Running it again spends GPU time again: ask the human to click "
-                               "Retry on the job in the Cortex studio.")
+        why = (f"already ran on the cluster (Slurm job {tj.external_id}), so running it again spends GPU time again"
+               if tj.external_id else "was stopped by a person")
+        raise ApprovalRequired(f"{tj.id} {why}: ask the human to click Retry on the job in the Cortex studio.")
     prev = f"{tj.status}: {tj.error}" if tj.error else str(tj.status)
+    if tj.external_id:
+        # "lost contact" failures say the Slurm job may still run: end it first, or the retry would share its
+        # job directory (and its output) and spend the GPU twice
+        await scancel(ctx, tj.external_id)
     tj.status, tj.error, tj.external_id = JobStatus.approved, None, None
     tj.metrics = {k: v for k, v in tj.metrics.items() if k != "loss_curve"}
     await _save(ctx, tj, f"retrying after {prev}")
