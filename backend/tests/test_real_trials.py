@@ -93,6 +93,7 @@ async def test_an_agent_records_but_never_judges(tmp_path, monkeypatch):
         {"checkpoint_id": cks[0], "success": True}]}, "mcp")
     (t,) = await rt.list_trials(ctx, p.id)
     assert t.source == "agent" and t.judged_by == "Ana (operator)" and out["sim_real"]["checkpoints"]
+    assert out["sim_real"]["checkpoints"][0]["agent_logged"] == 1  # kept visible in the numbers
     with pytest.raises(PermissionError):  # only the studio withdraws a judgement
         await rt.void_trial(ctx, t.id, "mcp")
     await rt.void_trial(ctx, t.id, "gui")
@@ -151,6 +152,11 @@ def test_the_routes(tmp_path, monkeypatch):
         rep = c.get(f"/api/projects/{pid}/sim-real").json()
         assert rep["checkpoints"][0]["real"]["n"] == 1 and rep["checkpoints"][0]["sim"] is None
         tid = r.json()[0]["id"]
+        # a named person, always: no default judge, and the list is capped like the tool's
+        assert c.post(f"/api/projects/{pid}/real-trials", json={"trials": [{"checkpoint_id": ck, "success": True}]}
+                      ).status_code == 422
+        assert c.post(f"/api/projects/{pid}/real-trials", json={"judged_by": "Ana", "trials": [
+            {"checkpoint_id": ck, "success": True}] * 101}).status_code == 422
         assert c.post(f"/api/real-trials/{tid}/void").status_code == 403  # no studio origin
         assert c.post(f"/api/real-trials/{tid}/void", headers=studio).status_code == 200
         assert c.get(f"/api/projects/{pid}/real-trials").json() == []

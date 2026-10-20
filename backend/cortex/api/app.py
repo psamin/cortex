@@ -16,7 +16,7 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 from starlette.datastructures import UploadFile
 
 from ..config import settings
@@ -499,8 +499,8 @@ class AnalyzeReq(BaseModel):
 
 
 class RealTrialsReq(BaseModel):
-    judged_by: str = "studio user"
-    trials: list[Any]
+    judged_by: str = Field(min_length=1, max_length=80)  # always a named person, never a default (STACK_SPEC 5.1)
+    trials: list[dict[str, Any]] = Field(min_length=1, max_length=100)
 
 
 @app.post("/api/projects/{pid}/real-trials")

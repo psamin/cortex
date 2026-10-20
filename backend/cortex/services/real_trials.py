@@ -59,6 +59,7 @@ class SimRealRow(BaseModel):
     checkpoint_id: str
     condition: str  # Condition.key, or "all"
     real: Rate
+    agent_logged: int = 0  # of the real trials, how many an agent recorded from a person's report
     sim: Rate | None  # None: no finished sim evaluation of this checkpoint covers the condition
     gap: float | None  # real - sim, in rate points
 
@@ -119,7 +120,9 @@ async def log_trials(ctx: Ctx, project: Project, trials: list[TrialIn], judged_b
 async def void_trial(ctx: Ctx, trial_id: str, actor: str) -> RealTrial:
     """Undo a mis-click in the studio. Only a person can withdraw a judgement; the row stays, marked void."""
     if actor != "gui":
-        raise PermissionError("only the studio can withdraw a real trial")
+        err = PermissionError("only the studio can withdraw a real trial")
+        err.approval_required = False  # type: ignore[attr-defined] - no approval unlocks this
+        raise err
     t = await ctx.repo.get(TABLE, trial_id, RealTrial)
     if t is None:
         raise NotFound(trial_id)
@@ -157,26 +160,27 @@ async def _sim_by_checkpoint(ctx: Ctx, project_id: str) -> dict[str, dict[str, t
 async def report(ctx: Ctx, project: Project) -> SimRealReport:
     trials = await list_trials(ctx, project.id)
     sim = await _sim_by_checkpoint(ctx, project.id)
-    by: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    by: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(lambda: [0, 0, 0]))
     for t in trials:
         cell = by[t.checkpoint_id][t.condition.key]
         cell[0] += int(t.success)
         cell[1] += 1
+        cell[2] += int(t.source == "agent")
     rows, per_ck = [], []
     pairs: list[tuple[float, float]] = []
     for ck, conds in by.items():
         sim_ck = sim.get(ck, {})
-        rk = rn = sk = sn = 0
-        for key, (k, n) in sorted(conds.items()):
+        rk = rn = sk = sn = ra = 0
+        for key, (k, n, by_agent) in sorted(conds.items()):
             s = sim_ck.get(key)
-            rows.append(SimRealRow(checkpoint_id=ck, condition=key, real=_rate(k, n),
+            rows.append(SimRealRow(checkpoint_id=ck, condition=key, real=_rate(k, n), agent_logged=by_agent,
                                    sim=_rate(*s) if s else None, gap=(k / n - s[0] / s[1]) if s and s[1] else None))
-            rk, rn = rk + k, rn + n
+            rk, rn, ra = rk + k, rn + n, ra + by_agent
             if s:
                 sk, sn = sk + s[0], sn + s[1]
         real = _rate(rk, rn)
         simr = _rate(sk, sn) if sn else None
-        per_ck.append(SimRealRow(checkpoint_id=ck, condition="all", real=real, sim=simr,
+        per_ck.append(SimRealRow(checkpoint_id=ck, condition="all", real=real, sim=simr, agent_logged=ra,
                                  gap=(real.rate - simr.rate) if simr and real.rate is not None else None))
         if simr and real.rate is not None:  # only the conditions both measured: the same tasks on both sides
             pairs.append((simr.rate, real.rate))  # type: ignore[arg-type]
