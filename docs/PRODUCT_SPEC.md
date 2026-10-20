@@ -2,6 +2,7 @@
 
 Status: **proposed**. This document is the target; [ROADMAP.md](ROADMAP.md) tracks what is built.
 Where this spec and the code disagree, the code describes today and this spec describes where it is going.
+The next round, readiness checks and real trials with sim ↔ real tracking, is in [STACK_SPEC.md](STACK_SPEC.md).
 
 ## 0. Why: build something agents want
 
