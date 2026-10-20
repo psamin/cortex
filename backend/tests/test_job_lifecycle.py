@@ -250,3 +250,34 @@ async def test_startup_sweep_skips_a_row_it_cannot_save(tmp_path, monkeypatch):
 
     monkeypatch.setattr(ctx2.repo, "save", fk_violation)
     assert await sr.sweep_interrupted(ctx2) == 1  # the run is still swept
+
+
+async def test_the_startup_sweep_fixes_legacy_branches_without_a_project(tmp_path, monkeypatch):
+    """Branches written before SimulationBranch.project_id existed come back with project_id "": the sweep takes the
+    project from their evaluation run instead of posting "" (an FK 409 on InsForge, on every start)."""
+    ctx, run = await _evaluation(tmp_path, monkeypatch, _hang)
+    await ctx.jobs.shutdown()
+    r, bs = await _stored(ctx, run)
+    r.status = JobStatus.running
+    await ctx.repo.save("evaluation_runs", r)
+    for b in bs:
+        b.status, b.project_id = JobStatus.queued, ""
+        await ctx.repo.save("simulation_branches", b, project_id="")
+    orphan = SimulationBranch(evaluation_id="ev_gone", spec=bs[0].spec, seeds=[1], status=JobStatus.queued)
+    await ctx.repo.save("simulation_branches", orphan, project_id="")
+
+    ctx2 = await _ctx(tmp_path)
+    saved: list[str] = []
+    real = ctx2.repo.save
+
+    async def no_empty_fk(table, row, **kw):
+        if table == "simulation_branches":
+            assert kw.get("project_id"), "would be an FK 409 on InsForge"
+            saved.append(row.id)
+        return await real(table, row, **kw)
+
+    monkeypatch.setattr(ctx2.repo, "save", no_empty_fk)
+    assert await sr.sweep_interrupted(ctx2) == 1
+    _, bs = await _stored(ctx2, run)
+    assert {b.status for b in bs} == {JobStatus.failed} and {b.project_id for b in bs} == {run.project_id}
+    assert orphan.id not in saved

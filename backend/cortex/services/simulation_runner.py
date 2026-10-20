@@ -60,8 +60,18 @@ async def sweep_interrupted(ctx: Ctx) -> int:
     """At startup: no evaluation job survives a restart, so any run or branch still queued/running was cut
     off. Mark them failed instead of leaving them "running" forever (#125). Returns how many runs."""
     n = 0
+    runs: dict[str, EvaluationRun | None] = {}
     for status in (JobStatus.queued, JobStatus.running):
         for b in await ctx.repo.list("simulation_branches", SimulationBranch, status=status):
+            if not b.project_id:  # written before branches carried project_id: take it from the run
+                if b.evaluation_id not in runs:
+                    runs[b.evaluation_id] = await ctx.repo.get("evaluation_runs", b.evaluation_id, EvaluationRun)
+                run = runs[b.evaluation_id]
+                if run is None or not run.project_id:
+                    # an orphan: saving it with project_id "" is what InsForge rejected (409) on every start
+                    log.info("startup sweep: branch %s has no project and no evaluation run; left as is", b.id)
+                    continue
+                b.project_id = run.project_id
             b.status, b.error = JobStatus.failed, INTERRUPTED
             await _save_or_skip(ctx, "simulation_branches", b, project_id=b.project_id)
         for run in await ctx.repo.list("evaluation_runs", EvaluationRun, status=status):
