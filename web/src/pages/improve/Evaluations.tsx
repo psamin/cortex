@@ -9,6 +9,7 @@ import type { EpisodeResult, EvaluationWithBranches, ExperimentComparison, Launc
 import { Badge, Button, Dialog, EmptyState, ErrorState, Field, InfoTip, Input, Panel, QueryState, Select, SkeletonRows, StatusBadge, InlineError } from "../../components/ui";
 import { ConditionLabel } from "../../components/Workcell";
 import { NextActionsPanel } from "../Plan";
+import { RealTrialsPanel } from "./RealTrials";
 import { ago, cn, evidenceValue, num, pct } from "../../lib/format";
 
 const SERIES = ["var(--series-1)", "var(--series-2)", "var(--series-3)", "var(--series-4)"];
@@ -81,6 +82,7 @@ export function EvaluationsTab() {
         }
       </QueryState>
 
+      <RealTrialsPanel pid={pid} />
       <NextActionsPanel pid={pid} />
       <LaunchDialog pid={pid} open={open} onClose={() => setOpen(false)} />
     </div>

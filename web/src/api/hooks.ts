@@ -88,6 +88,9 @@ export const useDatasets = (pid: string) =>
 export const useDatasetReadiness = (dsid: string | null) =>
   useQuery({ queryKey: ["readiness", dsid], queryFn: () => api.datasetReadiness(dsid!), enabled: !!dsid, staleTime: 5 * 60_000 });
 
+export const useRealTrials = (pid: string) => useQuery({ queryKey: ["real-trials", pid], queryFn: () => api.realTrials(pid) });
+export const useSimReal = (pid: string) => useQuery({ queryKey: ["sim-real", pid], queryFn: () => api.simReal(pid) });
+
 export const useTraining = (pid: string) =>
   useQuery({ queryKey: ["training", pid], queryFn: () => api.training(pid) });
 

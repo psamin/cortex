@@ -49,6 +49,8 @@ import type {
   DatasetVersion,
   RLSandboxView,
   ReadinessReport,
+  RealTrial,
+  SimRealReport,
 } from "./types";
 
 export const API_BASE: string = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, "") ||
@@ -243,6 +245,11 @@ export const api = {
   createDataset: (pid: string, req: CreateDatasetVersionRequest) => post<Job>(`/projects/${pid}/datasets`, req),
   datasets: (pid: string) => get<DatasetVersion[]>(`/projects/${pid}/datasets`),
   datasetReadiness: (dsid: string) => get<ReadinessReport>(`/datasets/${dsid}/readiness`),
+  realTrials: (pid: string) => get<RealTrial[]>(`/projects/${pid}/real-trials`),
+  logRealTrials: (pid: string, judged_by: string, trials: { checkpoint_id: string; success: boolean; condition: Condition; failure_mode?: string | null }[]) =>
+    post<RealTrial[]>(`/projects/${pid}/real-trials`, { judged_by, trials }),
+  voidRealTrial: (tid: string) => post<RealTrial>(`/real-trials/${tid}/void`),
+  simReal: (pid: string) => get<SimRealReport>(`/projects/${pid}/sim-real`),
   proposeTraining: (pid: string, dataset_version_id: string, policy_type?: PolicyType, steps?: number) =>
     post<TrainingJob>(`/projects/${pid}/training/proposals`, { dataset_version_id, policy_type, steps }),
   approveTraining: (tid: string, approver: string, approval_token?: string) =>
